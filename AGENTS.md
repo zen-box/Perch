@@ -327,6 +327,8 @@ cx.spawn(async move |this, cx| {
 - 新增文案：在 `i18n!` 宏里加一行 `KeyName => { "简中", "English", "日本語", "繁體" },`。
   宏要求四条译文都给全，**漏一种编译不过**；`tr` 的 `match` 故意不写 `_` 兜底，
   key 名写错或漏处理也是编译错误。所以不存在"文案静默变空白"这种事。
+- `Key` 上**没有** `#[allow(dead_code)]`：加了 key 却没人用会被编译器报出来。
+  改 key 名时记得把旧 key 删掉。
 - 取值一律 `i18n::tr(lang, key)`。语言从哪来：
   - 常规界面函数从 `AppState::language()` 拿，显式传给下游；
   - 签名被 GPUI 定死、拿不到 `AppState` 的回调（markdown 元素的 `render`、对话框内容闭包），
