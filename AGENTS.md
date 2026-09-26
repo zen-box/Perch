@@ -322,9 +322,29 @@ cx.spawn(async move |this, cx| {
 
 ### 9.10 国际化
 
-- 界面文案通过 `i18n::tr(lang, key)` 获取。新增文案时，简体中文、繁体中文、英文、日文四种语言一起加。
-- `tr` 遇到不存在的 key 会返回空字符串，加完一定要在界面上确认能正常显示。
-- 现状：大部分文案仍是写死的中文（约 600 处）。改到哪块，就顺手把那块迁到 `tr`。
+文案表在 `src/i18n.rs`，一处定义、四种语言：
+
+- 新增文案：在 `i18n!` 宏里加一行 `KeyName => { "简中", "English", "日本語", "繁體" },`。
+  宏要求四条译文都给全，**漏一种编译不过**；`tr` 的 `match` 故意不写 `_` 兜底，
+  key 名写错或漏处理也是编译错误。所以不存在"文案静默变空白"这种事。
+- 取值一律 `i18n::tr(lang, key)`。语言从哪来：
+  - 常规界面函数从 `AppState::language()` 拿，显式传给下游；
+  - 签名被 GPUI 定死、拿不到 `AppState` 的回调（markdown 元素的 `render`、对话框内容闭包），
+    用 `i18n::current(cx)` 取一次存进局部变量再用。**不要在这些回调里 `app.read(cx)` 读 `AppState`**（见 [§4.2](#42-gpui-实体读写违反会直接-panic)）。
+- **带参数的文案用 `tr_args(lang, key, &[..])`，不要 `format!(tr(..), ..)`**：`format!` 的格式串
+  必须是编译期字面量。`tr_args` 只做 `{}` 的顺序替换，**不支持 `{:.1}` 这类格式精度**——
+  小数位数在调用点先 `format!` 好再传进去。译文里的占位符统一写 `{}`，语序差异靠译文里
+  `{}` 的位置解决。
+- **不是所有中文都该翻译。** 三类例外进仓库根目录的 `i18n_skip.txt`（品牌名与语言名、
+  写进持久化数据或要跟旧数据比对的值、写给模型看的提示词），每条都要在文件里写明理由。
+  判断标准：**这是界面文案吗？是就翻译，别往白名单里加。**
+- 长生命周期对象（`ImageHttpClient`、`HttpClient`）拿不到 `App`，语言只能在**构造时捕获**；
+  这类对象在 `AppState::switch_language` 里要重建。`InputState` 把占位符存成状态，
+  所以切语言要重设一遍（见 `AppState::refresh_placeholders`，加新的本地化占位符往
+  `localized_inputs()` / `localized_textareas()` 里加一行即可）。
+- `i18n::tests::no_hardcoded_chinese_outside_whitelist` 会扫描 `src/**/*.rs`（跳过 `i18n.rs`
+  与测试区），断言白名单之外没有硬编码中文。**新写的文案没走 `tr` 会直接测试失败**，
+  白名单读的就是 `i18n_skip.txt`，和 `scan_cjk.py` 同一份。
 
 ## 10. GPUI 踩坑记录
 
@@ -400,16 +420,15 @@ cx.spawn(async move |this, cx| {
 
 | # | 问题 | 位置 | 处理 |
 | --- | --- | --- | --- |
-| 1 | 约 600 处写死中文，只有 24 处 `tr()`；`tr` 遇到未知 key 返回空字符串 | `ui/*`、`i18n.rs` | ⚠ 国际化方案待定 |
-| 2 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
-| 3 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
-| 4 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
-| 5 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
-| 6 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
-| 7 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
-| 8 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
-| 9 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
-| 10 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
+| 1 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
+| 2 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
+| 3 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
+| 4 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
+| 5 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
+| 6 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
+| 7 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
+| 8 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
+| 9 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
 

@@ -556,7 +556,7 @@ i18n! {
     Saved => { "已保存", "Saved", "保存しました", "已儲存" },
     DeleteFailed => { "删除失败: {}", "Failed to delete: {}", "削除に失敗しました: {}", "刪除失敗: {}" },
     DefaultPresetName => { "通用助手", "General assistant", "汎用アシスタント", "通用助手" },
-    PresetExplainCodeTemplate => { "请逐段解释下面这段代码：\n{{selection}}", "Please explain the following code section by section://n{{selection}}", "以下のコードを順を追って解説してください：\n{{selection}}", "請逐段解釋下面這段程式碼：\n{{selection}}" },
+    PresetExplainCodeTemplate => { "请逐段解释下面这段代码：\n{{selection}}", "Please explain the following code section by section:\n{{selection}}", "以下のコードを順を追って解説してください：\n{{selection}}", "請逐段解釋下面這段程式碼：\n{{selection}}" },
 }
 
 /// 按顺序替换文案里的 `{}` 占位符。
@@ -577,7 +577,7 @@ pub fn tr_args(lang: AppLanguage, key: Key, args: &[&str]) -> String {
 /// **为什么需要镜像**：绝大多数界面函数能从 `&AppState` 拿到语言，直接
 /// `tr(lang, key)` 最清楚；但有些回调的签名是 GPUI 定死的——markdown 自定义元素的
 /// `render`、对话框的内容闭包——手里只有 `&App`，拿不到 `AppState`。
-/// 这类地方用 [`current`] / [`t`] 读全局，其余地方一律显式传 `lang`。
+/// 这类地方用 [`current`] 取一次语言，再照常 `tr(lang, key)`，其余地方一律显式传 `lang`。
 ///
 /// 全局值在 `AppState` 构造时和每次 [`crate::app::AppState::switch_language`] 之后同步，
 /// 没设过时回落 [`AppLanguage::default`]（简体中文），所以读它不会 panic。
@@ -592,17 +592,11 @@ pub fn set_current(cx: &mut App, lang: AppLanguage) {
 }
 
 /// 读当前界面语言。给拿不到 `AppState` 的回调用。
+///
+/// 拿到的语言一般会先存进局部变量（`let lang = current(cx);`）再用多次——同一个函数里
+/// 反复读全局既没必要，也容易让人误以为中途会变。
 pub fn current(cx: &App) -> AppLanguage {
     cx.try_global::<CurrentLanguage>().copied().unwrap_or_default().0
-}
-
-/// 读当前界面语言并查一条文案，等价于 `tr(current(cx), key)`。
-///
-/// 目前只有 [`current`] + [`tr`] 的调用点；这个便捷封装是给接下来的应用层迁移
-/// （错误提示、toast 之类只拿到 `&App` 的地方）准备的。
-#[allow(dead_code)]
-pub fn t(cx: &App, key: Key) -> &'static str {
-    tr(current(cx), key)
 }
 
 #[cfg(test)]
@@ -643,5 +637,255 @@ mod tests {
         assert_eq!(AppLanguage::from_str("zh-HK"), AppLanguage::ZhTw);
         // 认不出来的一律回落简体中文
         assert_eq!(AppLanguage::from_str("fr-FR"), AppLanguage::ZhCn);
+    }
+
+    /// 源码扫描器：找出 `src/**/*.rs` 里白名单之外的硬编码中文。
+    ///
+    /// 这是 4.4 那一轮迁移的**防回归网**：迁移本身是一次性动作，但"以后新写的文案要记得
+    /// 走 `tr`"是长期要求，靠人自觉迟早会漏，所以把"没有漏翻的中文"变成测试断言。
+    ///
+    /// 判断标准和 `i18n_skip.txt` 的注释一致：是界面文案就翻译；不是（品牌名 / 写进数据的值 /
+    /// 写给模型的提示词）就往白名单里加，并写明理由。
+    mod scan {
+        use std::fs;
+        use std::path::{Path, PathBuf};
+
+        /// 界面文案表本身，里面通篇是中文，跳过。
+        pub const SKIP_FILE: &str = "i18n.rs";
+
+        pub fn is_cjk(c: char) -> bool {
+            matches!(c as u32, 0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff)
+        }
+
+        pub fn has_cjk(s: &str) -> bool {
+            s.chars().any(is_cjk)
+        }
+
+        /// 按 `#[cfg(test)]` 首次出现处切掉后面的测试区（约定测试写在文件末尾）。
+        ///
+        /// 测试里全是中文断言数据，那是在**测中文**，不是漏翻。
+        pub fn strip_test_region(src: &str) -> &str {
+            match src.find("#[cfg(test)]") {
+                Some(idx) => {
+                    let start = src[..idx].rfind('\n').map(|p| p + 1).unwrap_or(0);
+                    &src[..start]
+                }
+                None => src,
+            }
+        }
+
+        /// 读白名单。`\n` 还原成换行、`\\` 还原成反斜杠，其余原样。
+        ///
+        /// 转义约定必须跟 `i18n_skip.txt` 头部写的一致——Rust 源码里的字面量是**解码后**的
+        /// 实际字符，白名单里却没法直接写换行，两边靠这套约定对齐。
+        pub fn load_skip(root: &Path) -> Vec<String> {
+            let path = root.join("i18n_skip.txt");
+            let raw = fs::read_to_string(&path).unwrap_or_else(|e| panic!("读不到 {}: {e}", path.display()));
+            let mut out = Vec::new();
+            for line in raw.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let mut buf = String::new();
+                let mut chars = line.chars();
+                while let Some(c) = chars.next() {
+                    if c != '\\' {
+                        buf.push(c);
+                        continue;
+                    }
+                    match chars.next() {
+                        Some('n') => buf.push('\n'),
+                        Some(other) => buf.push(other),
+                        None => buf.push('\\'),
+                    }
+                }
+                out.push(buf);
+            }
+            out
+        }
+
+        /// 在字符数组里找子串，返回起始下标。
+        fn find(hay: &[char], from: usize, needle: &[char]) -> Option<usize> {
+            if needle.is_empty() || needle.len() > hay.len() {
+                return None;
+            }
+            (from..=hay.len() - needle.len()).find(|&i| hay[i..i + needle.len()] == *needle)
+        }
+
+        /// 把 `\n` / `\t` / `\r` / `\"` / `\\` 还原成实际字符。
+        ///
+        /// 单个字符单个字符地走，而不是连着做几次 `replace`：后者在遇到 `\\n`
+        /// （字面反斜杠 + n）时会先匹配到后两个字符，把它错当成换行。
+        fn decode_escapes(raw: &str) -> String {
+            let mut out = String::new();
+            let mut chars = raw.chars();
+            while let Some(c) = chars.next() {
+                if c != '\\' {
+                    out.push(c);
+                    continue;
+                }
+                match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some('t') => out.push('\t'),
+                    Some('r') => out.push('\r'),
+                    Some('"') => out.push('"'),
+                    Some('\\') => out.push('\\'),
+                    Some(other) => {
+                        out.push('\\');
+                        out.push(other);
+                    }
+                    None => out.push('\\'),
+                }
+            }
+            out
+        }
+
+        /// 逐字符状态机，挑出所有字符串字面量并**解码转义**。
+        ///
+        /// 不用正则的原因：正则分不清"注释里的中文""`r#"..."#` 原始字符串""字符字面量
+        /// `'"'` 里的引号"，会把它们一并算成待翻译的文案。
+        pub fn string_literals(src: &str) -> Vec<String> {
+            let b: Vec<char> = src.chars().collect();
+            let n = b.len();
+            let mut out = Vec::new();
+            let mut i = 0usize;
+            while i < n {
+                let c = b[i];
+                // 行注释
+                if c == '/' && i + 1 < n && b[i + 1] == '/' {
+                    while i < n && b[i] != '\n' {
+                        i += 1;
+                    }
+                    continue;
+                }
+                // 块注释（Rust 允许嵌套）
+                if c == '/' && i + 1 < n && b[i + 1] == '*' {
+                    let mut depth = 1usize;
+                    i += 2;
+                    while i < n && depth > 0 {
+                        if b[i] == '/' && i + 1 < n && b[i + 1] == '*' {
+                            depth += 1;
+                            i += 2;
+                            continue;
+                        }
+                        if b[i] == '*' && i + 1 < n && b[i + 1] == '/' {
+                            depth -= 1;
+                            i += 2;
+                            continue;
+                        }
+                        i += 1;
+                    }
+                    continue;
+                }
+                // 字符字面量：跳过，免得里面的单引号（`'"'`）把状态搞乱
+                if c == '\'' {
+                    if i + 3 < n && b[i + 1] == '\\' && b[i + 3] == '\'' {
+                        i += 4;
+                        continue;
+                    }
+                    if i + 2 < n && b[i + 2] == '\'' {
+                        i += 3;
+                        continue;
+                    }
+                    i += 1;
+                    continue;
+                }
+                // 原始字符串 r"..." / r#"..."# / br#"..."#
+                if c == 'r' && i + 1 < n && (b[i + 1] == '#' || b[i + 1] == '"') {
+                    let mut j = i + 1;
+                    let mut hashes = 0usize;
+                    while j < n && b[j] == '#' {
+                        hashes += 1;
+                        j += 1;
+                    }
+                    if j < n && b[j] == '"' {
+                        j += 1;
+                        let close: Vec<char> = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+                        let end = find(&b, j, &close).unwrap_or(n);
+                        out.push(b[j..end].iter().collect());
+                        i = end + close.len();
+                        continue;
+                    }
+                }
+                // 普通字符串
+                if c == '"' {
+                    let mut j = i + 1;
+                    let mut raw = String::new();
+                    while j < n {
+                        if b[j] == '\\' && j + 1 < n {
+                            raw.push(b[j]);
+                            raw.push(b[j + 1]);
+                            j += 2;
+                            continue;
+                        }
+                        if b[j] == '"' {
+                            break;
+                        }
+                        raw.push(b[j]);
+                        j += 1;
+                    }
+                    out.push(decode_escapes(&raw));
+                    i = j + 1;
+                    continue;
+                }
+                i += 1;
+            }
+            out
+        }
+
+        /// 递归收集目录下的 `.rs` 文件。
+        pub fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
+            let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("读不到 {}: {e}", dir.display()));
+            for entry in entries {
+                let path = entry.expect("读目录项失败").path();
+                if path.is_dir() {
+                    collect_rs(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    /// `src/` 下不该再出现白名单之外的硬编码中文。
+    ///
+    /// 白名单读的是仓库根目录的 `i18n_skip.txt`——和 Python 侧的 `scan_cjk.py` 同一份文件，
+    /// 免得两边各维护一份、慢慢对不上。
+    #[test]
+    fn no_hardcoded_chinese_outside_whitelist() {
+        use std::fs;
+        use std::path::Path;
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let skip = scan::load_skip(root);
+
+        let mut files = Vec::new();
+        scan::collect_rs(&root.join("src"), &mut files);
+        assert!(!files.is_empty(), "一个 rs 文件都没扫到，路径不对？");
+
+        let mut offenders = Vec::new();
+        for file in &files {
+            let name = file.file_name().unwrap_or_default().to_string_lossy();
+            if name == scan::SKIP_FILE {
+                continue;
+            }
+            let src = fs::read_to_string(file).expect("读源文件失败");
+            for lit in scan::string_literals(scan::strip_test_region(&src)) {
+                if !scan::has_cjk(&lit) || skip.contains(&lit) {
+                    continue;
+                }
+                offenders.push(format!("{}: {lit:?}", file.display()));
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "发现 {} 处白名单之外的硬编码中文。界面文案请改用 `i18n::tr` / `tr_args`；\
+             确实不该翻译的（品牌名 / 写进持久化数据的值 / 写给模型的提示词），\
+             加进 `i18n_skip.txt` 并写明理由：\n{}",
+            offenders.len(),
+            offenders.join("\n")
+        );
     }
 }

@@ -12,9 +12,13 @@
    - 没分配 key -> 报告并失败，避免漏翻
 4. 给需要的文件补 `use crate::i18n::{...}`。
 
-用法：
-  python apply_i18n.py --report src/ui/foo.rs ...   # 只看报告，不改文件
-  python apply_i18n.py src/ui/foo.rs ...            # 实际替换
+用法（从仓库根目录跑）：
+  python tools/i18n_migration/apply_i18n.py --report src/ui/foo.rs ...   # 只看报告，不改文件
+  python tools/i18n_migration/apply_i18n.py src/ui/foo.rs ...            # 实际替换
+
+迁移（4.1~4.4）已经做完，现在跑 `--report` 全量应该是「新 key：0 个」。
+这个脚本保留下来，是为了将来万一又要批量迁移时不必重写；日常加文案直接在
+`src/i18n.rs` 的 `i18n!` 里加一行就行，不需要它。
 """
 
 import re
@@ -25,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import i18n_entries  # noqa: E402
 import rslex  # noqa: E402
 
-I18N = Path("src/i18n.rs")
+# 仓库根：本文件在 tools/i18n_migration/ 下。目标文件仍按命令行给的相对路径解析（相对于 CWD）。
+I18N = Path(__file__).resolve().parents[2] / "src" / "i18n.rs"
 
 # `pub const XXX: &str = "..."` / `const XXX: &str = "..."` 的右侧。
 CONST_DEF = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+\w+\s*:\s*&(?:'static\s+)?str\s*=\s*$")

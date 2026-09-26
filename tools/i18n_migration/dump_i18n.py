@@ -1,21 +1,31 @@
 """按文件 dump 非测试区的中文字面量，附带所在行与左侧上下文，供分配 key 用。
 
-用法：
-  python dump_i18n.py src/ui/sidebar.rs
-  python dump_i18n.py src/ui            # 整个目录
+词法扫描复用 `rslex.py`——和 `scan_cjk.py` / `apply_i18n.py` 同一份实现。
+（这里早先 import 的是 `scan_cjk` 自己那份扫描器的 `CJK` / `scan_literals`，
+`scan_cjk.py` 改成复用 `rslex` 之后就没这俩名字了，于是本脚本一直是坏的。）
+
+用法（从仓库根目录跑）：
+  python tools/i18n_migration/dump_i18n.py src/ui/sidebar.rs
+  python tools/i18n_migration/dump_i18n.py src/ui            # 整个目录
 """
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from scan_cjk import CJK, scan_literals, strip_test_region  # noqa: E402
+import rslex  # noqa: E402
 
 
 def dump(path: Path):
     src = path.read_text(encoding="utf-8")
-    lines = strip_test_region(src).split("\n")
-    hits = [(ln, s) for ln, s in scan_literals(strip_test_region(src)) if CJK.search(s)]
+    # 测试区里的中文是测试数据，不算漏翻
+    body = rslex.strip_test_region(src)
+    lines = body.split("\n")
+    hits = [
+        (lit.line, lit.text)
+        for lit in rslex.scan(src, len(body))
+        if rslex.CJK.search(lit.text)
+    ]
     if not hits:
         return 0
     print(f"===== {path.as_posix()}  ({len(hits)} 处) =====")

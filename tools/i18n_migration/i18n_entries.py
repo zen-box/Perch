@@ -5,8 +5,11 @@ ENTRIES: (Key 名, 简体中文, English, 日本語, 繁體中文)
   - 简体中文必须与源码里的字面量**逐字一致**，apply_i18n.py 靠它做匹配
   - 含换行的文案直接写真实换行，脚本会转义成 `\\n`
 
-SKIP: 明确不翻译的中文字面量白名单（品牌名、关键词匹配表、发给模型的协议值等）
+SKIP: 从同目录的 `i18n_skip.txt` 读——白名单是"数据"，Python 工具与 Rust 侧的
+  防回归测试共用一份，见文件里的说明。
 """
+
+from pathlib import Path
 
 ENTRIES = [
     # ---- ui/empty_state.rs ----
@@ -503,70 +506,36 @@ FILE_KEY_OVERRIDE = {
 #    （「不超过16个字」翻成 "no more than 16 characters" 就不对了）。
 #    涉及：llm.rs 的附件文本块、reply_ops.rs 的起标题提示词、config.rs 的默认系统提示词、
 #    prompts.rs 的内置预设（后者按首次运行时的语言生成，见 lib 说明）。
-SKIP = {
-    "简体中文",
-    "繁體中文",
-    "日本語",
-    # ---- 3) 写给模型看的提示词 ----
-    "\n\n---\n**附件文件: {}**\n{fence}{ext}\n{text}\n{fence}",
-    "用不超过16个字给对话起标题，只输出标题本身，不要标点包裹。",
-    "你是强大的个人 AI 工作台 Perch，专精代码开发、架构设计与智能问答。请使用 Markdown 规范输出。",
-    # ---- 2) 数据层：认旧标签用的关键词 ----
-    "推理",
-    # brand.rs 的厂商中文名（display_name 里有对应的繁体 / 拉丁写法）
-    "OpenAI o 系列",
-    "OpenAI 平台",
-    "通义千问",
-    "智谱",
-    "月之暗面",
-    "豆包",
-    "字节跳动",
-    "即梦",
-    "腾讯混元",
-    "文心",
-    "讯飞星火",
-    "零一万物",
-    "零一萬物",
-    "百川",
-    "阶跃星辰",
-    "商汤日日新",
-    "书生",
-    "360 智脑",
-    "小米 MiMo",
-    "天工",
-    "可图",
-    "硅基流动",
-    "阿里云百炼",
-    "阿里云",
-    "火山引擎",
-    "腾讯云",
-    "百度智能云",
-    "讯飞开放平台",
-    "魔搭",
-    "七牛云",
-    "无问芯穹",
-    # display_name 里的繁體写法（同样是专有名词，不翻译）
-    "360 智腦",
-    "七牛雲",
-    "即夢",
-    "可圖",
-    "商湯日日新",
-    "字節跳動",
-    "智譜",
-    "書生",
-    "無問芯穹",
-    "百度智能雲",
-    "矽基流動",
-    "訊飛星火",
-    "訊飛開放平台",
-    "通義千問",
-    "阿里雲",
-    "阿里雲百煉",
-    "階躍星辰",
-    "騰訊混元",
-    "騰訊雲",
-    "無問芯穹",
-}
+def _load_skip():
+    """读仓库根目录的 `i18n_skip.txt`——白名单的唯一来源，Rust 侧的防回归测试也读它。
+
+    格式：一行一条，`#` 起头是注释，空行忽略。`\n` 表示换行、`\\` 表示反斜杠。
+
+    `parents[2]` 是仓库根：本文件在 `tools/i18n_migration/` 下。
+    """
+    root = Path(__file__).resolve().parents[2]
+    raw = (root / "i18n_skip.txt").read_text(encoding="utf-8")
+    items = []
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # 转义还原：先扫一遍，避免 `\\n`（字面反斜杠 + n）被误当成换行
+        out = []
+        i = 0
+        while i < len(line):
+            if line[i] == "\\" and i + 1 < len(line):
+                nxt = line[i + 1]
+                out.append("\n" if nxt == "n" else nxt)
+                i += 2
+            else:
+                out.append(line[i])
+                i += 1
+        items.append("".join(out))
+    return items
+
+
+SKIP = set(_load_skip())
 
 # 写进 src/i18n.rs 的分节注释，一眼看出这批 key 覆盖了哪些界面
 BATCH_TITLE = "4.4-d：模型编辑与提示词库"

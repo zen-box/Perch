@@ -39,7 +39,7 @@
 | 会话消息仍全部加载到内存 | `model.rs`、`app.rs`、`ui/chat.rs` | SQLite 已接入，但长历史的启动和内存成本仍随消息量增长 |
 | 本地工具同步执行，会卡住界面 | `app.rs` 中的 `execute_agent_tool` 直接调用 `execute_local_tool` | `/bash` 执行慢命令时界面无响应 |
 | 拉取模型只支持 OpenAI 风格的 `/v1/models` 加 Bearer 鉴权 | `app.rs` 中的 `fetch_models_from_provider` | Claude、Gemini 渠道拉取会失败 |
-| 国际化只覆盖约 30 个词条，大部分文案写死为中文 | `i18n.rs` 以及各个 `ui/*.rs` | 切换语言后界面是半翻译状态 |
+| ~~国际化只覆盖约 30 个词条，大部分文案写死为中文~~ | 已完成（2026-09-26）：界面文案全部走 `i18n::tr` / `tr_args`，白名单外的硬编码中文由 `i18n::tests::no_hardcoded_chinese_outside_whitelist` 守住 | 不再有半翻译状态 |
 | `ChatSession.folder` 字段尚未用于管理界面 | `model.rs` | 还不能按文件夹整理对话 |
 
 ---
