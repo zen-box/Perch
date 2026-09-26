@@ -11,11 +11,13 @@ use super::Palette;
 use super::brand_icon::model_badges;
 use crate::app::AppState;
 use crate::config::ModelConfig;
+use crate::i18n::{Key, tr, tr_args};
 
 /// 打开「选择要添加的模型」弹窗。打开前先由调用方拉好列表，填进 `pending_models`。
 pub fn open_fetch_models_dialog(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let p = Palette::new(cx);
+        let lang = app.read(cx).language();
         let (models, selected, existing, query, search) = {
             let state = app.read(cx);
             let existing = state
@@ -94,14 +96,19 @@ pub fn open_fetch_models_dialog(app: Entity<AppState>, window: &mut Window, cx: 
         let dismiss_app = app.clone();
         let enter_app = app.clone();
         dialog
-            .title("选择要添加的模型")
+            .title(tr(lang, Key::PickModelsToAdd))
             .w(px(560.))
             .child(
                 v_flex()
                     .gap_3()
-                    .child(div().text_xs().text_color(p.muted_foreground).child(format!(
-                        "可添加 {} 个，已存在 {already} 个。已选 {selected_count} 个",
-                        available.len()
+                    .child(div().text_xs().text_color(p.muted_foreground).child(tr_args(
+                        lang,
+                        Key::FetchModelsSummary,
+                        &[
+                            &available.len().to_string(),
+                            &already.to_string(),
+                            &selected_count.to_string(),
+                        ],
                     )))
                     .child(Input::new(&search))
                     .child(if available.is_empty() {
@@ -110,7 +117,7 @@ pub fn open_fetch_models_dialog(app: Entity<AppState>, window: &mut Window, cx: 
                             .text_sm()
                             .text_center()
                             .text_color(p.muted_foreground)
-                            .child("没有匹配的新模型")
+                            .child(tr(lang, Key::NoNewModelMatch))
                             .into_any_element()
                     } else {
                         div()
@@ -128,7 +135,7 @@ pub fn open_fetch_models_dialog(app: Entity<AppState>, window: &mut Window, cx: 
                                 Button::new("select-visible-models")
                                     .outline()
                                     .xsmall()
-                                    .label("全选当前")
+                                    .label(tr(lang, Key::SelectAllCurrent))
                                     .on_click(move |_, _, cx| {
                                         select_app
                                             .update(cx, |this, cx| this.select_pending_models(&select_ids, true, cx));
@@ -138,7 +145,7 @@ pub fn open_fetch_models_dialog(app: Entity<AppState>, window: &mut Window, cx: 
                                 Button::new("clear-visible-models")
                                     .ghost()
                                     .xsmall()
-                                    .label("清空当前")
+                                    .label(tr(lang, Key::ClearCurrent))
                                     .on_click(move |_, _, cx| {
                                         clear_app
                                             .update(cx, |this, cx| this.select_pending_models(&clear_ids, false, cx));
@@ -154,7 +161,7 @@ pub fn open_fetch_models_dialog(app: Entity<AppState>, window: &mut Window, cx: 
                     .child(
                         Button::new("fetch-cancel")
                             .outline()
-                            .label("取消")
+                            .label(tr(lang, Key::Cancel))
                             .on_click(move |_, window, cx| {
                                 cancel_app.update(cx, |this, cx| this.cancel_pending_models(cx));
                                 window.close_dialog(cx);
@@ -163,7 +170,7 @@ pub fn open_fetch_models_dialog(app: Entity<AppState>, window: &mut Window, cx: 
                     .child(
                         Button::new("fetch-ok")
                             .primary()
-                            .label("添加所选")
+                            .label(tr(lang, Key::AddSelected))
                             .on_click(move |_, window, cx| {
                                 if ok_app.update(cx, |this, cx| this.confirm_pending_models(cx)) {
                                     window.close_dialog(cx);

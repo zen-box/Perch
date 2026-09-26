@@ -20,6 +20,7 @@ use super::{Palette, chip, icon_tile};
 use crate::app::AppState;
 use crate::brand;
 use crate::config::ModelConfig;
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 use crate::model::ReasoningLevel;
 use crate::model_info::{Capability, format_tokens};
 use crate::model_ops::TokenField;
@@ -49,7 +50,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
         let (editor, provider_name, id_input, name_input, context_input, output_input) = {
             let state = app.read(cx);
             let Some(editor) = state.model_editor.clone() else {
-                return dialog.title("编辑模型");
+                return dialog.title(tr(lang, Key::EditModel));
             };
             let provider_name = state
                 .config
@@ -74,7 +75,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
         let header = h_flex()
             .gap_4()
             .items_start()
-            .child(render_icon_picker(&app, &draft, &p))
+            .child(render_icon_picker(&app, &draft, &p, lang))
             .child(
                 v_flex()
                     .flex_1()
@@ -82,20 +83,20 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                     .gap_3()
                     .when(is_new, |this| {
                         this.child(field(
-                            "模型 ID",
-                            Some("调用接口时使用的名字，填好后会自动识别下面的规格"),
+                            tr(lang, Key::ModelId),
+                            Some(tr(lang, Key::ModelIdHint)),
                             Input::new(&id_input),
                             &p,
                         ))
                     })
-                    .child(field("显示名称", None, Input::new(&name_input), &p))
+                    .child(field(tr(lang, Key::DisplayName), None, Input::new(&name_input), &p))
                     .when(!is_new, |this| {
                         this.child(
                             h_flex()
                                 .gap_1p5()
                                 .text_xs()
                                 .text_color(p.muted_foreground)
-                                .child("模型 ID")
+                                .child(tr(lang, Key::ModelId))
                                 .child(
                                     div()
                                         .min_w_0()
@@ -111,44 +112,46 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
             );
 
         let specs = form_card(
-            "规格",
+            tr(lang, Key::Specs),
             None,
             &p,
             vec![
                 token_row(
                     &app,
                     TokenField::Context,
-                    "上下文窗口",
-                    "一次对话最多能带上多少 token",
+                    tr(lang, Key::ContextWindow),
+                    tr(lang, Key::ContextWindowHint),
                     draft.context_window,
                     detected.context_window,
                     &CONTEXT_PRESETS,
                     &context_input,
                     editor.context_error.clone(),
                     &p,
+                    lang,
                 ),
                 token_row(
                     &app,
                     TokenField::Output,
-                    "最大输出",
-                    "单次回复的上限。Claude 必须指定，没设置对话参数时就用它",
+                    tr(lang, Key::MaxOutput),
+                    tr(lang, Key::MaxOutputHint),
                     draft.max_output,
                     detected.max_output,
                     &OUTPUT_PRESETS,
                     &output_input,
                     editor.output_error.clone(),
                     &p,
+                    lang,
                 ),
             ],
         );
 
         let levels = draft.effective_reasoning_levels();
         let thinking = form_card(
-            "思考",
+            tr(lang, Key::Reasoning),
             Some(if draft.reasoning_levels.is_some() {
-                "已手动设置"
+                tr(lang, Key::ManualSet)
             } else {
-                "自动识别"
+                tr(lang, Key::AutoDetect)
             }),
             &p,
             vec![
@@ -157,8 +160,8 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                     .px_4()
                     .py_3()
                     .child(row_title(
-                        "支持的强度",
-                        "对话参数里只会列出这里选中的档位，不支持调节就都不选",
+                        tr(lang, Key::SupportedEfforts),
+                        tr(lang, Key::SupportedEffortsHint),
                         &p,
                     ))
                     .child(
@@ -181,7 +184,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                             div()
                                 .text_xs()
                                 .text_color(p.muted_foreground)
-                                .child("这个模型总会先思考再回答，但接口不支持调节强度"),
+                                .child(tr(lang, Key::AlwaysThinkingHint)),
                         )
                     })
                     .into_any_element(),
@@ -190,15 +193,15 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                     .px_4()
                     .py_3()
                     .child(row_title(
-                        "默认强度",
-                        "对话没有单独设置时使用；「不指定」表示不发送，由接口决定",
+                        tr(lang, Key::DefaultEffort),
+                        tr(lang, Key::DefaultEffortHint),
                         &p,
                     ))
                     .child(if levels.is_empty() {
                         div()
                             .text_sm()
                             .text_color(p.muted_foreground)
-                            .child("先在上面选择支持的强度")
+                            .child(tr(lang, Key::PickEffortFirst))
                             .into_any_element()
                     } else {
                         h_flex()
@@ -219,7 +222,11 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                                                 this.update_model_draft(cx, |draft| draft.default_reasoning = level)
                                             })
                                         })
-                                        .child(level.map(|level| level.label(lang)).unwrap_or("不指定"))
+                                        .child(
+                                            level
+                                                .map(|level| level.label(lang))
+                                                .unwrap_or(tr(lang, Key::Unspecified)),
+                                        )
                                     }),
                             )
                             .into_any_element()
@@ -230,11 +237,11 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
 
         let capabilities = draft.effective_capabilities();
         let abilities = form_card(
-            "能力",
+            tr(lang, Key::Capabilities),
             Some(if draft.capabilities.is_some() {
-                "已手动设置"
+                tr(lang, Key::ManualSet)
             } else {
-                "自动识别"
+                tr(lang, Key::AutoDetect)
             }),
             &p,
             vec![
@@ -305,7 +312,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                         div()
                             .text_xs()
                             .text_color(p.muted_foreground)
-                            .child("目前只用于标注和筛选；图片、文档附件和联网搜索接入后会按这里判断模型能否使用"),
+                            .child(tr(lang, Key::CapabilitiesHint)),
                     )
                     .into_any_element(),
             ],
@@ -315,7 +322,11 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
         let enter_app = app.clone();
         let reset_app = app.clone();
         dialog
-            .title(if is_new { "添加模型" } else { "编辑模型" })
+            .title(if is_new {
+                tr(lang, Key::AddModel)
+            } else {
+                tr(lang, Key::EditModel)
+            })
             .w(px(620.))
             .margin_top(px(48.))
             .child(
@@ -336,19 +347,24 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                             .ghost()
                             .small()
                             .icon(IconName::RotateCcw)
-                            .label("恢复自动识别")
-                            .tooltip("清除手动设置的规格、能力、思考和图标")
+                            .label(tr(lang, Key::RestoreAutoDetect))
+                            .tooltip(tr(lang, Key::RestoreAutoDetectHint))
                             .on_click(move |_, window, cx| {
                                 reset_app.update(cx, |this, cx| this.reset_model_draft(window, cx))
                             }),
                     )
                     .child(footer(
-                        if is_new { "添加模型" } else { "保存" },
+                        if is_new {
+                            tr(lang, Key::AddModel)
+                        } else {
+                            tr(lang, Key::Save)
+                        },
                         move |window, cx| {
                             if ok_app.update(cx, |this, cx| this.confirm_model_editor(cx)) {
                                 window.close_dialog(cx);
                             }
                         },
+                        lang,
                     )),
             )
             .on_ok(move |_, _, cx| enter_app.update(cx, |this, cx| this.confirm_model_editor(cx)))
@@ -403,11 +419,12 @@ fn token_row(
     input: &Entity<InputState>,
     error: Option<String>,
     p: &Palette,
+    lang: AppLanguage,
 ) -> AnyElement {
-    let auto_label = format!(
-        "自动 · {}",
-        detected.map(format_tokens).unwrap_or_else(|| "未知".into())
-    );
+    let detected_label = detected
+        .map(format_tokens)
+        .unwrap_or_else(|| tr(lang, Key::Unknown).to_string());
+    let auto_label = tr_args(lang, Key::AutoPrefix, &[&detected_label]);
     let auto_app = app.clone();
     v_flex()
         .gap_2()
@@ -447,7 +464,7 @@ fn token_row(
 }
 
 /// 头像和「更换图标」按钮：自动匹配不对时可以手动选择品牌图标
-fn render_icon_picker(app: &Entity<AppState>, draft: &ModelConfig, p: &Palette) -> impl IntoElement {
+fn render_icon_picker(app: &Entity<AppState>, draft: &ModelConfig, p: &Palette, lang: AppLanguage) -> impl IntoElement {
     let label = if draft.name.trim().is_empty() {
         draft.id.clone()
     } else {
@@ -469,13 +486,19 @@ fn render_icon_picker(app: &Entity<AppState>, draft: &ModelConfig, p: &Palette) 
             Popover::new("model-icon-picker")
                 .anchor(Anchor::TopLeft)
                 .w(px(360.))
-                .trigger(Button::new("model-icon-trigger").ghost().xsmall().label("更换图标"))
+                .trigger(
+                    Button::new("model-icon-trigger")
+                        .ghost()
+                        .xsmall()
+                        .label(tr(lang, Key::ChangeIcon)),
+                )
                 .content(move |_, _, cx| render_icon_grid(&app, cx)),
         )
 }
 
 fn render_icon_grid(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl IntoElement + use<> {
     let p = Palette::new(cx);
+    let lang = app.read(cx).language();
     let (current, auto_brand) = {
         let state = app.read(cx);
         let draft = state.model_editor.as_ref().map(|editor| editor.draft.clone());
@@ -499,12 +522,17 @@ fn render_icon_grid(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> i
     let auto_app = app.clone();
     v_flex()
         .gap_2()
-        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("选择图标"))
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .child(tr(lang, Key::PickIcon)),
+        )
         .child(
             div()
                 .text_xs()
                 .text_color(p.muted_foreground)
-                .child("默认按模型 ID 自动匹配，匹配不对时可以手动指定"),
+                .child(tr(lang, Key::PickIconHint)),
         )
         .child(
             div().max_h(px(300.)).child(
@@ -515,7 +543,7 @@ fn render_icon_grid(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> i
                         cell(
                             "icon-auto".into(),
                             current.is_none(),
-                            "自动匹配",
+                            tr(lang, Key::AutoMatch),
                             brand_avatar(auto_brand, "?", px(30.), &p),
                         )
                         .on_click(cx.listener(move |popover, _, window, cx| {

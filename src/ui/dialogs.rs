@@ -11,6 +11,7 @@ use gpui_kit::*;
 use super::{Palette, channel_icon};
 use crate::app::AppState;
 use crate::config::ChannelType;
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 
 /// 弹窗里的表单项：标签 + 输入框 + 可选说明
 pub(super) fn field(
@@ -27,7 +28,11 @@ pub(super) fn field(
 }
 
 /// 弹窗底部的「取消 / 确认」按钮
-pub(super) fn footer(ok_label: &'static str, on_ok: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
+pub(super) fn footer(
+    ok_label: &'static str,
+    on_ok: impl Fn(&mut Window, &mut App) + 'static,
+    lang: AppLanguage,
+) -> impl IntoElement {
     h_flex()
         .w_full()
         .justify_end()
@@ -35,7 +40,7 @@ pub(super) fn footer(ok_label: &'static str, on_ok: impl Fn(&mut Window, &mut Ap
         .child(
             Button::new("dialog-cancel")
                 .outline()
-                .label("取消")
+                .label(tr(lang, Key::Cancel))
                 .on_click(|_, window, cx| window.close_dialog(cx)),
         )
         .child(
@@ -49,16 +54,21 @@ pub(super) fn footer(ok_label: &'static str, on_ok: impl Fn(&mut Window, &mut Ap
 pub fn open_rename_dialog(app: Entity<AppState>, input: Entity<InputState>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let p = Palette::new(cx);
+        let lang = app.read(cx).language();
         let ok_app = app.clone();
         let enter_app = app.clone();
         dialog
-            .title("重命名对话")
+            .title(tr(lang, Key::RenameSession))
             .w(px(420.))
-            .child(field("对话名称", None, Input::new(&input), &p))
-            .footer(footer("保存", move |window, cx| {
-                ok_app.update(cx, |this, cx| this.confirm_rename_session(window, cx));
-                window.close_dialog(cx);
-            }))
+            .child(field(tr(lang, Key::SessionName), None, Input::new(&input), &p))
+            .footer(footer(
+                tr(lang, Key::Save),
+                move |window, cx| {
+                    ok_app.update(cx, |this, cx| this.confirm_rename_session(window, cx));
+                    window.close_dialog(cx);
+                },
+                lang,
+            ))
             .on_ok(move |_, window, cx| {
                 enter_app.update(cx, |this, cx| this.confirm_rename_session(window, cx));
                 true
@@ -69,6 +79,7 @@ pub fn open_rename_dialog(app: Entity<AppState>, input: Entity<InputState>, wind
 pub fn open_add_provider_dialog(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let p = Palette::new(cx);
+        let lang = app.read(cx).language();
         let (current_ct, name_input, base_url_input, api_key_input) = {
             let state = app.read(cx);
             (
@@ -82,7 +93,7 @@ pub fn open_add_provider_dialog(app: Entity<AppState>, window: &mut Window, cx: 
         let enter_app = app.clone();
 
         dialog
-            .title("添加模型渠道")
+            .title(tr(lang, Key::AddModelChannel))
             .w(px(520.))
             .child(
                 v_flex()
@@ -90,7 +101,12 @@ pub fn open_add_provider_dialog(app: Entity<AppState>, window: &mut Window, cx: 
                     .child(
                         v_flex()
                             .gap_1p5()
-                            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("接口规范"))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(tr(lang, Key::ApiStandard)),
+                            )
                             .child(
                                 div()
                                     .grid()
@@ -131,20 +147,29 @@ pub fn open_add_provider_dialog(app: Entity<AppState>, window: &mut Window, cx: 
                                     })),
                             ),
                     )
-                    .child(field("渠道名称", None, Input::new(&name_input), &p))
+                    .child(field(tr(lang, Key::ChannelName), None, Input::new(&name_input), &p))
                     .child(field(
-                        "接口地址 (Base URL)",
-                        Some("已按接口规范填入官方地址，使用代理或中转时请修改"),
+                        tr(lang, Key::BaseUrl),
+                        Some(tr(lang, Key::BaseUrlAutoHint)),
                         Input::new(&base_url_input),
                         &p,
                     ))
-                    .child(field("API 密钥", None, Input::new(&api_key_input).mask_toggle(), &p)),
+                    .child(field(
+                        tr(lang, Key::ApiKeyLabel),
+                        None,
+                        Input::new(&api_key_input).mask_toggle(),
+                        &p,
+                    )),
             )
-            .footer(footer("添加渠道", move |window, cx| {
-                if ok_app.update(cx, |this, cx| this.confirm_add_provider(window, cx)) {
-                    window.close_dialog(cx);
-                }
-            }))
+            .footer(footer(
+                tr(lang, Key::AddChannel),
+                move |window, cx| {
+                    if ok_app.update(cx, |this, cx| this.confirm_add_provider(window, cx)) {
+                        window.close_dialog(cx);
+                    }
+                },
+                lang,
+            ))
             .on_ok(move |_, window, cx| enter_app.update(cx, |this, cx| this.confirm_add_provider(window, cx)))
     });
 }
@@ -157,15 +182,16 @@ pub fn confirm_regenerate(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let description = format!("这条回答之后的 {later_count} 条消息会被删除，然后重新生成这条回答。");
+    let lang = app.read(cx).language();
+    let description = tr_args(lang, Key::RegenerateDesc, &[&later_count.to_string()]);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
         let message_id = message_id.clone();
         let target = target.clone();
         alert
-            .title("重新生成这条回答？")
+            .title(tr(lang, Key::RegenerateConfirmTitle))
             .description(description.clone())
-            .button_props(danger_props("重新生成"))
+            .button_props(danger_props(tr(lang, Key::Regenerate), lang))
             .on_ok(move |_, _, cx| {
                 let (provider_id, model_id) = target.clone().unzip();
                 app.update(cx, |this, cx| {
@@ -176,11 +202,11 @@ pub fn confirm_regenerate(
     });
 }
 
-fn danger_props(ok_text: &'static str) -> DialogButtonProps {
+fn danger_props(ok_text: &'static str, lang: AppLanguage) -> DialogButtonProps {
     DialogButtonProps::default()
         .ok_text(ok_text)
         .ok_variant(ButtonVariant::Danger)
-        .cancel_text("取消")
+        .cancel_text(tr(lang, Key::Cancel))
         .show_cancel(true)
 }
 
@@ -191,14 +217,15 @@ pub fn confirm_delete_session(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let description = format!("「{}」中的全部消息都会被删除，且无法恢复。", title);
+    let lang = app.read(cx).language();
+    let description = tr_args(lang, Key::DeleteSessionDesc, &[title]);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
         let session_id = session_id.clone();
         alert
-            .title("删除这个对话？")
+            .title(tr(lang, Key::DeleteSessionTitle))
             .description(description.clone())
-            .button_props(danger_props("删除"))
+            .button_props(danger_props(tr(lang, Key::Delete), lang))
             .on_ok(move |_, _, cx| {
                 app.update(cx, |this, cx| this.delete_session(session_id.clone(), cx));
                 true
@@ -207,12 +234,13 @@ pub fn confirm_delete_session(
 }
 
 pub fn confirm_clear_session(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
+    let lang = app.read(cx).language();
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
         alert
-            .title("清空当前对话？")
-            .description("对话中的全部消息都会被清空，且无法恢复。")
-            .button_props(danger_props("清空"))
+            .title(tr(lang, Key::ClearChatTitle))
+            .description(tr(lang, Key::ClearChatDesc))
+            .button_props(danger_props(tr(lang, Key::Clear), lang))
             .on_ok(move |_, _, cx| {
                 app.update(cx, |this, cx| this.clear_current_session(cx));
                 true
@@ -221,13 +249,14 @@ pub fn confirm_clear_session(app: Entity<AppState>, window: &mut Window, cx: &mu
 }
 
 pub fn confirm_delete_provider(app: Entity<AppState>, provider_name: String, window: &mut Window, cx: &mut App) {
-    let description = format!("「{}」及其下的全部模型配置都会被删除。", provider_name);
+    let lang = app.read(cx).language();
+    let description = tr_args(lang, Key::DeleteChannelDesc, &[&provider_name]);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
         alert
-            .title("删除这个渠道？")
+            .title(tr(lang, Key::DeleteChannelTitle))
             .description(description.clone())
-            .button_props(danger_props("删除"))
+            .button_props(danger_props(tr(lang, Key::Delete), lang))
             .on_ok(move |_, window, cx| {
                 app.update(cx, |this, cx| this.delete_selected_provider(window, cx));
                 true
@@ -238,23 +267,28 @@ pub fn confirm_delete_provider(app: Entity<AppState>, provider_name: String, win
 pub fn open_edit_message_dialog(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let p = Palette::new(cx);
+        let lang = app.read(cx).language();
         let input = app.read(cx).edit_message_input.clone();
         let ok_app = app.clone();
         let enter_app = app.clone();
         dialog
-            .title("编辑并重新发送")
+            .title(tr(lang, Key::EditResend))
             .w(px(520.))
             .child(field(
-                "消息内容",
-                Some("保存后会删除这条消息之后的回复，并重新生成"),
+                tr(lang, Key::MessageContent),
+                Some(tr(lang, Key::EditResendHint)),
                 Textarea::new(&input),
                 &p,
             ))
-            .footer(footer("重新发送", move |window, cx| {
-                if ok_app.update(cx, |this, cx| this.confirm_edit_message(window, cx)) {
-                    window.close_dialog(cx);
-                }
-            }))
+            .footer(footer(
+                tr(lang, Key::Resend),
+                move |window, cx| {
+                    if ok_app.update(cx, |this, cx| this.confirm_edit_message(window, cx)) {
+                        window.close_dialog(cx);
+                    }
+                },
+                lang,
+            ))
             .on_ok(move |_, window, cx| enter_app.update(cx, |this, cx| this.confirm_edit_message(window, cx)))
     });
 }
@@ -262,18 +296,28 @@ pub fn open_edit_message_dialog(app: Entity<AppState>, window: &mut Window, cx: 
 pub fn open_folder_dialog(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let p = Palette::new(cx);
+        let lang = app.read(cx).language();
         let input = app.read(cx).folder_name_input.clone();
         let ok_app = app.clone();
         let enter_app = app.clone();
         dialog
-            .title("移动到文件夹")
+            .title(tr(lang, Key::MoveToFolderDialog))
             .w(px(420.))
-            .child(field("文件夹名称", Some("留空则移回「默认」"), Input::new(&input), &p))
-            .footer(footer("移动", move |window, cx| {
-                if ok_app.update(cx, |this, cx| this.confirm_move_folder(window, cx)) {
-                    window.close_dialog(cx);
-                }
-            }))
+            .child(field(
+                tr(lang, Key::FolderName),
+                Some(tr(lang, Key::FolderNameHint)),
+                Input::new(&input),
+                &p,
+            ))
+            .footer(footer(
+                tr(lang, Key::Move),
+                move |window, cx| {
+                    if ok_app.update(cx, |this, cx| this.confirm_move_folder(window, cx)) {
+                        window.close_dialog(cx);
+                    }
+                },
+                lang,
+            ))
             .on_ok(move |_, window, cx| enter_app.update(cx, |this, cx| this.confirm_move_folder(window, cx)))
     });
 }

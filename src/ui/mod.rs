@@ -268,7 +268,7 @@ impl AppState {
                                 } else {
                                     IconName::PanelLeftClose
                                 })
-                                .tooltip("显示/隐藏侧边栏 (Ctrl+B)")
+                                .tooltip(tr(lang, Key::ToggleSidebar))
                                 // 标题栏整体是拖拽区，按钮需要遮挡住它，否则 Windows 会把点击当成拖动窗口
                                 .occlude()
                                 .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
@@ -315,9 +315,9 @@ impl AppState {
                             .small()
                             .icon(if is_dark { IconName::Sun } else { IconName::Moon })
                             .tooltip(if is_dark {
-                                "切换到浅色模式"
+                                tr(lang, Key::SwitchToLight)
                             } else {
-                                "切换到深色模式"
+                                tr(lang, Key::SwitchToDark)
                             })
                             .occlude()
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -329,7 +329,7 @@ impl AppState {
                             .ghost()
                             .small()
                             .icon(IconName::ChartBar)
-                            .tooltip("用量与费用统计看板")
+                            .tooltip(tr(lang, Key::UsageDashboard))
                             .occlude()
                             .on_click(cx.listener(|_, _, window, cx| {
                                 analytics::open_analytics_dialog(cx.entity(), window, cx);
