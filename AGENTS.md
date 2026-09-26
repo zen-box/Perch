@@ -64,16 +64,16 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 应用层   app.rs、*_ops.rs                   AppState：状态、业务流程、后台任务、提示
   ↓
 服务层   llm.rs、provider_api.rs、          与外部通信、系统能力
-         image_http.rs、models_dev.rs、agent.rs、
-         clipboard.rs
+         image_http.rs、models_dev.rs、agent.rs
   ↓
 数据层   config.rs、model.rs、storage.rs、   数据结构、持久化、纯计算
          prompts.rs、backup.rs、paths.rs、
-         file_store.rs、model_info.rs、brand.rs
+         file_store.rs、model_info.rs、brand.rs、
+         clipboard.rs
 ```
 
 - 下层不能引用上层。数据层和服务层不 `use crate::app` 或 `crate::ui`；`app.rs` 不使用 `ui::` 里定义的类型。
-- 数据层和服务层不依赖 GPUI 的 `Context`、`Window`、`Entity`。`brand.rs` 实现 `AssetSource`、`image_http.rs` 实现 `HttpClient` 属于接口适配，是例外。
+- 数据层和服务层不依赖 GPUI 的 `Context`、`Window`、`Entity`。`brand.rs` 实现 `AssetSource`、`image_http.rs` 实现 `HttpClient` 属于接口适配，是例外；`clipboard.rs` 只用 gpui 的数据类型（`ClipboardEntry`、`Image`）做纯计算，不碰 `Context` / `Window`，同样允许。
 - 界面层不读写文件、不发网络请求，也不直接改 `config` 或 `storage` 的字段，一律调用 AppState 的方法。
 - 解析、计算、格式转换这类逻辑，尽量写成下层的纯函数，便于测试。
 
@@ -84,11 +84,11 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 | 配置项、渠道和模型设置 | `config.rs` |
 | 对话、消息、附件的数据结构 | `model.rs` |
 | 数据库表和读写 | `storage.rs`（改表结构要升版本号、写迁移） |
-| 数据文件路径 | `paths.rs`（文件名常量集中定义） |
+| 数据文件路径 | `paths.rs`（目前只有 `APP_NAME` / `LEGACY_APP_NAME` / `LEGACY_FILES`）；其余文件名按模块就近放，集中化见 [§13](#13-技术债清单) #17 |
 | 大模型请求格式 | `llm.rs`（请求体构建写成纯函数并测试） |
 | 渠道管理接口（拉取模型、测试连接） | `provider_api.rs` |
 | 一组新的业务操作 | 新建 `xxx_ops.rs`，写 `impl AppState { … }`；不要再往 `app.rs`、`session_ops.rs` 里加 |
-| 剪贴板内容的识别和转换 | `clipboard.rs`（用 gpui 的 `read_from_clipboard`，不要直接调 Win32 剪贴板接口） |
+| 剪贴板内容的识别和转换 | `clipboard.rs`（纯数据层：接收 `&[ClipboardEntry]`，判断该粘贴什么、把图片转成可保存格式）。**读剪贴板本身**在 `attachment_ops.rs` 里调 `cx.read_from_clipboard()`，不要直接调 Win32 剪贴板接口 |
 | 附件、粘贴 | `attachment_ops.rs` |
 | 确实需要的平台 API（Win32 等） | 新建 `platform/` 模块封装，业务代码只调用封装后的函数 |
 | 统计、计算、格式化 | 数据层的纯函数，不写在 `ui/` 里 |
@@ -98,7 +98,7 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 
 ### 3.3 规模
 
-- 单个文件（不算测试）超过 **800 行** 就要拆。`ui/chat.rs` 和 `session_ops.rs` 已经超标：新功能不要再往里加；改到其中某块时，顺手把那块拆成新文件。
+- 单个文件（不算测试）超过 **800 行** 就要拆。目前超标的是 `ui/chat.rs`、`session_ops.rs`、`app.rs`、`ui/settings.rs`、`ui/dialogs.rs`（完整清单见 [§13](#13-技术债清单) #4）：新功能不要再往里加；改到其中某块时，顺手把那块拆成新文件。
 - 界面函数超过约 100 行，或链式调用嵌套超过 4 层，拆出 `render_xxx` 子函数。
 - 每个 `xxx_ops.rs` 只负责一个领域，例如会话、模型、附件、渠道。
 
@@ -403,7 +403,7 @@ cx.spawn(async move |this, cx| {
 | 1 | 从未运行过 rustfmt：按 `rustfmt.toml` 有 330 处格式差异，833 行多一个空格的缩进，CRLF 和 LF 混用 | 全仓库 | 单独提交一次 `cargo fmt`，之后每次改动都格式化 |
 | 2 | clippy 警告 31 条（编译警告已清零） | 多处 | 改到时修 |
 | 3 | `AppState` 有 66 个字段；`app.rs` 引用了 `ui::analytics` 的类型 | `app.rs` | 新功能按 [§4.1](#41-appstate) 做；统计相关状态移出 `ui` |
-| 4 | 文件过大 | `ui/chat.rs`（1985 行）、`session_ops.rs`（1084 行） | 按功能拆分，如消息操作、流式回复、备份导入（附件与粘贴已拆到 `attachment_ops.rs`） |
+| 4 | 文件过大（§3.3 红线 800 行，按"不算测试"口径） | `ui/chat.rs`（1977）、`session_ops.rs`（1011）、`app.rs`（971）、`ui/settings.rs`（929）、`ui/dialogs.rs`（803） | 按功能拆分，如消息操作、流式回复、备份导入（附件与粘贴已拆到 `attachment_ops.rs`）。注：`llm.rs` 总 986 行，但测试占 232 行、非测试 754 行，未超标 |
 | 5 | 约 600 处写死中文，只有 24 处 `tr()`；`tr` 遇到未知 key 返回空字符串 | `ui/*`、`i18n.rs` | ⚠ 国际化方案待定 |
 | 6 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
 | 7 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
@@ -416,6 +416,7 @@ cx.spawn(async move |this, cx| {
 | 14 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
 | 15 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
 | 16 | 命名遗留：快捷键命名空间 `personal_control`、`pub mod file_store`、`pub mod analytics` | `main.rs`、`ui/mod.rs` | 改到时修 |
+| 17 | 数据文件名没有集中：`paths.rs` 只有 `APP_NAME` / `LEGACY_APP_NAME` / `LEGACY_FILES`，其余散在 `config.rs`（`perch-config.json`）、`model.rs`（`perch-sessions.json`、`perch.db`）、`models_dev.rs`（`models-dev-cache.json`）、`prompts.rs`（`prompts.json`）。改名时得动 5 个文件，容易漏 | 5 处 | 改到时把文件名常量收拢到 `paths.rs` |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
 
