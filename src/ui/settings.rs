@@ -10,7 +10,7 @@ use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
 use super::brand_icon::{model_avatar, model_badges, provider_avatar};
-use super::{Palette, dialogs, icon_tile};
+use super::{Palette, dialogs, icon_tile, model_editor_dialog};
 use crate::app::{AppState, SettingsTab};
 use crate::i18n::tr;
 
@@ -712,7 +712,7 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                             .cursor_pointer()
                             .when(!model.enabled, |this| this.opacity(0.55))
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                dialogs::open_model_editor(cx.entity(), window, cx);
+                                model_editor_dialog::open_model_editor(cx.entity(), window, cx);
                                 this.begin_edit_model(&row_edit_ids.0, &row_edit_ids.1, window, cx);
                             }))
                             .child(model_avatar(model, px(32.), p))
@@ -758,7 +758,7 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                                     .icon(IconName::Pencil)
                                     .tooltip("编辑模型")
                                     .on_click(cx.listener(move |this, _, window, cx| {
-                                        dialogs::open_model_editor(cx.entity(), window, cx);
+                                        model_editor_dialog::open_model_editor(cx.entity(), window, cx);
                                         this.begin_edit_model(&edit_ids.0, &edit_ids.1, window, cx);
                                     })),
                             )
@@ -840,7 +840,7 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                                 .label(tr(lang, "add_model"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     // 先打开弹窗再准备草稿：弹窗打开时会抢走焦点，之后才能把焦点给到 ID 输入框
-                                    dialogs::open_model_editor(cx.entity(), window, cx);
+                                    model_editor_dialog::open_model_editor(cx.entity(), window, cx);
                                     this.begin_add_model(window, cx);
                                 })),
                         ),

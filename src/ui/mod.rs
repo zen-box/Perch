@@ -2,7 +2,9 @@ mod analytics;
 mod brand_icon;
 mod chat;
 mod dialogs;
+mod fetch_models_dialog;
 mod markdown_image;
+mod model_editor_dialog;
 mod model_picker;
 mod params;
 mod settings;
@@ -188,7 +190,7 @@ impl Render for AppState {
             let app = cx.entity();
             window.defer(cx, move |window, cx| {
                 search.update(cx, |input, cx| input.set_value("", window, cx));
-                dialogs::open_fetch_models_dialog(app, window, cx);
+                fetch_models_dialog::open_fetch_models_dialog(app, window, cx);
             });
         }
 
