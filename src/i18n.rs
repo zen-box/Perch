@@ -13,10 +13,12 @@
 //! 新增文案时只需在 `i18n!` 里加一行，格式是
 //! `KeyName => { "简体中文", "English", "日本語", "繁體中文" },`。
 
+use gpui_kit::{App, Global};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppLanguage {
+    #[default]
     ZhCn,
     EnUs,
     JaJp,
@@ -189,6 +191,40 @@ i18n! {
     NoMatchingModel => { "没有匹配的模型", "No matching model", "一致するモデルがありません", "沒有符合的模型" },
     ManageModelChannel => { "管理模型渠道", "Manage providers", "プロバイダーを管理", "管理模型渠道" },
     PromptTemplates => { "提示词", "Prompts", "プロンプト", "提示詞" },
+
+    // ---- 4.3-b：侧边栏 / 图片渲染 / 参数面板 ----
+    DefaultValue => { "默认", "Default", "デフォルト", "預設" },
+    SidebarPinned => { "置顶", "Pinned", "ピン留め", "置頂" },
+    SidebarUnpin => { "取消置顶", "Unpin", "ピン留めを解除", "取消置頂" },
+    SidebarFavorite => { "收藏", "Favorite", "お気に入り", "收藏" },
+    SidebarUnfavorite => { "取消收藏", "Remove from favorites", "お気に入りを解除", "取消收藏" },
+    SidebarNoMatch => { "没有匹配的对话", "No matching chats", "一致するチャットがありません", "沒有符合的對話" },
+    SidebarAll => { "全部", "All", "すべて", "全部" },
+    Rename => { "重命名", "Rename", "名前を変更", "重新命名" },
+    RemoveFromFolder => { "移出文件夹", "Remove from folder", "フォルダから外す", "移出資料夾" },
+    NewFolder => { "新建文件夹…", "New folder…", "新しいフォルダ…", "新增資料夾…" },
+    MoveToFolder => { "移到「{}」", "Move to \"{}\"", "「{}」へ移動", "移到「{}」" },
+    DateToday => { "今天", "Today", "今日", "今天" },
+    DateYesterday => { "昨天", "Yesterday", "昨日", "昨天" },
+    DateLast7Days => { "近 7 天", "Last 7 days", "過去 7 日", "近 7 天" },
+    DateLast30Days => { "近 30 天", "Last 30 days", "過去 30 日", "近 30 天" },
+    DateEarlier => { "更早", "Earlier", "それ以前", "更早" },
+    Image => { "图片", "Image", "画像", "圖片" },
+    ImageBadBase64 => { "Base64 图片数据无效或格式不支持", "The Base64 image data is invalid or in an unsupported format", "Base64 画像データが無効か、対応していない形式です", "Base64 圖片資料無效或格式不支援" },
+    ImageUnsupportedUrl => { "不支持的图片地址", "Unsupported image URL", "対応していない画像 URL です", "不支援的圖片網址" },
+    ImageLoading => { "图片加载中…", "Loading image…", "画像を読み込み中…", "圖片載入中…" },
+    ImageLoadFailed => { "图片加载失败：{}", "Failed to load image: {}", "画像の読み込みに失敗しました：{}", "圖片載入失敗：{}" },
+    ImageHttpStatus => { "服务器返回 HTTP {}", "The server returned HTTP {}", "サーバーが HTTP {} を返しました", "伺服器回傳 HTTP {}" },
+    Retry => { "重试", "Retry", "再試行", "重試" },
+    OpenInBrowser => { "在浏览器中打开", "Open in browser", "ブラウザで開く", "在瀏覽器中開啟" },
+    ImageBadFormat => { "不是能识别的图片格式", "Not a recognizable image format", "判別できない画像形式です", "不是能辨識的圖片格式" },
+    ImageRemote => { "远程图片", "Remote image", "リモート画像", "遠端圖片" },
+    CopyLink => { "复制链接", "Copy link", "リンクをコピー", "複製連結" },
+    ImageLinkCopied => { "图片链接已复制", "Image link copied", "画像リンクをコピーしました", "圖片連結已複製" },
+    Close => { "关闭", "Close", "閉じる", "關閉" },
+    ImageInlineBase64 => { "Base64 内联图片", "Inline Base64 image", "インライン Base64 画像", "Base64 內嵌圖片" },
+    CopyBase64 => { "复制 Base64", "Copy Base64", "Base64 をコピー", "複製 Base64" },
+    Base64Copied => { "Base64 数据已复制", "Base64 data copied", "Base64 データをコピーしました", "Base64 資料已複製" },
 }
 
 /// 按顺序替换文案里的 `{}` 占位符。
@@ -202,6 +238,39 @@ pub fn tr_args(lang: AppLanguage, key: Key, args: &[&str]) -> String {
         text = text.replacen("{}", arg, 1);
     }
     text
+}
+
+/// 当前界面语言的一份全局镜像。
+///
+/// **为什么需要镜像**：绝大多数界面函数能从 `&AppState` 拿到语言，直接
+/// `tr(lang, key)` 最清楚；但有些回调的签名是 GPUI 定死的——markdown 自定义元素的
+/// `render`、对话框的内容闭包——手里只有 `&App`，拿不到 `AppState`。
+/// 这类地方用 [`current`] / [`t`] 读全局，其余地方一律显式传 `lang`。
+///
+/// 全局值在 `AppState` 构造时和每次 [`crate::app::AppState::switch_language`] 之后同步，
+/// 没设过时回落 [`AppLanguage::default`]（简体中文），所以读它不会 panic。
+#[derive(Clone, Copy, Default)]
+pub struct CurrentLanguage(pub AppLanguage);
+
+impl Global for CurrentLanguage {}
+
+/// 把语言同步进全局。启动时与每次切换语言后都要调用，否则全局值会落后于配置。
+pub fn set_current(cx: &mut App, lang: AppLanguage) {
+    cx.set_global(CurrentLanguage(lang));
+}
+
+/// 读当前界面语言。给拿不到 `AppState` 的回调用。
+pub fn current(cx: &App) -> AppLanguage {
+    cx.try_global::<CurrentLanguage>().copied().unwrap_or_default().0
+}
+
+/// 读当前界面语言并查一条文案，等价于 `tr(current(cx), key)`。
+///
+/// 目前只有 [`current`] + [`tr`] 的调用点；这个便捷封装是给接下来的应用层迁移
+/// （错误提示、toast 之类只拿到 `&App` 的地方）准备的。
+#[allow(dead_code)]
+pub fn t(cx: &App, key: Key) -> &'static str {
+    tr(current(cx), key)
 }
 
 #[cfg(test)]

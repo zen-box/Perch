@@ -4,7 +4,7 @@ use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel};
 use crate::llm::ChatMessageReq;
-use crate::model::{AttachmentKind, ChatMessage};
+use crate::model::{ChatMessage, DEFAULT_SESSION_TITLE};
 
 impl AppState {
     pub fn cancel_streaming(&mut self, cx: &mut Context<Self>) {
@@ -367,15 +367,9 @@ impl AppState {
         if session.messages.is_empty() && session.title_auto {
             let title_source = if user_prompt.trim().is_empty() {
                 if let Some(att) = attachments.first() {
-                    let kind_label = match att.kind {
-                        AttachmentKind::Image => "图片",
-                        AttachmentKind::Document => "文档",
-                        AttachmentKind::Text => "代码/文本",
-                        AttachmentKind::Other => "附件",
-                    };
-                    format!("[{kind_label}] {}", att.name)
+                    format!("[{}] {}", att.kind.title_label(), att.name)
                 } else {
-                    "新对话".to_string()
+                    DEFAULT_SESSION_TITLE.to_string()
                 }
             } else {
                 user_prompt.to_string()

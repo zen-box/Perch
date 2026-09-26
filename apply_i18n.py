@@ -27,6 +27,9 @@ import rslex  # noqa: E402
 
 I18N = Path("src/i18n.rs")
 
+# `pub const XXX: &str = "..."` / `const XXX: &str = "..."` 的右侧。
+CONST_DEF = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+\w+\s*:\s*&(?:'static\s+)?str\s*=\s*$")
+
 KEY_LINE = re.compile(
     r'^\s*([A-Z][A-Za-z0-9]*)\s*=>\s*\{\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*,'
     r'\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\}\s*,\s*$'
@@ -41,6 +44,16 @@ def unescape(s: str) -> str:
         .replace('\\"', '"')
         .replace("\\\\", "\\")
     )
+
+
+def is_const_definition(text: str, lit) -> bool:
+    """判断字面量是不是 `const XXX: &str = "..."` 的右侧值。
+
+    常量定义自身不能替换：换成同名常量会得到 `const X: &str = X;`（E0391 循环定义），
+    换成 `tr(...)` 又会让常量无法在 `const` 上下文求值。
+    """
+    line_start = text.rfind("\n", 0, lit.start) + 1
+    return CONST_DEF.match(text[line_start : lit.start]) is not None
 
 
 def parse_existing(src: str):
@@ -83,12 +96,28 @@ def main():
     keys, zh_to_key, _start, end = parse_existing(src)
 
     # 1) 校验并登记新 key
+    const_map = getattr(i18n_entries, "CONST_MAP", {})
+    const_files = getattr(i18n_entries, "CONST_FILES", set())
+    file_override = getattr(i18n_entries, "FILE_KEY_OVERRIDE", {})
+    # 同一个中文在不同界面可能是两个意思（「关闭」= 关闭弹窗 / = Off），
+    # 这类 key 由 FILE_KEY_OVERRIDE 指名，允许中文重复。
+    overridden_keys = set(file_override.values())
+
     new_lines = []
     for name, zh, en, ja, tw in i18n_entries.ENTRIES:
         if name in keys:
-            raise SystemExit(f"key 名重复：{name}")
-        if zh in zh_to_key and zh_to_key[zh] != name:
-            raise SystemExit(f"中文「{zh}」已由 {zh_to_key[zh]} 覆盖，不要再造 {name}")
+            # 已经写进 i18n.rs 了（ENTRIES 是累积表，前几批的条目会再出现一次）。
+            # 只要中文对得上就当已应用跳过；对不上说明改了文案却没改 key 名，必须报错。
+            if keys[name] != zh:
+                raise SystemExit(
+                    f"key {name} 已存在但中文不一致：\n  表里 = {keys[name]!r}\n  条目 = {zh!r}"
+                )
+            continue
+        if zh in zh_to_key and name not in overridden_keys:
+            raise SystemExit(
+                f"中文「{zh}」已由 {zh_to_key[zh]} 覆盖。"
+                f"若这里确实是另一个意思，请在 FILE_KEY_OVERRIDE 里指名 {name}"
+            )
         keys[name] = zh
         zh_to_key.setdefault(zh, name)
         new_lines.append(
@@ -103,6 +132,10 @@ def main():
     skipped = {}
     changed_files = {}
 
+    const_map = getattr(i18n_entries, "CONST_MAP", {})
+    const_files = getattr(i18n_entries, "CONST_FILES", set())
+    file_override = getattr(i18n_entries, "FILE_KEY_OVERRIDE", {})
+
     for t in targets:
         path = Path(t)
         text = path.read_text(encoding="utf-8")
@@ -115,7 +148,16 @@ def main():
             if lit.text in i18n_entries.SKIP:
                 skipped.setdefault(path.as_posix(), []).append(lit)
                 continue
-            key = zh_to_key.get(lit.text)
+            # `pub const XXX: &str = "中文";` 的右侧是常量自身的定义，绝不能替换，
+            # 否则会变成 `const XXX: &str = XXX;`（E0391 循环定义）。
+            if is_const_definition(text, lit):
+                skipped.setdefault(path.as_posix(), []).append(lit)
+                continue
+            # 存进数据的值（默认标题、默认文件夹名）不翻译，改用命名常量
+            if lit.text in const_map and path.as_posix() in const_files:
+                repls.append((lit.start, lit.end, const_map[lit.text]))
+                continue
+            key = file_override.get((path.as_posix(), lit.text)) or zh_to_key.get(lit.text)
             if key is None:
                 unmapped.setdefault(path.as_posix(), []).append(lit)
                 continue
@@ -171,7 +213,9 @@ def main():
 
     # 5) 写回目标文件 + 补 import
     for f, text in changed_files.items():
-        text = ensure_import(text)
+        # 只做了常量替换、没引入查表的文件不要加 i18n import，否则 unused import
+        if f in need_key:
+            text = ensure_import(text)
         Path(f).write_text(text, encoding="utf-8", newline="\n")
     print(f"\n已改写 {len(changed_files)} 个文件")
 

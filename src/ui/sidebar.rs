@@ -11,7 +11,8 @@ use gpui_kit_assets::IconName;
 
 use super::{Palette, SIDEBAR_WIDTH, dialogs};
 use crate::app::AppState;
-use crate::i18n::{Key, tr};
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
+use crate::model::{DEFAULT_SESSION_FOLDER, DEFAULT_SESSION_TITLE};
 
 // ================= 会话侧边栏 =================
 
@@ -36,7 +37,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
         .sessions
         .iter()
         .map(|session| session.folder.clone())
-        .filter(|folder| !folder.is_empty() && folder != "默认")
+        .filter(|folder| !folder.is_empty() && folder != DEFAULT_SESSION_FOLDER)
         .collect();
     folders.sort();
     folders.dedup();
@@ -60,7 +61,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
     let mut rows: Vec<AnyElement> = Vec::new();
     let mut row_ix = 0usize;
     if !pinned.is_empty() {
-        rows.push(sidebar_group("置顶", true, p));
+        rows.push(sidebar_group(tr(lang, Key::SidebarPinned), true, p));
         for session in pinned {
             rows.push(session_row(&app, row_ix, session, session.id == active_id, &folders, p, cx).into_any_element());
             row_ix += 1;
@@ -68,7 +69,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
     }
     let mut current_group = "";
     for session in rest {
-        let group = date_group_label(&session.created_at);
+        let group = date_group_label(&session.created_at, lang);
         if group != current_group {
             current_group = group;
             rows.push(sidebar_group(group, row_ix == 0, p));
@@ -85,7 +86,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
                 .text_sm()
                 .text_color(p.muted_foreground)
                 .text_center()
-                .child("没有匹配的对话")
+                .child(tr(lang, Key::SidebarNoMatch))
                 .into_any_element(),
         );
     }
@@ -124,7 +125,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
                             .gap_1()
                             .child(filter_chip(
                                 "folder-all",
-                                "全部",
+                                tr(lang, Key::SidebarAll),
                                 folder_filter.is_empty() && !favorites_only,
                                 cx.listener(|this, _, _, cx| {
                                     this.clear_session_filters(cx);
@@ -132,7 +133,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
                             ))
                             .child(filter_chip(
                                 "folder-fav",
-                                "收藏",
+                                tr(lang, Key::SidebarFavorite),
                                 favorites_only,
                                 cx.listener(|this, _, _, cx| {
                                     this.toggle_favorites_filter(cx);
@@ -199,8 +200,16 @@ fn session_row(
     p: &Palette,
     cx: &mut Context<AppState>,
 ) -> impl IntoElement {
+    let lang = app.read(cx).language();
     let session_id = session.id.clone();
-    let title = session.title.clone();
+    // 新建后还没用过、也没被自动命名过的会话，标题仍是数据层的占位值
+    // （`DEFAULT_SESSION_TITLE`）。这类占位标题在显示层换成当前语言的「新对话」，
+    // 而数据层保持固定值——否则标题会随界面语言变化，搜索和比较都会跟着变。
+    let title = if session.title_auto && session.title == DEFAULT_SESSION_TITLE {
+        tr(lang, Key::NewChat).to_string()
+    } else {
+        session.title.clone()
+    };
     let pinned = session.pinned;
     let favorite = session.favorite;
     let folder = session.folder.clone();
@@ -262,7 +271,11 @@ fn session_row(
                 .child(session_icon_button(
                     ("pin-session", ix),
                     if pinned { IconName::PinOff } else { IconName::Pin },
-                    if pinned { "取消置顶" } else { "置顶" },
+                    if pinned {
+                        tr(lang, Key::SidebarUnpin)
+                    } else {
+                        tr(lang, Key::SidebarPinned)
+                    },
                     {
                         let id = session_id.clone();
                         cx.listener(move |this, _, _, cx| this.toggle_session_pin(&id, cx))
@@ -271,7 +284,11 @@ fn session_row(
                 .child(session_icon_button(
                     ("fav-session", ix),
                     if favorite { IconName::StarOff } else { IconName::Star },
-                    if favorite { "取消收藏" } else { "收藏" },
+                    if favorite {
+                        tr(lang, Key::SidebarUnfavorite)
+                    } else {
+                        tr(lang, Key::SidebarFavorite)
+                    },
                     {
                         let id = session_id.clone();
                         cx.listener(move |this, _, _, cx| this.toggle_session_favorite(&id, cx))
@@ -280,7 +297,7 @@ fn session_row(
                 .child(session_icon_button(
                     ("rename-session", ix),
                     IconName::Pencil,
-                    "重命名",
+                    tr(lang, Key::Rename),
                     {
                         let rename_id = session_id.clone();
                         let rename_title = title.clone();
@@ -290,13 +307,18 @@ fn session_row(
                         })
                     },
                 ))
-                .child(session_icon_button(("delete-session", ix), IconName::Trash, "删除", {
-                    let delete_id = session_id.clone();
-                    let delete_title = title.clone();
-                    cx.listener(move |_, _, window, cx| {
-                        dialogs::confirm_delete_session(cx.entity(), delete_id.clone(), &delete_title, window, cx);
-                    })
-                })),
+                .child(session_icon_button(
+                    ("delete-session", ix),
+                    IconName::Trash,
+                    tr(lang, Key::Delete),
+                    {
+                        let delete_id = session_id.clone();
+                        let delete_title = title.clone();
+                        cx.listener(move |_, _, window, cx| {
+                            dialogs::confirm_delete_session(cx.entity(), delete_id.clone(), &delete_title, window, cx);
+                        })
+                    },
+                )),
         )
         .context_menu(move |menu, _, _| {
             let pin_app = menu_app.clone();
@@ -314,28 +336,36 @@ fn session_row(
             let current_folder = menu_folder.clone();
             let mut menu = menu
                 .item(
-                    PopupMenuItem::new(if pinned { "取消置顶" } else { "置顶" })
-                        .icon(IconName::Pin)
-                        .on_click(move |_, _, cx| {
-                            pin_app.update(cx, |this, cx| this.toggle_session_pin(&pin_id, cx));
-                        }),
+                    PopupMenuItem::new(if pinned {
+                        tr(lang, Key::SidebarUnpin)
+                    } else {
+                        tr(lang, Key::SidebarPinned)
+                    })
+                    .icon(IconName::Pin)
+                    .on_click(move |_, _, cx| {
+                        pin_app.update(cx, |this, cx| this.toggle_session_pin(&pin_id, cx));
+                    }),
                 )
                 .item(
-                    PopupMenuItem::new(if favorite { "取消收藏" } else { "收藏" })
-                        .icon(IconName::Star)
-                        .on_click(move |_, _, cx| {
-                            fav_app.update(cx, |this, cx| this.toggle_session_favorite(&fav_id, cx));
-                        }),
+                    PopupMenuItem::new(if favorite {
+                        tr(lang, Key::SidebarUnfavorite)
+                    } else {
+                        tr(lang, Key::SidebarFavorite)
+                    })
+                    .icon(IconName::Star)
+                    .on_click(move |_, _, cx| {
+                        fav_app.update(cx, |this, cx| this.toggle_session_favorite(&fav_id, cx));
+                    }),
                 )
                 .separator();
-            if current_folder != "默认" {
+            if current_folder != DEFAULT_SESSION_FOLDER {
                 let app = menu_app.clone();
                 let id = menu_id.clone();
                 menu = menu.item(
-                    PopupMenuItem::new("移出文件夹")
+                    PopupMenuItem::new(tr(lang, Key::RemoveFromFolder))
                         .icon(IconName::Folder)
                         .on_click(move |_, _, cx| {
-                            app.update(cx, |this, cx| this.set_session_folder(&id, "默认", cx));
+                            app.update(cx, |this, cx| this.set_session_folder(&id, DEFAULT_SESSION_FOLDER, cx));
                         }),
                 );
             }
@@ -347,7 +377,7 @@ fn session_row(
                 let id = menu_id.clone();
                 let target = folder_name.clone();
                 menu = menu.item(
-                    PopupMenuItem::new(format!("移到「{folder_name}」"))
+                    PopupMenuItem::new(tr_args(lang, Key::MoveToFolder, &[folder_name]))
                         .icon(IconName::Folder)
                         .on_click(move |_, _, cx| {
                             app.update(cx, |this, cx| this.set_session_folder(&id, &target, cx));
@@ -355,7 +385,7 @@ fn session_row(
                 );
             }
             menu.item(
-                PopupMenuItem::new("新建文件夹…")
+                PopupMenuItem::new(tr(lang, Key::NewFolder))
                     .icon(IconName::FolderPlus)
                     .on_click(move |_, window, cx| {
                         dialogs::open_folder_dialog(folder_app.clone(), window, cx);
@@ -366,7 +396,7 @@ fn session_row(
             )
             .separator()
             .item(
-                PopupMenuItem::new("重命名")
+                PopupMenuItem::new(tr(lang, Key::Rename))
                     .icon(IconName::Pencil)
                     .on_click(move |_, window, cx| {
                         let input = rename_app.read(cx).rename_input.clone();
@@ -378,7 +408,7 @@ fn session_row(
             )
             .separator()
             .item(
-                PopupMenuItem::new("删除")
+                PopupMenuItem::new(tr(lang, Key::Delete))
                     .icon(IconName::Trash)
                     .on_click(move |_, window, cx| {
                         dialogs::confirm_delete_session(
@@ -407,16 +437,16 @@ fn session_icon_button(
         .on_click(on_click)
 }
 
-fn date_group_label(created_at: &str) -> &'static str {
+fn date_group_label(created_at: &str, lang: AppLanguage) -> &'static str {
     let today = chrono::Local::now().date_naive();
     match chrono::NaiveDate::parse_from_str(created_at.get(..10).unwrap_or(""), "%Y-%m-%d") {
         Ok(date) => match (today - date).num_days() {
-            ..=0 => "今天",
-            1 => "昨天",
-            2..=6 => "近 7 天",
-            7..=29 => "近 30 天",
-            _ => "更早",
+            ..=0 => tr(lang, Key::DateToday),
+            1 => tr(lang, Key::DateYesterday),
+            2..=6 => tr(lang, Key::DateLast7Days),
+            7..=29 => tr(lang, Key::DateLast30Days),
+            _ => tr(lang, Key::DateEarlier),
         },
-        Err(_) => "更早",
+        Err(_) => tr(lang, Key::DateEarlier),
     }
 }

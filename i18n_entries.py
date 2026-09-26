@@ -56,9 +56,77 @@ ENTRIES = [
 
     # ---- ui/settings.rs ----
     ("PromptTemplates", "提示词", "Prompts", "プロンプト", "提示詞"),
+
+    # ---- ui/params.rs ----
+    ("DefaultValue", "默认", "Default", "デフォルト", "預設"),
+
+    # ---- ui/sidebar.rs ----
+    ("SidebarPinned", "置顶", "Pinned", "ピン留め", "置頂"),
+    ("SidebarUnpin", "取消置顶", "Unpin", "ピン留めを解除", "取消置頂"),
+    ("SidebarFavorite", "收藏", "Favorite", "お気に入り", "收藏"),
+    ("SidebarUnfavorite", "取消收藏", "Remove from favorites", "お気に入りを解除", "取消收藏"),
+    ("SidebarNoMatch", "没有匹配的对话", "No matching chats", "一致するチャットがありません", "沒有符合的對話"),
+    ("SidebarAll", "全部", "All", "すべて", "全部"),
+    ("Rename", "重命名", "Rename", "名前を変更", "重新命名"),
+    ("RemoveFromFolder", "移出文件夹", "Remove from folder", "フォルダから外す", "移出資料夾"),
+    ("NewFolder", "新建文件夹…", "New folder…", "新しいフォルダ…", "新增資料夾…"),
+    ("MoveToFolder", "移到「{}」", "Move to \"{}\"", "「{}」へ移動", "移到「{}」"),
+    ("DateToday", "今天", "Today", "今日", "今天"),
+    ("DateYesterday", "昨天", "Yesterday", "昨日", "昨天"),
+    ("DateLast7Days", "近 7 天", "Last 7 days", "過去 7 日", "近 7 天"),
+    ("DateLast30Days", "近 30 天", "Last 30 days", "過去 30 日", "近 30 天"),
+    ("DateEarlier", "更早", "Earlier", "それ以前", "更早"),
+
+    # ---- ui/markdown_image.rs ----
+    ("Image", "图片", "Image", "画像", "圖片"),
+    ("ImageBadBase64", "Base64 图片数据无效或格式不支持", "The Base64 image data is invalid or in an unsupported format", "Base64 画像データが無効か、対応していない形式です", "Base64 圖片資料無效或格式不支援"),
+    ("ImageUnsupportedUrl", "不支持的图片地址", "Unsupported image URL", "対応していない画像 URL です", "不支援的圖片網址"),
+    ("ImageLoading", "图片加载中…", "Loading image…", "画像を読み込み中…", "圖片載入中…"),
+    ("ImageLoadFailed", "图片加载失败：{}", "Failed to load image: {}", "画像の読み込みに失敗しました：{}", "圖片載入失敗：{}"),
+    ("ImageHttpStatus", "服务器返回 HTTP {}", "The server returned HTTP {}", "サーバーが HTTP {} を返しました", "伺服器回傳 HTTP {}"),
+    ("Retry", "重试", "Retry", "再試行", "重試"),
+    ("OpenInBrowser", "在浏览器中打开", "Open in browser", "ブラウザで開く", "在瀏覽器中開啟"),
+    ("ImageBadFormat", "不是能识别的图片格式", "Not a recognizable image format", "判別できない画像形式です", "不是能辨識的圖片格式"),
+    ("ImageRemote", "远程图片", "Remote image", "リモート画像", "遠端圖片"),
+    ("CopyLink", "复制链接", "Copy link", "リンクをコピー", "複製連結"),
+    ("ImageLinkCopied", "图片链接已复制", "Image link copied", "画像リンクをコピーしました", "圖片連結已複製"),
+    ("Close", "关闭", "Close", "閉じる", "關閉"),
+    ("ImageInlineBase64", "Base64 内联图片", "Inline Base64 image", "インライン Base64 画像", "Base64 內嵌圖片"),
+    ("CopyBase64", "复制 Base64", "Copy Base64", "Base64 をコピー", "複製 Base64"),
+    ("Base64Copied", "Base64 数据已复制", "Base64 data copied", "Base64 データをコピーしました", "Base64 資料已複製"),
 ]
+
+# 存进数据的值（新建会话的默认标题、默认文件夹名）不是界面文案：
+# 它们是**持久化数据**，换界面语言不该改动已有数据，也不该改动新数据。
+# 统一收成常量，比散落的字面量好维护，也避免被误当成漏翻的文案。
+CONST_MAP = {
+    "新对话": "DEFAULT_SESSION_TITLE",
+    "默认": "DEFAULT_SESSION_FOLDER",
+}
+
+# 只有这些文件里的「默认 / 新对话」是数据；ui/params.rs 里的「默认」是界面文案，
+# 走 tr(lang, Key::DefaultValue)，所以不在这里。
+CONST_FILES = {
+    "src/model.rs",
+    "src/session_folder_ops.rs",
+    "src/session_list_ops.rs",
+    "src/session_ops.rs",
+    "src/params_ops.rs",
+    "src/ui/chat.rs",
+    "src/ui/sidebar.rs",
+}
 
 SKIP = set()
 
+# 同一个中文在不同界面是两个意思时，在这里指名该文件该用哪个 key。
+# 典型：「关闭」既是推理档位的 Off，也是弹窗的 Close。
+# 另外，源码里带命名参数的格式串（`{folder_name}`）和表里的 `{}` 对不上，
+# 也要在这里显式指路。
+FILE_KEY_OVERRIDE = {
+    ("src/ui/markdown_image.rs", "关闭"): "Close",
+    ("src/ui/sidebar.rs", "移到「{folder_name}」"): "MoveToFolder",
+    ("src/ui/markdown_image.rs", "服务器返回 HTTP {status}"): "ImageHttpStatus",
+}
+
 # 写进 src/i18n.rs 的分节注释，一眼看出这批 key 覆盖了哪些界面
-BATCH_TITLE = "4.3-b：待补"
+BATCH_TITLE = "4.3-b：侧边栏 / 图片渲染 / 参数面板"

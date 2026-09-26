@@ -169,6 +169,22 @@ pub enum AttachmentKind {
     Other,
 }
 
+impl AttachmentKind {
+    /// 只有附件、没有文字时用来派生会话标题的种类前缀（如 `[图片] a.png`）。
+    ///
+    /// **这是要写进 `session.title` 的值，不是界面文案**，所以不参与 i18n，理由同
+    /// [`DEFAULT_SESSION_TITLE`]。放在这里而不是调用点，是为了让「附件种类 -> 标题前缀」
+    /// 只有一处定义，将来加种类时编译器会在这里报缺失分支。
+    pub fn title_label(&self) -> &'static str {
+        match self {
+            AttachmentKind::Image => "图片",
+            AttachmentKind::Document => "文档",
+            AttachmentKind::Text => "代码/文本",
+            AttachmentKind::Other => "附件",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Attachment {
     pub id: String,
@@ -285,6 +301,15 @@ impl ChatMessage {
         }
     }
 }
+
+/// 新建会话的默认标题。
+///
+/// **这是要写进数据的值，不是界面文案**，所以不参与 i18n：换界面语言不该改动
+/// 已有数据，也不该让同一个会话在两种语言下有两个名字。
+pub const DEFAULT_SESSION_TITLE: &str = "新对话";
+
+/// 新建会话的默认文件夹名。理由同 [`DEFAULT_SESSION_TITLE`]。
+pub const DEFAULT_SESSION_FOLDER: &str = "默认";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatSession {
@@ -412,8 +437,8 @@ impl StorageData {
 
         if sessions.is_empty() {
             let default_session = ChatSession::new(
-                "新对话".to_string(),
-                "默认".to_string(),
+                DEFAULT_SESSION_TITLE.to_string(),
+                DEFAULT_SESSION_FOLDER.to_string(),
                 "deepseek-chat".to_string(),
                 String::new(),
             );
@@ -489,8 +514,8 @@ impl StorageData {
         self.sessions.retain(|s| s.id != id);
         if self.sessions.is_empty() {
             let session = ChatSession::new(
-                "新对话".to_string(),
-                "默认".to_string(),
+                DEFAULT_SESSION_TITLE.to_string(),
+                DEFAULT_SESSION_FOLDER.to_string(),
                 "deepseek-chat".to_string(),
                 String::new(),
             );

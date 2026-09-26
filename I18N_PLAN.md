@@ -1,6 +1,6 @@
 # 第四批 i18n 方案（技术债 #1）
 
-> 状态：**已拍板并实施中** —— 4.1 地基 ✅（`298ec39`）、4.2 数据层 ✅（`df93163`）；4.3 `ui/`、4.4 应用层待做。
+> 状态：**已拍板并实施中** —— 4.1 地基 ✅（`298ec39`）、4.2 数据层 ✅（`df93163`）、4.3-a 空状态/输入框/消息操作/模型选择器 ✅（`cd1eadc`）、4.3-b 侧边栏/图片渲染/会话数据 ✅；4.3 剩余、4.4 应用层待做。
 > 结论：不引入第三方 i18n 库，用宏把「漏 key / 漏语言」从运行期静默失败变成**编译期报错**。
 > 用户拍板：方案由 AI 定（宏枚举）；译文由 AI 生成、不做人工校对；品牌名用英文对应名（Qwen / Zhipu / Moonshot）。
 
@@ -162,6 +162,44 @@ impl Capability {
 ### UI 层：不用改函数签名
 
 所有渲染函数都是统一签名 `(state: &mut AppState, p: &Palette, cx: &mut Context<AppState>)`，函数内一行 `let lang = state.language();` 即可。深层子函数（如 `render_assistant_message`）若不接收 `state`，把 `lang` 作为参数传下去即可。
+
+### 拿不到 `App` 的回调：语言全局镜像
+
+少数回调的签名被 GPUI 定死，手里只有 `&App`，拿不到 `AppState`：
+
+- `MarkdownPlugin::parse` —— 连 `&App` 都没有，只有 `MarkdownParseContext`（源文本 + 偏移量）；
+- `MarkdownPlugin::render` —— 有 `&mut App`；
+- `window.open_dialog` 的内容闭包 —— 有 `&mut App`。
+
+`i18n.rs` 提供一份全局镜像兜底：
+
+```rust
+pub struct CurrentLanguage(pub AppLanguage);   // impl Global
+pub fn set_current(cx: &mut App, lang: AppLanguage);   // AppState::new 与 switch_language 里调用
+pub fn current(cx: &App) -> AppLanguage;               // 没设过时回落 ZhCn，不会 panic
+pub fn t(cx: &App, key: Key) -> &'static str;          // 等价 tr(current(cx), key)
+```
+
+**优先级**：能显式传 `lang` 就显式传，全局只给上面这几类回调兜底。
+
+`parse` 连 `&App` 都没有，所以解析期**不本地化**——`ChatImage::alt_text()` 只取 Markdown 里写的 `alt`，本地化的「图片」兜底留给渲染期的 `ChatImage::title(lang)`。理由是解析结果会进 Markdown 节点缓存，在那里固化语言会在切换语言后留下陈旧文案。
+
+---
+
+## 四点五、数据 vs 文案：一条必须守住的界线
+
+**写进数据的值不本地化；占位值在显示层本地化。**
+
+| 类别 | 处理 | 例子 |
+| --- | --- | --- |
+| 会话标题、文件夹名 | 数据层常量 `DEFAULT_SESSION_TITLE` / `DEFAULT_SESSION_FOLDER`，固定中文 | `model.rs`、`session_list_ops.rs`、`params_ops.rs`、`session_ops.rs` |
+| 附件种类前缀 | 数据层 `AttachmentKind::title_label()`，固定中文 | 派生会话标题用 |
+| 空会话的占位标题 | **显示层**换成 `tr(lang, Key::NewChat)` | `sidebar.rs`：`title_auto && title == DEFAULT_SESSION_TITLE` |
+| 界面文案 | `tr(lang, Key::Xxx)` | 其余全部 |
+
+为什么不让数据随语言变：`session.folder` 要参与**字符串比较**（`begin_move_folder` 里 `current == DEFAULT_SESSION_FOLDER`），一旦本地化，切换语言后旧数据的文件夹就会「对不上」；标题也会因为语言切换而变脸，搜索、导出、备份全都跟着漂。
+
+`apply_i18n.py` 里有 `is_const_definition()` 守卫，**不会**替换 `pub const X: &str = "中文";` 的右侧（否则会得到 `const X: &str = X;`，E0391 循环定义）。
 
 ---
 

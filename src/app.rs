@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 use crate::agent::execute_local_tool;
 use crate::backup::BackupFile;
 use crate::config::{AppConfig, ChannelType};
-use crate::i18n::{AppLanguage, Key, apply_locale, tr};
+use crate::i18n::{AppLanguage, Key, apply_locale, set_current, tr};
 use crate::model::{Attachment, ChatMessage, StorageData};
 use crate::model_ops::{ModelEditor, TokenField};
 use crate::prompts::PromptLibrary;
@@ -185,6 +185,7 @@ impl AppState {
         apply_theme(is_dark, Some(window), cx);
         let lang = AppLanguage::from_str(&config.language);
         apply_locale(lang);
+        set_current(cx, lang);
 
         let selected_provider_id = config.active_provider_id.clone();
         let initial_api_key = config.get_active_api_key();
@@ -602,6 +603,8 @@ impl AppState {
         self.config.language = lang.as_str().to_string();
         let saved = self.persist_config(cx);
         apply_locale(lang);
+        // 先同步全局再弹提示，否则「已切换为 xx」这条提示还是旧语言
+        set_current(cx, lang);
         self.chat_input.update(cx, |i, cx| {
             i.set_placeholder(tr(lang, Key::InputPlaceholder), window, cx)
         });

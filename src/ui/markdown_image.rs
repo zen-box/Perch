@@ -9,6 +9,7 @@ use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
 use super::Palette;
+use crate::i18n::{AppLanguage, Key, current, tr, tr_args};
 use crate::image_http::{image_host, normalize_image_url};
 
 const MAX_WIDTH: f32 = 560.;
@@ -24,12 +25,23 @@ struct ChatImage {
 }
 
 impl ChatImage {
-    fn title(&self) -> String {
+    /// 图片说明。Markdown 里写了 `alt` 就用它，没写才回落到本地化的「图片」。
+    fn title(&self, lang: AppLanguage) -> String {
         if self.alt.trim().is_empty() {
-            "图片".to_string()
+            tr(lang, Key::Image).to_string()
         } else {
             self.alt.trim().to_string()
         }
+    }
+
+    /// 解析期能拿到的说明：只有 Markdown 里写的 `alt`，没有本地化兜底。
+    ///
+    /// 解析回调 `MarkdownPlugin::parse` 只收到 `MarkdownParseContext`（源文本 + 偏移量），
+    /// 拿不到 `App`，也就读不了界面语言。而解析结果会进 Markdown 节点缓存，在这里
+    /// 固化某种语言，反而会在切换语言后留下陈旧文案。所以解析期只取 `alt` 原文，
+    /// 本地化的兜底留给 [`Self::title`] 在渲染时补。
+    fn alt_text(&self) -> String {
+        self.alt.trim().to_string()
     }
 }
 
@@ -98,7 +110,7 @@ impl MarkdownPlugin for ChatImagePlugin {
             markdown_ast::Node::Html(html) => sole_html_image(&html.value)?,
             _ => return None,
         };
-        let label = image.title();
+        let label = image.alt_text();
         let source = cx.node_source(node).unwrap_or_default();
         Some(
             MarkdownNode::new("pc-image", image)
@@ -139,6 +151,9 @@ fn decode_data_url(raw: &str) -> Option<(Arc<gpui_kit::Image>, (f32, f32))> {
 
 fn render_image(image: ChatImage, window: &mut Window, cx: &mut App) -> AnyElement {
     let p = Palette::new(cx);
+    // 这个函数由 GPUI 的 `MarkdownPlugin::render` 调用，签名定死、拿不到 `AppState`，
+    // 所以从语言全局读。
+    let lang = current(cx);
     let trimmed = image.url.trim().trim_matches('"').trim_matches('\'');
 
     // 1. Base64 / Data URI：本地解码并直接渲染
@@ -146,15 +161,16 @@ fn render_image(image: ChatImage, window: &mut Window, cx: &mut App) -> AnyEleme
         return match decode_data_url(trimmed) {
             Some((gpui_image, natural)) => {
                 let (width, height) = fit_size(natural.0, natural.1, image.width, image.height);
-                render_loaded_base64(&image, gpui_image, (width, height), natural, &p)
+                render_loaded_base64(&image, gpui_image, (width, height), natural, &p, lang)
             }
             None => image_card(
                 &element_id("pc-img-bad", &image.url[..image.url.len().min(64)]),
                 IconName::ImageOff,
-                image.title(),
-                "Base64 图片数据无效或格式不支持".into(),
+                image.title(lang),
+                tr(lang, Key::ImageBadBase64).into(),
                 None,
                 &p,
+                lang,
             )
             .into_any_element(),
         };
@@ -165,10 +181,11 @@ fn render_image(image: ChatImage, window: &mut Window, cx: &mut App) -> AnyEleme
         return image_card(
             &element_id("pc-img-bad", &image.url),
             IconName::ImageOff,
-            image.title(),
-            "不支持的图片地址".into(),
+            image.title(lang),
+            tr(lang, Key::ImageUnsupportedUrl).into(),
             None,
             &p,
+            lang,
         )
         .into_any_element();
     };
@@ -179,9 +196,9 @@ fn render_image(image: ChatImage, window: &mut Window, cx: &mut App) -> AnyEleme
             let size = rendered.size(0);
             let natural = (size.width.0 as f32, size.height.0 as f32);
             let (width, height) = fit_size(natural.0, natural.1, image.width, image.height);
-            render_loaded(url, &image, (width, height), natural, &p)
+            render_loaded(url, &image, (width, height), natural, &p, lang)
         }
-        Some(Err(error)) => render_failed(url, &image, failure_reason(&error), &p),
+        Some(Err(error)) => render_failed(url, &image, failure_reason(&error, lang), &p, lang),
         None => {
             let hint = image.width.zip(image.height).or_else(|| url_size_hint(&url));
             let (width, height) = match hint {
@@ -203,7 +220,7 @@ fn render_image(image: ChatImage, window: &mut Window, cx: &mut App) -> AnyEleme
                 .text_xs()
                 .text_color(p.muted_foreground)
                 .child(Spinner::new().small())
-                .child("图片加载中…")
+                .child(tr(lang, Key::ImageLoading))
                 .into_any_element()
         }
     }
@@ -215,9 +232,10 @@ fn render_loaded_base64(
     size: (f32, f32),
     natural: (f32, f32),
     p: &Palette,
+    lang: AppLanguage,
 ) -> AnyElement {
     let id = element_id("pc-img-b64", &image.url[..image.url.len().min(64)]);
-    let title = image.title();
+    let title = image.title(lang);
     let img_for_viewer = gpui_image.clone();
     let raw_for_viewer = image.url.clone();
     div()
@@ -251,9 +269,16 @@ fn render_loaded_base64(
         .into_any_element()
 }
 
-fn render_loaded(url: String, image: &ChatImage, size: (f32, f32), natural: (f32, f32), p: &Palette) -> AnyElement {
+fn render_loaded(
+    url: String,
+    image: &ChatImage,
+    size: (f32, f32),
+    natural: (f32, f32),
+    p: &Palette,
+    lang: AppLanguage,
+) -> AnyElement {
     let id = element_id("pc-img", &url);
-    let title = image.title();
+    let title = image.title(lang);
     let view_url = url.clone();
     div()
         .id(id.clone())
@@ -280,7 +305,7 @@ fn render_loaded(url: String, image: &ChatImage, size: (f32, f32), natural: (f32
         .into_any_element()
 }
 
-fn render_failed(url: String, image: &ChatImage, error: String, p: &Palette) -> AnyElement {
+fn render_failed(url: String, image: &ChatImage, error: String, p: &Palette, lang: AppLanguage) -> AnyElement {
     let id = element_id("pc-img-err", &url);
     let reason = error.lines().next().unwrap_or("").chars().take(160).collect::<String>();
     let retry_url = url.clone();
@@ -288,10 +313,11 @@ fn render_failed(url: String, image: &ChatImage, error: String, p: &Palette) -> 
     image_card(
         &id,
         IconName::ImageOff,
-        format!("图片加载失败：{}", image.title()),
+        tr_args(lang, Key::ImageLoadFailed, &[&image.title(lang)]),
         reason,
         None,
         p,
+        lang,
     )
     .child(
         h_flex()
@@ -302,7 +328,7 @@ fn render_failed(url: String, image: &ChatImage, error: String, p: &Palette) -> 
                     .ghost()
                     .xsmall()
                     .icon(IconName::RotateCw)
-                    .tooltip("重试")
+                    .tooltip(tr(lang, Key::Retry))
                     .on_click(move |_, window, cx| {
                         cx.remove_asset::<ImgResourceLoader>(&Resource::Uri(retry_url.clone().into()));
                         window.refresh();
@@ -313,7 +339,7 @@ fn render_failed(url: String, image: &ChatImage, error: String, p: &Palette) -> 
                     .ghost()
                     .xsmall()
                     .icon(IconName::ExternalLink)
-                    .tooltip("在浏览器中打开")
+                    .tooltip(tr(lang, Key::OpenInBrowser))
                     .on_click(move |_, _, cx| cx.open_url(&open_url)),
             ),
     )
@@ -321,11 +347,11 @@ fn render_failed(url: String, image: &ChatImage, error: String, p: &Palette) -> 
 }
 
 /// GPUI 会在错误外面包一层「loading image asset from ...」，这里取出真正的原因
-fn failure_reason(error: &ImageCacheError) -> String {
+fn failure_reason(error: &ImageCacheError, lang: AppLanguage) -> String {
     match error {
         ImageCacheError::Other(error) => error.root_cause().to_string(),
-        ImageCacheError::BadStatus { status, .. } => format!("服务器返回 HTTP {status}"),
-        ImageCacheError::Image(_) | ImageCacheError::Usvg(_) => "不是能识别的图片格式".into(),
+        ImageCacheError::BadStatus { status, .. } => tr_args(lang, Key::ImageHttpStatus, &[&status.to_string()]),
+        ImageCacheError::Image(_) | ImageCacheError::Usvg(_) => tr(lang, Key::ImageBadFormat).into(),
         other => other.to_string(),
     }
 }
@@ -338,6 +364,7 @@ fn image_card(
     detail: String,
     action: Option<&'static str>,
     p: &Palette,
+    lang: AppLanguage,
 ) -> Stateful<Div> {
     h_flex()
         .id(id.clone())
@@ -373,7 +400,7 @@ fn image_card(
                         .text_xs()
                         .text_color(p.muted_foreground)
                         .child(if detail.is_empty() {
-                            "远程图片".to_string()
+                            tr(lang, Key::ImageRemote).to_string()
                         } else {
                             detail
                         }),
@@ -393,6 +420,8 @@ fn image_card(
 pub fn open_image_viewer(url: String, title: String, natural: Option<(f32, f32)>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, window, cx| {
         let p = Palette::new(cx);
+        // 对话框内容闭包的签名由 GPUI 定死（只有 `&mut App`），拿不到 `AppState`，从语言全局读。
+        let lang = current(cx);
         let viewport = window.viewport_size();
         let dialog_width = f32::from(viewport.width - px(80.)).clamp(360., 1200.);
         // 弹窗左右各 16px 内边距；上下留给标题栏、底部按钮和外边距
@@ -444,10 +473,13 @@ pub fn open_image_viewer(url: String, title: String, natural: Option<(f32, f32)>
                                     .outline()
                                     .small()
                                     .icon(IconName::Link)
-                                    .label("复制链接")
+                                    .label(tr(lang, Key::CopyLink))
                                     .on_click(move |_, window, cx| {
                                         cx.write_to_clipboard(ClipboardItem::new_string(copy_url.clone()));
-                                        window.push_notification(Notification::success("图片链接已复制"), cx);
+                                        window.push_notification(
+                                            Notification::success(tr(lang, Key::ImageLinkCopied)),
+                                            cx,
+                                        );
                                     }),
                             )
                             .child(
@@ -455,14 +487,14 @@ pub fn open_image_viewer(url: String, title: String, natural: Option<(f32, f32)>
                                     .outline()
                                     .small()
                                     .icon(IconName::ExternalLink)
-                                    .label("在浏览器中打开")
+                                    .label(tr(lang, Key::OpenInBrowser))
                                     .on_click(move |_, _, cx| cx.open_url(&open_url)),
                             )
                             .child(
                                 Button::new("image-viewer-close")
                                     .primary()
                                     .small()
-                                    .label("关闭")
+                                    .label(tr(lang, Key::Close))
                                     .on_click(|_, window, cx| window.close_dialog(cx)),
                             ),
                     ),
@@ -481,6 +513,8 @@ pub fn open_base64_viewer(
 ) {
     window.open_dialog(cx, move |dialog, window, cx| {
         let p = Palette::new(cx);
+        // 对话框内容闭包的签名由 GPUI 定死（只有 `&mut App`），拿不到 `AppState`，从语言全局读。
+        let lang = current(cx);
         let viewport = window.viewport_size();
         let dialog_width = f32::from(viewport.width - px(80.)).clamp(360., 1200.);
         let available_width = dialog_width - 32.;
@@ -517,7 +551,7 @@ pub fn open_base64_viewer(
                             .truncate()
                             .text_xs()
                             .text_color(p.muted_foreground)
-                            .child("Base64 内联图片"),
+                            .child(tr(lang, Key::ImageInlineBase64)),
                     )
                     .child(
                         h_flex()
@@ -528,17 +562,18 @@ pub fn open_base64_viewer(
                                     .outline()
                                     .small()
                                     .icon(IconName::Copy)
-                                    .label("复制 Base64")
+                                    .label(tr(lang, Key::CopyBase64))
                                     .on_click(move |_, window, cx| {
                                         cx.write_to_clipboard(ClipboardItem::new_string(copy_data.clone()));
-                                        window.push_notification(Notification::success("Base64 数据已复制"), cx);
+                                        window
+                                            .push_notification(Notification::success(tr(lang, Key::Base64Copied)), cx);
                                     }),
                             )
                             .child(
                                 Button::new("base64-viewer-close")
                                     .primary()
                                     .small()
-                                    .label("关闭")
+                                    .label(tr(lang, Key::Close))
                                     .on_click(|_, window, cx| window.close_dialog(cx)),
                             ),
                     ),
@@ -550,6 +585,8 @@ pub fn open_base64_viewer(
 pub fn open_local_image_viewer(path: std::path::PathBuf, title: String, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, window, cx| {
         let p = Palette::new(cx);
+        // 对话框内容闭包的签名由 GPUI 定死（只有 `&mut App`），拿不到 `AppState`，从语言全局读。
+        let lang = current(cx);
         let viewport = window.viewport_size();
         let dialog_width = f32::from(viewport.width - px(80.)).clamp(360., 1200.);
         let available_height = (f32::from(viewport.height) - 200.).max(160.);
@@ -584,7 +621,7 @@ pub fn open_local_image_viewer(path: std::path::PathBuf, title: String, window: 
                         Button::new("local-image-close")
                             .primary()
                             .small()
-                            .label("关闭")
+                            .label(tr(lang, Key::Close))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
             )

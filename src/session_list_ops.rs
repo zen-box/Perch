@@ -6,6 +6,7 @@ use gpui_kit::*;
 
 use crate::agent::export_session_to_markdown;
 use crate::app::{AppState, ToastLevel, ViewMode};
+use crate::model::{DEFAULT_SESSION_FOLDER, DEFAULT_SESSION_TITLE};
 
 impl AppState {
     pub fn matching_session_ids(&mut self, query: &str) -> HashSet<String> {
@@ -41,7 +42,9 @@ impl AppState {
 
     pub fn create_new_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (provider_id, model) = self.config.default_model_selection();
-        let id = self.storage.create_session("新对话", "默认", &model, &provider_id);
+        let id = self
+            .storage
+            .create_session(DEFAULT_SESSION_TITLE, DEFAULT_SESSION_FOLDER, &model, &provider_id);
         self.storage.active_session_id = id;
         self.view_mode = ViewMode::Chat;
         self.pending_quote = None;

@@ -3,6 +3,7 @@
 use gpui_kit::*;
 
 use crate::app::AppState;
+use crate::model::DEFAULT_SESSION_FOLDER;
 
 impl AppState {
     pub fn toggle_session_pin(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -29,7 +30,7 @@ impl AppState {
     pub fn set_session_folder(&mut self, id: &str, folder: &str, cx: &mut Context<Self>) {
         if let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == id) {
             session.folder = if folder.trim().is_empty() {
-                "默认".into()
+                DEFAULT_SESSION_FOLDER.into()
             } else {
                 folder.trim().to_string()
             };
@@ -40,7 +41,7 @@ impl AppState {
 
     pub fn begin_move_folder(&mut self, id: &str, current: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.folder_target_id = Some(id.to_string());
-        let value = if current == "默认" { "" } else { current };
+        let value = if current == DEFAULT_SESSION_FOLDER { "" } else { current };
         self.folder_name_input.update(cx, |input, cx| {
             input.set_value(value, window, cx);
             input.focus(window, cx);

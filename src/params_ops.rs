@@ -4,7 +4,7 @@ use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel};
 use crate::config::{ProviderConfig, format_header_lines, parse_header_lines};
-use crate::model::ChatParams;
+use crate::model::{ChatParams, DEFAULT_SESSION_FOLDER};
 
 impl AppState {
     pub fn patch_params(&mut self, cx: &mut Context<Self>, update: impl FnOnce(&mut ChatParams)) {
@@ -85,7 +85,9 @@ impl AppState {
         } else {
             preset.model.clone()
         };
-        let id = self.storage.create_session(&preset.name, "默认", &model, &provider_id);
+        let id = self
+            .storage
+            .create_session(&preset.name, DEFAULT_SESSION_FOLDER, &model, &provider_id);
         if let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == id) {
             let mut params = preset.params.clone();
             if params.system_prompt.as_ref().is_none_or(|text| text.trim().is_empty())
