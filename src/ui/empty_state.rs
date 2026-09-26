@@ -12,11 +12,12 @@ use crate::app::AppState;
 // ================= 空状态 =================
 
 pub(super) fn render_empty_state(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+    let lang = state.language();
     let has_providers = !state.config.providers.is_empty();
     let subtitle = if has_providers {
         format!(
             "{} · {}",
-            state.config.get_active_provider_name(),
+            state.config.get_active_provider_name(lang),
             model_picker::current_model_label(state)
         )
     } else {

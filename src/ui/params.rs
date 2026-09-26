@@ -12,7 +12,6 @@ use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
 use crate::app::AppState;
-use crate::model::ReasoningLevel;
 
 pub fn render_params_button(cx: &mut Context<AppState>) -> impl IntoElement {
     let app = cx.entity();
@@ -31,6 +30,7 @@ pub fn render_params_button(cx: &mut Context<AppState>) -> impl IntoElement {
 
 fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl IntoElement + use<> {
     let p = Palette::new(cx);
+    let lang = app.read(cx).language();
     let (params, levels, model_default) = {
         let state = app.read(cx);
         let session = state.storage.get_active_session();
@@ -150,11 +150,11 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
             let app = app.clone();
             let current = reasoning.filter(|level| levels.contains(level));
             let default_label = match model_default {
-                Some(level) => format!("默认（{}）", level.label()),
+                Some(level) => format!("默认（{}）", level.label(lang)),
                 None => "默认".to_string(),
             };
             let value_label = current
-                .map(|level| level.label().to_string())
+                .map(|level| level.label(lang).to_string())
                 .unwrap_or_else(|| default_label.clone());
             this.child(labeled(
                 "思考强度".to_string(),
@@ -175,7 +175,7 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
                                         button.ghost()
                                     }
                                 })
-                                .label(level.map(ReasoningLevel::label).unwrap_or("默认"))
+                                .label(level.map(|level| level.label(lang)).unwrap_or("默认"))
                                 .on_click(move |_, _, cx| {
                                     app.update(cx, |this, cx| this.patch_params(cx, |params| params.reasoning = level));
                                 })

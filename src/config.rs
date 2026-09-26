@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
+use crate::i18n::{AppLanguage, Key, tr};
 use crate::model::ReasoningLevel;
 use crate::model_info::{self, Capability, ModelSpec};
 use crate::paths::{APP_NAME, CONFIG_FILE, LEGACY_APP_NAME, data_file, write_atomic};
@@ -28,10 +29,14 @@ impl ChannelType {
         ]
     }
 
+    /// 渠道类型的显示名。
+    ///
+    /// 这些都是接口规范的产品名（Chat Completions / Responses API / Gemini / Claude），
+    /// 业界通用英文写法，不翻译。
     pub fn label(&self) -> &'static str {
         match self {
             ChannelType::OpenAiChat => "OpenAI (Chat Completions)",
-            ChannelType::OpenAiResponses => "OpenAI (Responses 规范)",
+            ChannelType::OpenAiResponses => "OpenAI (Responses API)",
             ChannelType::Gemini => "Google Gemini",
             ChannelType::Claude => "Anthropic Claude",
         }
@@ -403,10 +408,11 @@ impl AppConfig {
             .unwrap_or_default()
     }
 
-    pub fn get_active_provider_name(&self) -> String {
+    /// 当前渠道的显示名。没有选中渠道时返回一句提示，所以要调用方给语言。
+    pub fn get_active_provider_name(&self, lang: AppLanguage) -> String {
         self.get_active_provider()
             .map(|p| p.name.clone())
-            .unwrap_or_else(|| "未选择渠道".to_string())
+            .unwrap_or_else(|| tr(lang, Key::NoProviderSelected).to_string())
     }
 
     pub fn default_model_selection(&self) -> (String, String) {

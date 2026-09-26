@@ -2,8 +2,9 @@ use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel};
 use crate::config::ModelConfig;
+use crate::i18n::{Key, tr_args};
 use crate::model::ReasoningLevel;
-use crate::model_info::{self, Capability};
+use crate::model_info::{self, Capability, TokenParseError};
 
 /// 「添加 / 编辑模型」弹窗的草稿，点保存之前不改动配置
 #[derive(Clone, Debug)]
@@ -148,12 +149,20 @@ impl AppState {
             TokenField::Context => self.model_edit_context_input.read(cx).value().to_string(),
             TokenField::Output => self.model_edit_output_input.read(cx).value().to_string(),
         };
+        // 语言要在借用 self.model_editor 之前取，之后 self 就被 editor 借走了
+        let lang = self.language();
         let Some(editor) = self.model_editor.as_mut() else {
             return;
         };
         let (value, error) = match model_info::parse_tokens(&text) {
             Ok(value) => (value, None),
-            Err(error) => (None, Some(error)),
+            Err(error) => (
+                None,
+                Some(match error {
+                    TokenParseError::NotANumber => tr_args(lang, Key::TokenNotANumber, &[&text]),
+                    TokenParseError::OutOfRange => tr_args(lang, Key::TokenOutOfRange, &[&text]),
+                }),
+            ),
         };
         match field {
             TokenField::Context => {

@@ -123,6 +123,47 @@ i18n! {
     NoProviders => { "暂无渠道，请点击上方的「+」添加您自有的 AI 渠道", "No providers configured. Click '+' above to add your AI channel.", "プロバイダーがありません。上の「+」をクリックして追加してください。", "暫無渠道，請點擊上方的「+」新增自有的 AI 渠道" },
     NoModels => { "暂无模型，可点击右上角「从接口拉取模型」或「添加模型」", "No models found. Click 'Fetch Models' or 'Add Model' above.", "モデルがありません。右上の「モデル取得」または「モデル追加」をクリックしてください。", "暫無模型，可點擊右上角「從介面拉取模型」或「新增模型」" },
     LangSwitched => { "语言已切换为：简体中文", "Language switched to: English", "言語を日本語に切り替えました", "語言已切換為：繁體中文" },
+
+    // 模型能力（模型信息卡片上的标签与说明）
+    CapabilityVision => { "图片理解", "Vision", "画像理解", "圖片理解" },
+    CapabilityFiles => { "PDF 与文档", "PDF & Docs", "PDF・文書", "PDF 與文件" },
+    CapabilityTools => { "工具调用", "Tool Use", "ツール呼び出し", "工具呼叫" },
+    CapabilityWebSearch => { "联网搜索", "Web Search", "ウェブ検索", "聯網搜尋" },
+    CapabilityImageOutput => { "图片生成", "Image Generation", "画像生成", "圖片生成" },
+    CapabilityVisionDesc => { "能看懂图片和截图", "Understands images and screenshots", "画像やスクリーンショットを理解できます", "能看懂圖片和截圖" },
+    CapabilityFilesDesc => { "能直接读取 PDF 等文档", "Reads PDFs and other documents directly", "PDF などの文書を直接読み取れます", "能直接讀取 PDF 等文件" },
+    CapabilityToolsDesc => { "支持函数调用，MCP 要用", "Supports function calling, required for MCP", "関数呼び出しに対応（MCP に必要）", "支援函式呼叫，MCP 需要" },
+    CapabilityWebSearchDesc => { "模型自带联网搜索", "Model has built-in web search", "モデルがウェブ検索を内蔵", "模型內建聯網搜尋" },
+    CapabilityImageOutputDesc => { "可以生成图片", "Can generate images", "画像を生成できます", "可以生成圖片" },
+
+    // 思考强度档位
+    ReasoningOff => { "关闭", "Off", "オフ", "關閉" },
+    ReasoningMinimal => { "最小", "Minimal", "最小", "最小" },
+    ReasoningLow => { "低", "Low", "低", "低" },
+    ReasoningMedium => { "中", "Medium", "中", "中" },
+    ReasoningHigh => { "高", "High", "高", "高" },
+    ReasoningXHigh => { "超高", "Extra High", "最高", "超高" },
+    ReasoningMax => { "最大", "Max", "最大", "最大" },
+
+    // 数据层算出来、直接显示给用户的值
+    NoProviderSelected => { "未选择渠道", "No provider selected", "プロバイダー未選択", "未選擇渠道" },
+
+    // 上下文窗口 / 最大输出输入框的校验提示
+    TokenNotANumber => { "「{}」不是有效的数字，可以写 128000、128K 或 1M", "「{}」is not a valid number. Try 128000, 128K or 1M", "「{}」は有効な数字ではありません（128000、128K、1M など）", "「{}」不是有效的數字，可以寫 128000、128K 或 1M" },
+    TokenOutOfRange => { "「{}」超出了合理范围", "「{}」is out of the reasonable range", "「{}」は妥当な範囲を超えています", "「{}」超出了合理範圍" },
+}
+
+/// 按顺序替换文案里的 `{}` 占位符。
+///
+/// 为什么不写成 `format!(tr(...), arg)`：`format!` 的格式串必须是编译期字面量，
+/// 把 `tr(...)` 的返回值当格式串会报 `format argument must be a string literal`。
+/// 语序差异（英语常把数值放句首、日语放句中）靠译文里 `{}` 的位置解决，不靠代码。
+pub fn tr_args(lang: AppLanguage, key: Key, args: &[&str]) -> String {
+    let mut text = tr(lang, key).to_string();
+    for arg in args {
+        text = text.replacen("{}", arg, 1);
+    }
+    text
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ use std::fs;
 use std::path::Path;
 use uuid::Uuid;
 
+use crate::i18n::{AppLanguage, Key, tr};
 use crate::paths::{DATABASE_FILE, SESSIONS_FILE, data_dir, data_file};
 use crate::storage::{Database, StorageResult};
 
@@ -32,16 +33,20 @@ impl ReasoningLevel {
         ReasoningLevel::Max,
     ];
 
-    pub fn label(self) -> &'static str {
-        match self {
-            ReasoningLevel::Off => "关闭",
-            ReasoningLevel::Minimal => "最小",
-            ReasoningLevel::Low => "低",
-            ReasoningLevel::Medium => "中",
-            ReasoningLevel::High => "高",
-            ReasoningLevel::XHigh => "超高",
-            ReasoningLevel::Max => "最大",
-        }
+    /// 界面上的档位名。
+    pub fn label(self, lang: AppLanguage) -> &'static str {
+        tr(
+            lang,
+            match self {
+                ReasoningLevel::Off => Key::ReasoningOff,
+                ReasoningLevel::Minimal => Key::ReasoningMinimal,
+                ReasoningLevel::Low => Key::ReasoningLow,
+                ReasoningLevel::Medium => Key::ReasoningMedium,
+                ReasoningLevel::High => Key::ReasoningHigh,
+                ReasoningLevel::XHigh => Key::ReasoningXHigh,
+                ReasoningLevel::Max => Key::ReasoningMax,
+            },
+        )
     }
 
     /// OpenAI 兼容接口的 `reasoning_effort` 取值，按字面发送，由模型配置决定哪些档位可选

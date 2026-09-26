@@ -44,6 +44,7 @@ const OUTPUT_PRESETS: [(u32, &str); 6] = [
 pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let p = Palette::new(cx);
+        let lang = app.read(cx).language();
         let mono_font = cx.theme().mono_font_family.clone();
         let (editor, provider_name, id_input, name_input, context_input, output_input) = {
             let state = app.read(cx);
@@ -172,7 +173,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                                         app.update(cx, |this, cx| this.toggle_model_draft_level(level, cx))
                                     })
                                     .when(selected, |this| this.child(Icon::new(IconName::Check).size(px(12.))))
-                                    .child(level.label())
+                                    .child(level.label(lang))
                             })),
                     )
                     .when(levels.is_empty() && detected.always_thinks, |this| {
@@ -218,7 +219,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                                                 this.update_model_draft(cx, |draft| draft.default_reasoning = level)
                                             })
                                         })
-                                        .child(level.map(ReasoningLevel::label).unwrap_or("不指定"))
+                                        .child(level.map(|level| level.label(lang)).unwrap_or("不指定"))
                                     }),
                             )
                             .into_any_element()
@@ -280,7 +281,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                                                     .flex_1()
                                                     .text_sm()
                                                     .font_weight(FontWeight::MEDIUM)
-                                                    .child(capability.label()),
+                                                    .child(capability.label(lang)),
                                             )
                                             .child(
                                                 Icon::new(if selected {
@@ -296,7 +297,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
                                         div()
                                             .text_xs()
                                             .text_color(p.muted_foreground)
-                                            .child(capability.description()),
+                                            .child(capability.description(lang)),
                                     )
                             })),
                     )

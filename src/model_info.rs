@@ -8,6 +8,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{AppLanguage, Key, tr};
 use crate::model::ReasoningLevel;
 
 /// 模型能力。目前只用于展示和筛选，附件、联网等功能接入后会按这里判断是否可用。
@@ -30,24 +31,32 @@ impl Capability {
         Capability::ImageOutput,
     ];
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Capability::Vision => "图片理解",
-            Capability::Files => "PDF 与文档",
-            Capability::Tools => "工具调用",
-            Capability::WebSearch => "联网搜索",
-            Capability::ImageOutput => "图片生成",
-        }
+    /// 界面上的能力名。
+    pub fn label(self, lang: AppLanguage) -> &'static str {
+        tr(
+            lang,
+            match self {
+                Capability::Vision => Key::CapabilityVision,
+                Capability::Files => Key::CapabilityFiles,
+                Capability::Tools => Key::CapabilityTools,
+                Capability::WebSearch => Key::CapabilityWebSearch,
+                Capability::ImageOutput => Key::CapabilityImageOutput,
+            },
+        )
     }
 
-    pub fn description(self) -> &'static str {
-        match self {
-            Capability::Vision => "能看懂图片和截图",
-            Capability::Files => "能直接读取 PDF 等文档",
-            Capability::Tools => "支持函数调用，MCP 要用",
-            Capability::WebSearch => "模型自带联网搜索",
-            Capability::ImageOutput => "可以生成图片",
-        }
+    /// 能力名下面的补充说明，用在模型信息卡片里。
+    pub fn description(self, lang: AppLanguage) -> &'static str {
+        tr(
+            lang,
+            match self {
+                Capability::Vision => Key::CapabilityVisionDesc,
+                Capability::Files => Key::CapabilityFilesDesc,
+                Capability::Tools => Key::CapabilityToolsDesc,
+                Capability::WebSearch => Key::CapabilityWebSearchDesc,
+                Capability::ImageOutput => Key::CapabilityImageOutputDesc,
+            },
+        )
     }
 }
 
@@ -493,9 +502,21 @@ pub fn format_tokens_exact(value: u32) -> String {
     }
 }
 
+/// 解析 token 数时可能出的错。
+///
+/// 这里只报"错在哪"，具体提示文案交给界面层翻——数据层不依赖文案表，
+/// 也就不必为了报错而给每个调用点都传一个语言参数。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenParseError {
+    /// 不是能识别的数字
+    NotANumber,
+    /// 数字超出了合理范围（1 ~ 1 亿）
+    OutOfRange,
+}
+
 /// 解析用户输入的 token 数："128K" → 128000，"1.5M" → 1500000，"131072" → 131072。
 /// 空字符串表示自动识别。K、M 按 1000 进位：作为上限时宁可偏小，不会超出模型限制。
-pub fn parse_tokens(text: &str) -> Result<Option<u32>, String> {
+pub fn parse_tokens(text: &str) -> Result<Option<u32>, TokenParseError> {
     let text = text.trim().replace([',', '_', ' '], "");
     if text.is_empty() {
         return Ok(None);
@@ -508,12 +529,10 @@ pub fn parse_tokens(text: &str) -> Result<Option<u32>, String> {
     } else {
         (lower.as_str(), 1.0)
     };
-    let value: f64 = number
-        .parse()
-        .map_err(|_| format!("「{text}」不是有效的数字，可以写 128000、128K 或 1M"))?;
+    let value: f64 = number.parse().map_err(|_| TokenParseError::NotANumber)?;
     let value = (value * multiplier).round();
     if !(1.0..=100_000_000.0).contains(&value) {
-        return Err(format!("「{text}」超出了合理范围"));
+        return Err(TokenParseError::OutOfRange);
     }
     Ok(Some(value as u32))
 }
