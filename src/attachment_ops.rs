@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::app::{AppState, ToastLevel, ViewMode, runtime, update_state};
 use crate::clipboard::{self, PastePayload};
 use crate::file_store;
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 use crate::model::{Attachment, AttachmentKind};
 
 impl AppState {
@@ -14,17 +15,20 @@ impl AppState {
         if paths.is_empty() {
             return;
         }
+        // 语言要在 spawn 之前取好：闭包里只有 `this` / `cx`，读不到 `AppState`
+        let lang = self.language();
         cx.spawn(async move |this, cx| {
             let results = runtime()
-                .spawn_blocking(move || paths.iter().map(|path| import_file(path)).collect::<Vec<_>>())
+                .spawn_blocking(move || paths.iter().map(|path| import_file(path, lang)).collect::<Vec<_>>())
                 .await
-                .unwrap_or_else(|error| vec![Err(format!("添加附件失败：{error}"))]);
+                .unwrap_or_else(|error| vec![Err(tr_args(lang, Key::AddAttachmentFailed, &[&error.to_string()]))]);
             update_state(&this, cx, |state, cx| state.finish_attachment_import(results, cx));
         })
         .detach();
     }
 
     fn finish_attachment_import(&mut self, results: Vec<Result<Attachment, String>>, cx: &mut Context<Self>) {
+        let lang = self.language();
         let mut added = 0usize;
         let mut errors = Vec::new();
         for result in results {
@@ -37,7 +41,10 @@ impl AppState {
             }
         }
         if added > 0 {
-            self.toast(ToastLevel::Success, format!("已添加 {added} 个附件"));
+            self.toast(
+                ToastLevel::Success,
+                tr_args(lang, Key::AttachmentsAdded, &[&added.to_string()]),
+            );
         }
         if !errors.is_empty() {
             self.toast(ToastLevel::Error, errors.join("\n"));
@@ -46,29 +53,33 @@ impl AppState {
     }
 
     pub fn pick_attachments(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         let (tx, rx) = tokio::sync::oneshot::channel();
         // 系统文件对话框会阻塞调用它的线程，放到单独的线程里
         std::thread::spawn(move || {
             let files = rfd::FileDialog::new()
-                .set_title("选择附件 (支持图片、文档、代码与文本)")
+                .set_title(tr(lang, Key::PickAttachmentTitle))
                 .add_filter(
-                    "常用文件 (图片/文档/代码)",
+                    tr(lang, Key::FilterCommonFiles),
                     &[
                         "png", "jpg", "jpeg", "webp", "gif", "bmp", "pdf", "docx", "xlsx", "pptx", "txt", "md", "json",
                         "rs", "py", "js", "ts", "html", "css", "c", "cpp", "go", "java", "sql", "sh", "yaml", "yml",
                         "toml", "csv",
                     ],
                 )
-                .add_filter("图片文件", &["png", "jpg", "jpeg", "webp", "gif", "bmp"])
-                .add_filter("文档 (PDF/Office)", &["pdf", "docx", "xlsx", "pptx"])
                 .add_filter(
-                    "文本与代码",
+                    tr(lang, Key::FilterImages),
+                    &["png", "jpg", "jpeg", "webp", "gif", "bmp"],
+                )
+                .add_filter(tr(lang, Key::FilterDocuments), &["pdf", "docx", "xlsx", "pptx"])
+                .add_filter(
+                    tr(lang, Key::FilterTextCode),
                     &[
                         "txt", "md", "json", "rs", "py", "js", "ts", "c", "cpp", "go", "java", "sql", "sh", "yaml",
                         "yml", "toml", "xml", "csv",
                     ],
                 )
-                .add_filter("所有文件 (*.*)", &["*"])
+                .add_filter(tr(lang, Key::FilterAllFiles), &["*"])
                 .pick_files();
             // 用户关掉对话框时接收端可能已经不在了，发送失败无所谓
             let _ = tx.send(files);
@@ -107,6 +118,7 @@ impl AppState {
 
     /// 返回 true 表示这次粘贴已经作为附件处理
     fn apply_paste(&mut self, payload: PastePayload, cx: &mut Context<Self>) -> bool {
+        let lang = self.language();
         match payload {
             PastePayload::Files(paths) => {
                 self.add_attachment_paths(paths, cx);
@@ -117,7 +129,7 @@ impl AppState {
                 true
             }
             PastePayload::FoldersOnly => {
-                self.toast(ToastLevel::Info, "不能粘贴文件夹，请选择文件夹里的文件");
+                self.toast(ToastLevel::Info, tr(lang, Key::CannotPasteFolder));
                 cx.notify();
                 true
             }
@@ -127,16 +139,17 @@ impl AppState {
 
     /// 剪贴板图片在后台转换格式、保存，完成后加到附件里
     fn add_clipboard_image(&mut self, image: Image, cx: &mut Context<Self>) {
+        let lang = self.language();
         cx.spawn(async move |this, cx| {
             let result = runtime()
-                .spawn_blocking(move || import_clipboard_image(&image))
+                .spawn_blocking(move || import_clipboard_image(&image, lang))
                 .await
-                .unwrap_or_else(|error| Err(format!("粘贴图片失败：{error}")));
+                .unwrap_or_else(|error| Err(tr_args(lang, Key::PasteImageFailed, &[&error.to_string()])));
             update_state(&this, cx, |state, cx| {
                 match result {
                     Ok(attachment) => {
                         state.pending_attachments.push(attachment);
-                        state.toast(ToastLevel::Success, "已从剪贴板粘贴图片");
+                        state.toast(ToastLevel::Success, tr(state.language(), Key::ImagePasted));
                     }
                     Err(error) => state.toast(ToastLevel::Error, error),
                 }
@@ -159,22 +172,27 @@ impl AppState {
     /// 其它平台暂时没接，界面那边也只在 Windows 下挂这个回调。
     #[cfg(target_os = "windows")]
     pub fn reveal_attachment(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let lang = self.language();
         if let Err(error) = std::process::Command::new("explorer").arg(path).spawn() {
-            self.toast(ToastLevel::Error, format!("打开文件失败: {error}"));
+            self.toast(
+                ToastLevel::Error,
+                tr_args(lang, Key::OpenFileFailed, &[&error.to_string()]),
+            );
             cx.notify();
         }
     }
 }
 
 /// 在后台线程把本地文件复制进附件目录
-fn import_file(path: &Path) -> Result<Attachment, String> {
+fn import_file(path: &Path, lang: AppLanguage) -> Result<Attachment, String> {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("file")
         .to_string();
     let (kind, mime) = file_store::detect_kind_and_mime(&name);
-    let saved = file_store::save_file_from_path(path).map_err(|error| format!("「{name}」没有添加：{error}"))?;
+    let saved = file_store::save_file_from_path(path)
+        .map_err(|error| tr_args(lang, Key::AttachmentNotAdded, &[&name, &error.to_string()]))?;
     Ok(Attachment {
         id: Uuid::new_v4().to_string(),
         kind,
@@ -187,7 +205,7 @@ fn import_file(path: &Path) -> Result<Attachment, String> {
 }
 
 /// 在后台线程把剪贴板图片转成常见格式并保存
-fn import_clipboard_image(image: &Image) -> Result<Attachment, String> {
+fn import_clipboard_image(image: &Image, lang: AppLanguage) -> Result<Attachment, String> {
     let prepared = clipboard::prepare_image(image)?;
     let name = format!(
         "paste_{}.{}",
@@ -195,7 +213,7 @@ fn import_clipboard_image(image: &Image) -> Result<Attachment, String> {
         prepared.extension
     );
     let saved = file_store::save_bytes(&prepared.bytes, &name, prepared.mime)
-        .map_err(|error| format!("保存剪贴板图片失败：{error}"))?;
+        .map_err(|error| tr_args(lang, Key::SaveClipboardImageFailed, &[&error.to_string()]))?;
     Ok(Attachment {
         id: Uuid::new_v4().to_string(),
         kind: AttachmentKind::Image,

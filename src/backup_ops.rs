@@ -6,6 +6,7 @@ use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel, update_state};
 use crate::backup::{self, BackupFile};
+use crate::i18n::{Key, tr, tr_args};
 use crate::paths::data_dir;
 
 impl AppState {
@@ -22,8 +23,14 @@ impl AppState {
                     &state.prompts,
                     &state.config,
                 ) {
-                    Ok(()) => state.toast(ToastLevel::Success, format!("已导出备份 {}", path.display())),
-                    Err(error) => state.toast(ToastLevel::Error, format!("导出失败: {error}")),
+                    Ok(()) => state.toast(
+                        ToastLevel::Success,
+                        tr_args(state.language(), Key::BackupExported, &[&path.display().to_string()]),
+                    ),
+                    Err(error) => state.toast(
+                        ToastLevel::Error,
+                        tr_args(state.language(), Key::ExportFailed, &[&error.to_string()]),
+                    ),
                 }
                 cx.notify();
             });
@@ -32,11 +39,12 @@ impl AppState {
     }
 
     pub fn pick_import_backup(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let file = rfd::FileDialog::new()
-                .set_title("选择 JSON 备份")
-                .add_filter("JSON 备份文件", &["json"])
+                .set_title(tr(lang, Key::PickBackupTitle))
+                .add_filter(tr(lang, Key::FilterJsonBackup), &["json"])
                 .pick_file();
             let _ = tx.send(file);
         });
@@ -48,7 +56,7 @@ impl AppState {
                 match loaded {
                     Ok(file) => {
                         state.pending_import = Some(file);
-                        state.toast(ToastLevel::Info, "已读取备份，请确认是否恢复");
+                        state.toast(ToastLevel::Info, tr(state.language(), Key::BackupLoaded));
                     }
                     Err(error) => state.toast(ToastLevel::Error, error),
                 }
@@ -59,21 +67,25 @@ impl AppState {
     }
 
     pub fn confirm_import(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         let Some(backup) = self.pending_import.take() else {
             return;
         };
         self.apply_backup(backup);
         self.persist_storage(cx);
         if let Err(error) = self.prompts.save() {
-            self.toast(ToastLevel::Error, format!("提示词保存失败: {error}"));
+            self.toast(
+                ToastLevel::Error,
+                tr_args(lang, Key::PromptsSaveFailed, &[&error.to_string()]),
+            );
         }
         if let Err(error) = self.config.save() {
-            self.toast(ToastLevel::Error, format!("配置保存失败: {error}"));
-        } else {
             self.toast(
-                ToastLevel::Success,
-                "备份已恢复。API Key 需在本机凭据中存在，否则请重新填写",
+                ToastLevel::Error,
+                tr_args(lang, Key::ConfigSaveFailed, &[&error.to_string()]),
             );
+        } else {
+            self.toast(ToastLevel::Success, tr(lang, Key::BackupRestored));
         }
         cx.notify();
     }

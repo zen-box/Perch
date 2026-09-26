@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 use crate::agent::execute_local_tool;
 use crate::backup::BackupFile;
 use crate::config::{AppConfig, ChannelType};
-use crate::i18n::{AppLanguage, Key, apply_locale, set_current, tr};
+use crate::i18n::{AppLanguage, Key, apply_locale, set_current, tr, tr_args};
 use crate::model::{Attachment, ChatMessage, StorageData};
 use crate::model_ops::{ModelEditor, TokenField};
 use crate::prompts::PromptLibrary;
@@ -199,7 +199,7 @@ impl AppState {
         });
 
         let search_session_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::SearchChat)));
-        let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入新的对话名称"));
+        let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhSessionName)));
 
         let cfg_api_key_input = cx.new(|cx| {
             let mut inp = InputState::new(window, cx).masked(true).placeholder("sk-...");
@@ -211,20 +211,22 @@ impl AppState {
             inp.set_value(&initial_base_url, window, cx);
             inp
         });
-        let cfg_search_provider_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索渠道"));
-        let model_picker_search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索模型或渠道"));
+        let cfg_search_provider_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhSearchProvider)));
+        let model_picker_search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhSearchModelOrProvider)));
 
         let sys_prompt = config.system_prompt.clone();
         let cfg_system_prompt_input = cx.new(|cx| {
             let mut inp = TextareaState::new(window, cx)
                 .auto_grow(3, 12)
-                .placeholder("例如：你是一名资深的 Rust 工程师，回答简洁并给出可运行的示例。");
+                .placeholder(tr(lang, Key::PhSystemPrompt));
             inp.set_value(&sys_prompt, window, cx);
             inp
         });
 
         let new_provider_name_input = cx.new(|cx| {
-            let mut inp = InputState::new(window, cx).placeholder("例如：OpenAI 官方 / DeepSeek / 公司代理");
+            let mut inp = InputState::new(window, cx).placeholder(tr(lang, Key::PhProviderName));
             inp.set_value(ChannelType::OpenAiChat.label(), window, cx);
             inp
         });
@@ -235,11 +237,13 @@ impl AppState {
         });
         let new_provider_api_key_input = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("sk-..."));
 
-        let model_edit_id_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("调用接口时使用的名字，例如 claude-sonnet-4-5"));
-        let model_edit_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("留空则显示模型 ID"));
-        let model_edit_context_input = cx.new(|cx| InputState::new(window, cx).placeholder("自定义，如 128K"));
-        let model_edit_output_input = cx.new(|cx| InputState::new(window, cx).placeholder("自定义，如 64K"));
+        let model_edit_id_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhModelId)));
+        let model_edit_name_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhModelDisplayName)));
+        let model_edit_context_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhCustomContextLimit)));
+        let model_edit_output_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhCustomOutputLimit)));
 
         let (message_list_session, message_count) = storage
             .get_active_session()
@@ -255,7 +259,7 @@ impl AppState {
         let params_prompt_input = cx.new(|cx| {
             let mut input = TextareaState::new(window, cx)
                 .auto_grow(2, 6)
-                .placeholder("留空则使用全局系统提示词");
+                .placeholder(tr(lang, Key::PhSessionSystemPrompt));
             input.set_value(&initial_prompt, window, cx);
             input
         });
@@ -276,15 +280,15 @@ impl AppState {
                 .auto_grow(2, 6)
                 .placeholder("X-Title: Perch")
         });
-        let prompt_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("名称"));
-        let prompt_icon_input = cx.new(|cx| InputState::new(window, cx).placeholder("例如：✨"));
+        let prompt_name_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhName)));
+        let prompt_icon_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhIcon)));
         let prompt_body_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(3, 8)
-                .placeholder("支持 {{date}} {{clipboard}} {{selection}}")
+                .placeholder(tr(lang, Key::PhTemplateVars))
         });
-        let folder_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("文件夹名称"));
-        let model_fetch_search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索模型 ID 或名称"));
+        let folder_name_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::FolderName)));
+        let model_fetch_search = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhModelSearch)));
         let prompts = PromptLibrary::load();
 
         let subscriptions = vec![
@@ -408,10 +412,7 @@ impl AppState {
         // 旧数据迁移是在 data_dir() 里做的，那会儿还没有 AppState，失败信息先攒着，
         // 到这里才弹得出来。迁移失败会让程序当成全新安装，必须让用户看到。
         for message in crate::paths::take_migration_failures() {
-            state.toast(
-                ToastLevel::Error,
-                format!("旧数据迁移失败，可能读不到历史数据：{message}"),
-            );
+            state.toast(ToastLevel::Error, tr_args(lang, Key::MigrationFailed, &[&message]));
         }
         state
     }
@@ -427,8 +428,12 @@ impl AppState {
     }
 
     pub(crate) fn persist_storage(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         if let Err(error) = self.storage.save() {
-            self.toast(ToastLevel::Error, format!("对话保存失败: {error}"));
+            self.toast(
+                ToastLevel::Error,
+                tr_args(lang, Key::ChatSaveFailed, &[&error.to_string()]),
+            );
             cx.notify();
         }
     }
@@ -436,10 +441,14 @@ impl AppState {
     /// 保存配置。返回是否成功，调用方要弹成功提示时用它决定。
     /// §6：保存失败必须让用户看到，不能 `let _ = self.config.save()` 一吞了事。
     pub(crate) fn persist_config(&mut self, cx: &mut Context<Self>) -> bool {
+        let lang = self.language();
         match self.config.save() {
             Ok(()) => true,
             Err(error) => {
-                self.toast(ToastLevel::Error, format!("配置保存失败: {error}"));
+                self.toast(
+                    ToastLevel::Error,
+                    tr_args(lang, Key::ConfigSaveFailed, &[&error.to_string()]),
+                );
                 cx.notify();
                 false
             }
@@ -484,13 +493,17 @@ impl AppState {
     }
 
     pub fn toggle_local_tools(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         self.config.local_tools_enabled = !self.config.local_tools_enabled;
         if !self.config.local_tools_enabled {
             self.pending_tool_name = None;
             self.pending_tool_cmd = None;
         }
         if let Err(error) = self.config.save() {
-            self.toast(ToastLevel::Error, format!("本地工具设置保存失败: {error}"));
+            self.toast(
+                ToastLevel::Error,
+                tr_args(lang, Key::LocalToolSettingsSaveFailed, &[&error.to_string()]),
+            );
         }
         cx.notify();
     }
@@ -547,10 +560,11 @@ impl AppState {
     }
 
     pub fn execute_agent_tool(&mut self, tool_name: &str, arg: &str, cx: &mut Context<Self>) {
+        let lang = self.language();
         if !self.config.local_tools_enabled {
             self.pending_tool_name = None;
             self.pending_tool_cmd = None;
-            self.toast(ToastLevel::Error, "本地工具未启用");
+            self.toast(ToastLevel::Error, tr(lang, Key::LocalToolsDisabled));
             cx.notify();
             return;
         }
@@ -562,10 +576,11 @@ impl AppState {
             assistant_msg.is_streaming = false;
             assistant_msg.tool_calls.push(result.display.clone());
 
+            // 换行留在调用点拼，不塞进译文——译文里带看不见的 \n 太容易写错
             let formatted_content = if result.is_error {
-                format!("**工具执行失败**:\n```text\n{}\n```", result.output)
+                tr_args(lang, Key::ToolExecFailed, &[&result.output])
             } else {
-                format!("**工具执行成功**:\n```text\n{}\n```", result.output)
+                tr_args(lang, Key::ToolExecOk, &[&result.output])
             };
             assistant_msg.content = formatted_content;
             session.messages.push(assistant_msg);
@@ -594,8 +609,9 @@ impl AppState {
     }
 
     pub fn copy_to_clipboard(&mut self, text: &str, cx: &mut Context<Self>) {
+        let lang = self.language();
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-        self.toast(ToastLevel::Success, "已复制到剪贴板");
+        self.toast(ToastLevel::Success, tr(lang, Key::CopiedToClipboard));
         cx.notify();
     }
 
@@ -624,10 +640,11 @@ impl AppState {
     }
 
     pub fn save_system_prompt(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         let prompt = self.cfg_system_prompt_input.read(cx).value().trim().to_string();
         self.config.system_prompt = prompt;
         if self.persist_config(cx) {
-            self.toast(ToastLevel::Success, "系统提示词已保存");
+            self.toast(ToastLevel::Success, tr(lang, Key::SystemPromptSaved));
         }
         cx.notify();
     }
