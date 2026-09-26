@@ -1,0 +1,3 @@
+# cargo fmt 的格式配置，规范见 AGENTS.md「代码风格」
+max_width = 120
+newline_style = "Unix"

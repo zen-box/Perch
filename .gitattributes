@@ -1,0 +1,9 @@
+# 仓库内统一使用 LF 换行，规范见 AGENTS.md「代码风格」
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gif binary
+*.webp binary
