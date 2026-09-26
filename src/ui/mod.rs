@@ -1,9 +1,14 @@
 mod analytics;
 mod brand_icon;
 mod chat;
+mod composer;
 mod dialogs;
+mod empty_state;
 mod fetch_models_dialog;
 mod markdown_image;
+mod message_assistant;
+mod message_user;
+mod message_variants;
 mod model_editor_dialog;
 mod model_picker;
 mod params;
@@ -12,6 +17,7 @@ mod settings_general;
 mod settings_misc;
 mod settings_prompts;
 mod settings_providers;
+mod sidebar;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -232,7 +238,7 @@ impl Render for AppState {
                 match view_mode {
                     ViewMode::Chat => this
                         .when(!self.sidebar_collapsed, |this| {
-                            this.child(chat::render_sidebar(self, &p, cx))
+                            this.child(sidebar::render_sidebar(self, &p, cx))
                         })
                         .child(chat::render_chat_panel(self, &p, cx)),
                     ViewMode::Settings => this.child(settings::render_settings(self, &p, cx)),
