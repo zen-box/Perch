@@ -131,6 +131,7 @@ pub(super) fn page(
     )
 }
 
+/// 带标题的分组卡片，行与行之间用细线分隔
 pub(super) fn section(title: &'static str, p: &Palette, rows: Vec<AnyElement>) -> impl IntoElement {
     v_flex()
         .gap_2()
@@ -149,6 +150,7 @@ pub(super) fn section(title: &'static str, p: &Palette, rows: Vec<AnyElement>) -
         )
 }
 
+/// 左侧标题说明、右侧控件的设置行
 pub(super) fn setting_row(
     title: &'static str,
     description: impl Into<SharedString>,
@@ -171,6 +173,7 @@ pub(super) fn setting_row(
         .into_any_element()
 }
 
+/// 分段选择器
 pub(super) fn segmented<T: Copy + PartialEq + 'static>(
     id: &'static str,
     options: Vec<(T, SharedString)>,
