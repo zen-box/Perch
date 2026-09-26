@@ -11,6 +11,7 @@ use gpui_kit::{AssetSource, SharedString};
 use regex::Regex;
 
 use crate::config::{ModelConfig, ProviderConfig};
+use crate::i18n::AppLanguage;
 
 include!(concat!(env!("OUT_DIR"), "/brand_icons.rs"));
 
@@ -73,7 +74,69 @@ impl Brand {
             self.foreground
         }
     }
+
+    /// 品牌显示名。
+    ///
+    /// **品牌名是专有名词，不做逐字翻译**，只在「中文写法」和「拉丁写法」之间切换：
+    /// 简体中文用厂商的中文名，繁體中文用繁體写法，英文与日文用拉丁写法
+    /// （Qwen / Zhipu / Moonshot 这类）。所以这里没有走 `i18n::tr`——`BRANDS` 是
+    /// 一张静态表，把 100 多个条目全改成 `Key` 只会让表更难读。
+    ///
+    /// 写法与简体中文相同的品牌（OpenAI、Suno、Cursor…）不进
+    /// [`BRAND_TITLE_OVERRIDES`]，直接回落 [`Brand::title`]。
+    pub fn display_name(&self, lang: AppLanguage) -> &'static str {
+        let Some(&(traditional, latin)) = BRAND_TITLE_OVERRIDES.get(self.key) else {
+            return self.title;
+        };
+        match lang {
+            AppLanguage::ZhCn => self.title,
+            AppLanguage::ZhTw => traditional,
+            AppLanguage::EnUs | AppLanguage::JaJp => latin,
+        }
+    }
 }
+
+/// `(品牌 key) -> (繁體写法, 英文/日文写法)`。
+///
+/// 只列「简体中文写法与其它语言不同」的品牌；其余品牌各语言同名，不需要覆盖。
+static BRAND_TITLE_OVERRIDES: LazyLock<std::collections::HashMap<&'static str, (&'static str, &'static str)>> =
+    LazyLock::new(|| {
+        [
+            ("openai-o", ("OpenAI o 系列", "OpenAI o-series")),
+            ("openai-platform", ("OpenAI 平台", "OpenAI Platform")),
+            ("qwen", ("通義千問", "Qwen")),
+            ("zhipu", ("智譜", "Zhipu")),
+            ("moonshot", ("月之暗面", "Moonshot")),
+            ("doubao", ("豆包", "Doubao")),
+            ("bytedance", ("字節跳動", "ByteDance")),
+            ("jimeng", ("即夢", "Jimeng")),
+            ("hunyuan", ("騰訊混元", "Tencent Hunyuan")),
+            ("wenxin", ("文心", "ERNIE")),
+            ("spark", ("訊飛星火", "iFlytek Spark")),
+            ("yi", ("零一萬物", "01.AI")),
+            ("baichuan", ("百川", "Baichuan")),
+            ("stepfun", ("階躍星辰", "StepFun")),
+            ("sensenova", ("商湯日日新", "SenseNova")),
+            ("internlm", ("書生", "InternLM")),
+            ("ai360", ("360 智腦", "360 Zhinao")),
+            ("xiaomimimo", ("小米 MiMo", "Xiaomi MiMo")),
+            ("skywork", ("天工", "Skywork")),
+            ("kolors", ("可圖", "Kolors")),
+            ("siliconcloud", ("矽基流動", "SiliconFlow")),
+            ("bailian", ("阿里雲百煉", "Alibaba Cloud Bailian")),
+            ("alibabacloud", ("阿里雲", "Alibaba Cloud")),
+            ("volcengine", ("火山引擎", "Volcano Engine")),
+            ("tencentcloud", ("騰訊雲", "Tencent Cloud")),
+            ("baiducloud", ("百度智能雲", "Baidu AI Cloud")),
+            ("iflytekcloud", ("訊飛開放平台", "iFlytek Open Platform")),
+            ("zeroone", ("零一萬物", "01.AI")),
+            ("modelscope", ("魔搭", "ModelScope")),
+            ("qiniu", ("七牛雲", "Qiniu Cloud")),
+            ("infinigence", ("無問芯穹", "Infinigence")),
+        ]
+        .into_iter()
+        .collect()
+    });
 
 macro_rules! brands {
     ($(($key:literal, $title:literal, $icon:literal, $bg:literal, $fg:literal, $color:literal, $scale:literal)),* $(,)?) => {

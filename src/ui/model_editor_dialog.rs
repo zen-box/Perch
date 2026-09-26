@@ -554,11 +554,12 @@ fn render_icon_grid(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> i
                     .children(brand::BRANDS.iter().map(|brand| {
                         let app = app.clone();
                         let key = brand.key;
+                        let brand_title = brand.display_name(lang);
                         cell(
                             SharedString::from(format!("icon-{key}")),
                             current.as_deref() == Some(key),
-                            brand.title,
-                            brand_avatar(Some(brand), brand.title, px(30.), &p),
+                            brand_title,
+                            brand_avatar(Some(brand), brand_title, px(30.), &p),
                         )
                         .on_click(cx.listener(move |popover, _, window, cx| {
                             app.update(cx, |this, cx| {

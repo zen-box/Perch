@@ -9,11 +9,15 @@
 - 从 `#[cfg(test)]` 首次出现处切掉测试区（约定：测试都写在文件末尾）
 
 产出三个数字：中文字面量总数、去重后唯一串数（≈ key 数量）、带占位符的串数。
+白名单（`i18n_entries.SKIP`：品牌名、语言名等）单独计数，不计入待迁工作量。
 """
 
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import i18n_entries  # noqa: E402
 
 CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
@@ -113,19 +117,29 @@ def scan_literals(src: str):
 
 def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else "src")
-    files = sorted(root.rglob("*.rs"))
+    # `src/i18n.rs` 本身就是译文表，不是待迁的硬编码文案，排除掉。
+    files = [f for f in sorted(root.rglob("*.rs")) if f.as_posix() != "src/i18n.rs"]
     total = 0
     uniq = {}
     placeholder = 0
+    skipped = 0
     by_file = {}
     for f in files:
         src = strip_test_region(f.read_text(encoding="utf-8"))
         hits = [(ln, s) for ln, s in scan_literals(src) if CJK.search(s)]
         if not hits:
             continue
-        by_file[str(f).replace("\\", "/")] = len(hits)
-        total += len(hits)
-        for _, s in hits:
+        kept = []
+        for ln, s in hits:
+            if s in i18n_entries.SKIP:
+                skipped += 1
+            else:
+                kept.append((ln, s))
+        if not kept:
+            continue
+        by_file[str(f).replace("\\", "/")] = len(kept)
+        total += len(kept)
+        for _, s in kept:
             uniq[s] = uniq.get(s, 0) + 1
             if "{}" in s or "{error}" in s:
                 placeholder += 1
@@ -134,6 +148,7 @@ def main():
     print(f"非测试区中文字面量总数：{total}")
     print(f"去重后唯一串数（≈ key 数量）：{len(uniq)}")
     print(f"含占位符的串数：{placeholder}")
+    print(f"白名单跳过（品牌名 / 语言名等）：{skipped}")
     print()
     print("按文件（多→少）：")
     for path, cnt in sorted(by_file.items(), key=lambda kv: -kv[1]):
