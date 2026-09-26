@@ -282,22 +282,32 @@ impl AppState {
                     .gap_1()
                     .pr_2()
                     .child(
-                        Button::new("language")
-                            .ghost()
-                            .small()
-                            .icon(IconName::Languages)
-                            .tooltip(tr(lang, Key::LanguageSelect))
-                            .occlude()
-                            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-                                LANGUAGES.iter().fold(menu, |menu, &(option, label)| {
-                                    let app = app.clone();
-                                    menu.item(PopupMenuItem::new(label).checked(option == lang).on_click(
-                                        move |_, window, cx| {
-                                            app.update(cx, |this, cx| this.switch_language(option, window, cx));
-                                        },
-                                    ))
-                                })
-                            }),
+                        // `.occlude()` 必须打在这一层，不能打在 `Button` 自己身上。
+                        //
+                        // 下拉菜单的开关监听注册在 `Popover`/`Popup` 根节点上（它是按钮的**祖先**），
+                        // 而该监听会先判断「自己的命中框是否 hovered」。命中框查找在遇到
+                        // `HitboxBehavior::BlockMouse`（也就是 `.occlude()`）时会**截断**，
+                        // 于是祖先的命中框不再算 hovered，监听被跳过 —— 菜单永远打不开。
+                        // 放在外层就两全：`TitleBar` 拖拽区的命中框照样被挡住（不挡的话 Windows 的
+                        // `WM_NCHITTEST` 会返回 HTCAPTION，把点击判成拖动窗口），而 `Popup` 根节点
+                        // 仍排在遮挡命中框的前面，能正常收到点击。
+                        h_flex().flex_shrink_0().occlude().child(
+                            Button::new("language")
+                                .ghost()
+                                .small()
+                                .icon(IconName::Languages)
+                                .tooltip(tr(lang, Key::LanguageSelect))
+                                .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                                    LANGUAGES.iter().fold(menu, |menu, &(option, label)| {
+                                        let app = app.clone();
+                                        menu.item(PopupMenuItem::new(label).checked(option == lang).on_click(
+                                            move |_, window, cx| {
+                                                app.update(cx, |this, cx| this.switch_language(option, window, cx));
+                                            },
+                                        ))
+                                    })
+                                }),
+                        ),
                     )
                     .child(
                         Button::new("toggle-theme")
