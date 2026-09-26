@@ -29,7 +29,13 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
         };
         let summary = {
             let state = app.read(cx);
-            collect_stats(state, current_range)
+            // 单价查询来自服务层的 models.dev，在这里注入，analytics.rs 才能保持纯计算
+            collect_stats(
+                &state.storage.sessions,
+                &state.config.default_model_selection().1,
+                &|model, input, output| crate::models_dev::calculate_cost(model, input, output, 0).0,
+                current_range,
+            )
         };
 
         let max_daily_tokens = summary.daily.iter().map(|d| d.total_tokens).max().unwrap_or(1).max(1);

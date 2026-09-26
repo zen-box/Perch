@@ -2,13 +2,15 @@
 //!
 //! 从界面层搬出来的：原先在 `ui/analytics.rs` 里，每次弹窗渲染都会遍历全部会话和消息。
 //! 这里只做计算，配色、布局、图表这些展示相关的东西留在 `ui/analytics.rs`。
+//!
+//! 为了守住分层，这里不认 `AppState`，也不查 models.dev：会话从参数传进来，
+//! 单价由调用方用 `cost_of` 注入。
 
 use std::collections::HashMap;
 
 use chrono::{Duration, Local, NaiveDate};
 
-use crate::app::AppState;
-use crate::models_dev::calculate_cost;
+use crate::model::ChatSession;
 
 /// 统计看板的时间范围。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,7 +57,16 @@ pub struct AnalyticsSummary {
     pub models: Vec<ModelStat>,
 }
 
-pub fn collect_stats(state: &AppState, range: TimeRange) -> AnalyticsSummary {
+/// 汇总一段时间内的用量与费用。
+///
+/// `default_model` 是消息和会话都没记模型时的兜底；`cost_of` 按 (模型, 输入 token, 输出 token)
+/// 返回美元单价，由调用方注入，这样这里不必依赖 models.dev。
+pub fn collect_stats(
+    sessions: &[ChatSession],
+    default_model: &str,
+    cost_of: &dyn Fn(&str, usize, usize) -> f64,
+    range: TimeRange,
+) -> AnalyticsSummary {
     let now = Local::now().date_naive();
     let min_date = match range {
         TimeRange::Days7 => Some(now - Duration::days(6)),
@@ -71,7 +82,7 @@ pub fn collect_stats(state: &AppState, range: TimeRange) -> AnalyticsSummary {
     let mut daily_map: HashMap<String, (usize, usize, f64)> = HashMap::new();
     let mut model_map: HashMap<String, (usize, usize, f64)> = HashMap::new();
 
-    for session in &state.storage.sessions {
+    for session in sessions {
         for msg in &session.messages {
             if msg.role != "assistant" || (msg.prompt_tokens == 0 && msg.completion_tokens == 0) {
                 continue;
@@ -103,10 +114,10 @@ pub fn collect_stats(state: &AppState, range: TimeRange) -> AnalyticsSummary {
             } else if !session.model.is_empty() && session.model != "default" {
                 session.model.clone()
             } else {
-                state.config.default_model_selection().1
+                default_model.to_string()
             };
 
-            let (cost_usd, _) = calculate_cost(&model, in_tok, out_tok, 0);
+            let cost_usd = cost_of(&model, in_tok, out_tok);
 
             total_input += in_tok;
             total_output += out_tok;
