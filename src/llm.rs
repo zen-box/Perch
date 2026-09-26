@@ -1,4 +1,5 @@
 use crate::config::ChannelType;
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 use crate::model::{Attachment, AttachmentKind, ReasoningLevel};
 use futures::StreamExt;
 use reqwest::header::{HeaderName, HeaderValue};
@@ -97,6 +98,9 @@ pub struct ChatRequest {
     pub proxy: String,
     pub timeout_secs: u64,
     pub retries: u8,
+    /// 界面语言。错误信息会写进消息的 error 字段给用户看，所以要跟着界面走；
+    /// 请求体本身（含 `effective_message_text` 那段附件文本）不受它影响。
+    pub lang: AppLanguage,
 }
 
 pub(crate) struct BuiltRequest {
@@ -107,9 +111,7 @@ pub(crate) struct BuiltRequest {
 
 pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>, mut cancel_rx: Option<Receiver<()>>) {
     if request.base_url.trim().is_empty() {
-        let _ = tx.send(StreamEvent::Error(
-            "未配置接口基础地址 (Base URL)，请在设置中配置渠道。".into(),
-        ));
+        let _ = tx.send(StreamEvent::Error(tr(request.lang, Key::ErrNoBaseUrl).into()));
         let _ = tx.send(StreamEvent::Done);
         return;
     }
@@ -117,9 +119,7 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
         || request.base_url.contains("127.0.0.1")
         || request.base_url.contains("11434");
     if request.api_key.trim().is_empty() && !is_local {
-        let _ = tx.send(StreamEvent::Error(
-            "未配置 API 密钥 (API Key)。\n请进入设置 -> 渠道与服务商 填入该渠道的有效 API Key。".into(),
-        ));
+        let _ = tx.send(StreamEvent::Error(tr(request.lang, Key::ErrNoApiKey).into()));
         let _ = tx.send(StreamEvent::Done);
         return;
     }
@@ -147,7 +147,11 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
         match Proxy::all(request.proxy.trim()) {
             Ok(proxy) => client_builder = client_builder.proxy(proxy),
             Err(error) => {
-                let _ = tx.send(StreamEvent::Error(format!("代理地址无效: {error}")));
+                let _ = tx.send(StreamEvent::Error(tr_args(
+                    request.lang,
+                    Key::ErrBadProxy,
+                    &[&error.to_string()],
+                )));
                 let _ = tx.send(StreamEvent::Done);
                 return;
             }
@@ -183,7 +187,10 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
                 let status = response.status();
                 let body = response.text().await.unwrap_or_default();
                 let label = built_label(&request);
-                let message = redact(&format!("{label}返回 HTTP {status}\n响应: {body}"), &request.api_key);
+                let message = redact(
+                    &tr_args(request.lang, Key::ErrHttpStatus, &[label, &status.to_string(), &body]),
+                    &request.api_key,
+                );
                 let retryable = status.is_server_error() || status.as_u16() == 408 || status.as_u16() == 429;
                 if attempt < attempts && retryable {
                     if !sleep_or_cancel(&mut cancel_rx, attempt).await {
@@ -207,10 +214,14 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
                 let reason = if error.is_timeout() {
                     timeout_message(&request)
                 } else {
-                    format!("连接{}失败: {error}", built_label(&request))
+                    tr_args(
+                        request.lang,
+                        Key::ErrConnectFailed,
+                        &[built_label(&request), &error.to_string()],
+                    )
                 };
                 let _ = tx.send(StreamEvent::Error(redact(
-                    &format!("{reason}\n请求地址: {}", built.url),
+                    &tr_args(request.lang, Key::ErrRequestUrl, &[&reason, &built.url]),
                     &request.api_key,
                 )));
                 let _ = tx.send(StreamEvent::Done);
@@ -267,7 +278,7 @@ async fn read_json(
     let value: Value = response
         .json()
         .await
-        .map_err(|error| format!("响应不是有效 JSON: {error}"))?;
+        .map_err(|error| tr_args(request.lang, Key::ErrBadJson, &[&error.to_string()]))?;
     emit_complete(request.channel_type, &value, tx, completion_chars);
     Ok(())
 }
@@ -294,7 +305,13 @@ async fn read_sse(
         let bytes = match chunk {
             Some(Ok(bytes)) => bytes,
             Some(Err(error)) if error.is_timeout() => return Err(timeout_message(request)),
-            Some(Err(error)) => return Err(format!("传输中断: {error}")),
+            Some(Err(error)) => {
+                return Err(tr_args(
+                    request.lang,
+                    Key::ErrTransferInterrupted,
+                    &[&error.to_string()],
+                ));
+            }
             None => break,
         };
         buffer.extend_from_slice(&bytes);
@@ -339,9 +356,10 @@ fn timeout_message(request: &ChatRequest) -> String {
     } else {
         request.timeout_secs
     };
-    format!(
-        "{}超过 {secs} 秒没有返回数据，连接已超时。可以在渠道设置里调大「超时」。",
-        built_label(request)
+    tr_args(
+        request.lang,
+        Key::ErrTimeout,
+        &[built_label(request), &secs.to_string()],
     )
 }
 
@@ -486,8 +504,8 @@ pub(crate) fn build_request(request: &ChatRequest) -> Result<BuiltRequest, Strin
         if name.is_empty() {
             continue;
         }
-        HeaderName::from_bytes(name.as_bytes()).map_err(|_| format!("自定义请求头名称无效: {name}"))?;
-        HeaderValue::from_str(value).map_err(|_| format!("自定义请求头的值包含非法字符: {name}"))?;
+        HeaderName::from_bytes(name.as_bytes()).map_err(|_| tr_args(request.lang, Key::ErrBadHeaderName, &[name]))?;
+        HeaderValue::from_str(value).map_err(|_| tr_args(request.lang, Key::ErrBadHeaderValue, &[name]))?;
         headers.push((name.to_string(), value.clone()));
     }
     Ok(BuiltRequest { url, body, headers })
@@ -779,11 +797,12 @@ fn sampling_value(value: f32) -> f64 {
     (value as f64 * 1000.0).round() / 1000.0
 }
 
+/// 出错信息里用来指代渠道的短名（「Claude 渠道返回 HTTP 500」）。
 fn built_label(request: &ChatRequest) -> &'static str {
     match request.channel_type {
-        ChannelType::Claude => "Claude 渠道",
-        ChannelType::Gemini => "Gemini 渠道",
-        ChannelType::OpenAiChat | ChannelType::OpenAiResponses => "OpenAI 渠道",
+        ChannelType::Claude => tr(request.lang, Key::LabelClaudeChannel),
+        ChannelType::Gemini => tr(request.lang, Key::LabelGeminiChannel),
+        ChannelType::OpenAiChat | ChannelType::OpenAiResponses => tr(request.lang, Key::LabelOpenAiChannel),
     }
 }
 
@@ -824,6 +843,7 @@ mod tests {
             proxy: String::new(),
             timeout_secs: 90,
             retries: 1,
+            lang: AppLanguage::ZhCn,
         }
     }
 

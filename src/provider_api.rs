@@ -4,13 +4,15 @@ use reqwest::{Client, Url};
 use serde_json::Value;
 
 use crate::config::{ChannelType, ProviderConfig};
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 
-pub async fn fetch_models(provider: &ProviderConfig) -> Result<Vec<(String, String)>, String> {
-    let url = models_url(provider)?;
+/// 拉取渠道的模型列表。`lang` 只影响失败时返回的提示文案，不影响请求本身。
+pub async fn fetch_models(provider: &ProviderConfig, lang: AppLanguage) -> Result<Vec<(String, String)>, String> {
+    let url = models_url(provider, lang)?;
     let client = Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
-        .map_err(|error| format!("无法创建 HTTP 客户端: {error}"))?;
+        .map_err(|error| tr_args(lang, Key::ErrCreateHttpClient, &[&error.to_string()]))?;
     let mut request = client.get(url);
     match provider.channel_type {
         ChannelType::OpenAiChat | ChannelType::OpenAiResponses => {
@@ -29,7 +31,7 @@ pub async fn fetch_models(provider: &ProviderConfig) -> Result<Vec<(String, Stri
     let response = request
         .send()
         .await
-        .map_err(|error| format!("连接失败: {}", error.without_url()))?;
+        .map_err(|error| tr_args(lang, Key::ErrConnectFailedShort, &[&error.without_url().to_string()]))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -39,17 +41,18 @@ pub async fn fetch_models(provider: &ProviderConfig) -> Result<Vec<(String, Stri
         } else {
             excerpt.replace(&provider.api_key, "[redacted]")
         };
-        return Err(format!("接口返回 HTTP {status}: {excerpt}"));
+        return Err(tr_args(lang, Key::ErrApiHttpStatus, &[&status.to_string(), &excerpt]));
     }
     let body: Value = response
         .json()
         .await
-        .map_err(|error| format!("模型列表不是有效 JSON: {}", error.without_url()))?;
-    parse_models(provider.channel_type, &body)
+        .map_err(|error| tr_args(lang, Key::ErrModelsNotJson, &[&error.without_url().to_string()]))?;
+    parse_models(provider.channel_type, &body, lang)
 }
 
-fn models_url(provider: &ProviderConfig) -> Result<Url, String> {
-    let mut url = Url::parse(provider.base_url.trim()).map_err(|error| format!("接口地址无效: {error}"))?;
+fn models_url(provider: &ProviderConfig, lang: AppLanguage) -> Result<Url, String> {
+    let mut url = Url::parse(provider.base_url.trim())
+        .map_err(|error| tr_args(lang, Key::ErrInvalidBaseUrl, &[&error.to_string()]))?;
     let path = url.path().trim_end_matches('/');
     if !path.ends_with("/models") {
         let suffix = match provider.channel_type {
@@ -64,7 +67,7 @@ fn models_url(provider: &ProviderConfig) -> Result<Url, String> {
     Ok(url)
 }
 
-fn parse_models(channel_type: ChannelType, body: &Value) -> Result<Vec<(String, String)>, String> {
+fn parse_models(channel_type: ChannelType, body: &Value, lang: AppLanguage) -> Result<Vec<(String, String)>, String> {
     let field = if channel_type == ChannelType::Gemini {
         "models"
     } else {
@@ -73,7 +76,7 @@ fn parse_models(channel_type: ChannelType, body: &Value) -> Result<Vec<(String, 
     let items = body
         .get(field)
         .and_then(Value::as_array)
-        .ok_or_else(|| "接口响应缺少模型列表".to_string())?;
+        .ok_or_else(|| tr(lang, Key::ErrNoModelList).to_string())?;
     Ok(items
         .iter()
         .filter_map(|item| {
@@ -116,11 +119,23 @@ mod tests {
 
     #[test]
     fn builds_provider_specific_model_urls() {
-        let openai = models_url(&provider(ChannelType::OpenAiChat, "https://example.com/v1")).unwrap();
+        let openai = models_url(
+            &provider(ChannelType::OpenAiChat, "https://example.com/v1"),
+            AppLanguage::ZhCn,
+        )
+        .unwrap();
         assert_eq!(openai.as_str(), "https://example.com/v1/models");
-        let claude = models_url(&provider(ChannelType::Claude, "https://api.anthropic.com/v1")).unwrap();
+        let claude = models_url(
+            &provider(ChannelType::Claude, "https://api.anthropic.com/v1"),
+            AppLanguage::ZhCn,
+        )
+        .unwrap();
         assert_eq!(claude.as_str(), "https://api.anthropic.com/v1/models");
-        let gemini = models_url(&provider(ChannelType::Gemini, "https://example.com/v1beta")).unwrap();
+        let gemini = models_url(
+            &provider(ChannelType::Gemini, "https://example.com/v1beta"),
+            AppLanguage::ZhCn,
+        )
+        .unwrap();
         assert_eq!(gemini.path(), "/v1beta/models");
         assert_eq!(
             gemini.query_pairs().find(|(name, _)| name == "key").unwrap().1,
@@ -131,13 +146,19 @@ mod tests {
     #[test]
     fn parses_all_provider_response_shapes() {
         assert_eq!(
-            parse_models(ChannelType::OpenAiChat, &json!({"data": [{"id": "gpt-test"}]})).unwrap(),
+            parse_models(
+                ChannelType::OpenAiChat,
+                &json!({"data": [{"id": "gpt-test"}]}),
+                AppLanguage::ZhCn,
+            )
+            .unwrap(),
             vec![("gpt-test".into(), "gpt-test".into())]
         );
         assert_eq!(
             parse_models(
                 ChannelType::Claude,
-                &json!({"data": [{"id": "claude-test", "display_name": "Claude Test"}]})
+                &json!({"data": [{"id": "claude-test", "display_name": "Claude Test"}]}),
+                AppLanguage::ZhCn,
             )
             .unwrap(),
             vec![("claude-test".into(), "Claude Test".into())]
@@ -145,7 +166,8 @@ mod tests {
         assert_eq!(
             parse_models(
                 ChannelType::Gemini,
-                &json!({"models": [{"name": "models/gemini-test", "displayName": "Gemini Test"}]})
+                &json!({"models": [{"name": "models/gemini-test", "displayName": "Gemini Test"}]}),
+                AppLanguage::ZhCn,
             )
             .unwrap(),
             vec![("gemini-test".into(), "Gemini Test".into())]

@@ -5,6 +5,7 @@ use tokio::sync::oneshot;
 
 use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::config::{ChannelType, ModelConfig, ProviderConfig};
+use crate::i18n::{AppLanguage, Key, tr};
 use crate::llm::{ChatMessageReq, ChatRequest, StreamEvent, stream_chat};
 use crate::model::{ChatMessage, MessageVariant, ReasoningLevel, ResolvedParams};
 
@@ -40,9 +41,7 @@ impl AppState {
                 .unwrap_or((default_provider, default_model))
         });
         if self.config.providers.is_empty() {
-            self.push_local_assistant(
-                "尚未创建任何 AI 渠道。\n\n点击右上角的设置图标，进入「模型渠道」添加你的第一个渠道。",
-            );
+            self.push_local_assistant(tr(self.language(), Key::ErrNoChannelCreated));
             self.persist_storage(cx);
             cx.notify();
             return;
@@ -57,9 +56,11 @@ impl AppState {
         }
         let history = self.history_messages();
         let Some(job) = self.make_job(&message_id, None, &provider_id, &model, history) else {
+            // 先把文案取出来：下面要可变借用 self 去改消息，不能同时再读 self
+            let error = tr(self.language(), Key::ErrNoModelInChannel).to_string();
             if let Some(message) = self.find_message_mut(&message_id) {
                 message.is_streaming = false;
-                message.error = Some("当前渠道没有可用模型，请先添加或启用模型。".into());
+                message.error = Some(error);
             }
             self.persist_storage(cx);
             cx.notify();
@@ -94,7 +95,7 @@ impl AppState {
             }
         }
         if jobs.len() < 2 {
-            self.toast(ToastLevel::Error, "选中的模型里没有足够的可用模型");
+            self.toast(ToastLevel::Error, tr(self.language(), Key::ErrNotEnoughModels));
             cx.notify();
             return;
         }
@@ -163,7 +164,14 @@ impl AppState {
             key: stream_key(message_id, variant_id),
             message_id: message_id.to_string(),
             variant_id: variant_id.map(str::to_string),
-            request: chat_request(provider, model, messages, &resolved, explicit_temperature),
+            request: chat_request(
+                provider,
+                model,
+                messages,
+                &resolved,
+                explicit_temperature,
+                self.language(),
+            ),
         })
     }
 
@@ -354,6 +362,7 @@ fn chat_request(
     messages: Vec<ChatMessageReq>,
     params: &ResolvedParams,
     explicit_temperature: bool,
+    lang: AppLanguage,
 ) -> ChatRequest {
     let levels = model.effective_reasoning_levels();
     // 对话没指定时用模型的默认强度；模型不支持的档位不发送
@@ -395,6 +404,7 @@ fn chat_request(
             provider.timeout_secs
         },
         retries: provider.retries,
+        lang,
     }
 }
 
@@ -491,6 +501,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             false,
+            AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, None);
         assert_eq!(request.top_p, None);
@@ -500,6 +511,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             true,
+            AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, Some(0.7), "explicit temperature is kept");
 
@@ -510,6 +522,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             false,
+            AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, Some(0.7));
 
@@ -520,6 +533,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             false,
+            AppLanguage::ZhCn,
         );
         assert_eq!(
             request.temperature,
@@ -539,6 +553,7 @@ mod tests {
             Vec::new(),
             &params(None, Some(100_000)),
             false,
+            AppLanguage::ZhCn,
         );
         assert_eq!(request.reasoning, Some(ReasoningLevel::High));
         assert_eq!(request.max_tokens, Some(32_000), "clamped to the model's output limit");
@@ -549,6 +564,7 @@ mod tests {
             Vec::new(),
             &params(Some(ReasoningLevel::Off), None),
             false,
+            AppLanguage::ZhCn,
         );
         assert_eq!(
             request.reasoning,
@@ -564,6 +580,7 @@ mod tests {
             Vec::new(),
             &params(Some(ReasoningLevel::High), None),
             false,
+            AppLanguage::ZhCn,
         );
         assert_eq!(request.reasoning, None);
     }

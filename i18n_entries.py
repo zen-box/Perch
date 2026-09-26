@@ -386,6 +386,31 @@ ENTRIES = [
     ("BackupLoaded", "已读取备份，请确认是否恢复", "Backup loaded; confirm whether to restore", "バックアップを読み込みました。復元するか確認してください", "已讀取備份，請確認是否還原"),
     ("PromptsSaveFailed", "提示词保存失败: {}", "Failed to save prompts: {}", "プロンプトの保存に失敗しました: {}", "提示詞儲存失敗: {}"),
     ("BackupRestored", "备份已恢复。API Key 需在本机凭据中存在，否则请重新填写", "Backup restored. API keys must exist in the local credential store; fill them in again otherwise", "バックアップを復元しました。API キーは本機の資格情報に存在する必要があります。ない場合は再入力してください", "備份已還原。API Key 需在本機憑證中存在，否則請重新填寫"),
+    # ---- 4.4-b 请求链路 ----
+    # 这些串最终会进 `StreamEvent::Error` -> 消息的 error 字段，用户能看见，所以要翻。
+    ("ErrNoBaseUrl", "未配置接口基础地址 (Base URL)，请在设置中配置渠道。", "No API base URL configured. Set one up under Settings → Providers.", "API のベース URL が未設定です。設定 → プロバイダーで設定してください。", "未設定介面基礎位址 (Base URL)，請在設定中設定管道。"),
+    ("ErrNoApiKey", "未配置 API 密钥 (API Key)。\n请进入设置 -> 渠道与服务商 填入该渠道的有效 API Key。", "No API key configured.\nOpen Settings → Providers and fill in a valid key for this provider.", "API キーが未設定です。\n設定 → プロバイダーで、このプロバイダーの有効な API キーを入力してください。", "未設定 API 金鑰 (API Key)。\n請進入設定 -> 管道與服務商 填入該管道的有效 API Key。"),
+    ("ErrBadProxy", "代理地址无效: {}", "Invalid proxy address: {}", "プロキシアドレスが無効です: {}", "代理位址無效: {}"),
+    ("ErrHttpStatus", "{}返回 HTTP {}\n响应: {}", "{} returned HTTP {}\nResponse: {}", "{} が HTTP {} を返しました\nレスポンス: {}", "{}回傳 HTTP {}\n回應: {}"),
+    ("ErrConnectFailed", "连接{}失败: {}", "Failed to connect to {}: {}", "{} への接続に失敗しました: {}", "連線{}失敗: {}"),
+    ("ErrRequestUrl", "{}\n请求地址: {}", "{}\nRequest URL: {}", "{}\nリクエスト URL: {}", "{}\n請求位址: {}"),
+    ("ErrBadJson", "响应不是有效 JSON: {}", "The response is not valid JSON: {}", "レスポンスが有効な JSON ではありません: {}", "回應不是有效 JSON: {}"),
+    ("ErrTransferInterrupted", "传输中断: {}", "The transfer was interrupted: {}", "転送が中断されました: {}", "傳輸中斷: {}"),
+    ("ErrTimeout", "{}超过 {} 秒没有返回数据，连接已超时。可以在渠道设置里调大「超时」。", "{} returned no data for over {} seconds and the connection timed out. You can raise “Timeout” in the provider settings.", "{} が {} 秒以上データを返さなかったため、接続がタイムアウトしました。プロバイダー設定で「タイムアウト」を大きくできます。", "{}超過 {} 秒沒有回傳資料，連線已逾時。可以在管道設定裡調大「逾時」。"),
+    ("ErrBadHeaderName", "自定义请求头名称无效: {}", "Invalid custom header name: {}", "カスタムヘッダー名が無効です: {}", "自訂請求標頭名稱無效: {}"),
+    ("ErrBadHeaderValue", "自定义请求头的值包含非法字符: {}", "A custom header value contains illegal characters: {}", "カスタムヘッダーの値に不正な文字が含まれています: {}", "自訂請求標頭的值包含非法字元: {}"),
+    ("LabelClaudeChannel", "Claude 渠道", "Claude provider", "Claude プロバイダー", "Claude 管道"),
+    ("LabelGeminiChannel", "Gemini 渠道", "Gemini provider", "Gemini プロバイダー", "Gemini 管道"),
+    ("LabelOpenAiChannel", "OpenAI 渠道", "OpenAI provider", "OpenAI プロバイダー", "OpenAI 管道"),
+    ("ErrNoChannelCreated", "尚未创建任何 AI 渠道。\n\n点击右上角的设置图标，进入「模型渠道」添加你的第一个渠道。", "No AI provider yet.\n\nClick the settings icon in the top right and open “Providers” to add your first one.", "AI プロバイダーがまだありません。\n\n右上の設定アイコンから「プロバイダー」を開き、最初のプロバイダーを追加してください。", "尚未建立任何 AI 管道。\n\n點擊右上角的設定圖示，進入「模型管道」新增你的第一個管道。"),
+    ("ErrNoModelInChannel", "当前渠道没有可用模型，请先添加或启用模型。", "This provider has no usable model. Add or enable one first.", "このプロバイダーには使えるモデルがありません。先にモデルを追加するか有効にしてください。", "目前管道沒有可用模型，請先新增或啟用模型。"),
+    ("ErrNotEnoughModels", "选中的模型里没有足够的可用模型", "Not enough usable models among the selected ones", "選択したモデルの中に、使えるモデルが足りません", "選中的模型裡沒有足夠的可用模型"),
+    ("ErrCreateHttpClient", "无法创建 HTTP 客户端: {}", "Could not create the HTTP client: {}", "HTTP クライアントを作成できません: {}", "無法建立 HTTP 客戶端: {}"),
+    ("ErrConnectFailedShort", "连接失败: {}", "Connection failed: {}", "接続に失敗しました: {}", "連線失敗: {}"),
+    ("ErrApiHttpStatus", "接口返回 HTTP {}: {}", "The API returned HTTP {}: {}", "API が HTTP {} を返しました: {}", "介面回傳 HTTP {}: {}"),
+    ("ErrModelsNotJson", "模型列表不是有效 JSON: {}", "The model list is not valid JSON: {}", "モデル一覧が有効な JSON ではありません: {}", "模型清單不是有效 JSON: {}"),
+    ("ErrInvalidBaseUrl", "接口地址无效: {}", "Invalid API address: {}", "API アドレスが無効です: {}", "介面位址無效: {}"),
+    ("ErrNoModelList", "接口响应缺少模型列表", "The API response has no model list", "API レスポンスにモデル一覧がありません", "介面回應缺少模型清單"),
 ]
 
 # 存进数据的值（新建会话的默认标题、默认文件夹名）不是界面文案：
@@ -433,15 +458,28 @@ FILE_KEY_OVERRIDE = {
     ("src/ui/message_assistant.rs", "• 速率与耗时:       {:.1} tok/s · {:.1}s"): "TokenSpeed",
 }
 
-# 品牌名与语言名。品牌名是专有名词，不走 tr：见 `brand::Brand::display_name`，
-# 它只在中式写法与
-# 拉丁写法（Qwen / Zhipu / Moonshot）之间切换，所以 `brands!` 表里的中文标题
-# 不该被替换成 `tr(...)`（那是静态表，塞不进 Key）。
-# 语言名在语言选择器里永远写自己的文字。
+# 白名单：明确**不该**翻译的中文字面量。三类，理由各不相同。
+#
+# 1) 品牌名与语言名。品牌名是专有名词，不走 tr：见 `brand::Brand::display_name`，
+#    它只在中式写法与拉丁写法（Qwen / Zhipu / Moonshot）之间切换，所以 `brands!`
+#    表里的中文标题不该被替换成 `tr(...)`（那是静态表，塞不进 Key）。
+#    语言名在语言选择器里永远写自己的文字。
+# 2) 写进持久化数据、或要跟已有数据比对的值（见 CONST_MAP 与 model_info 的「推理」）。
+# 3) 写给模型看的提示词。它们是**请求体**的一部分，跟着界面语言变会让同一个会话在
+#    不同语言下产生不同的请求体（prompt 缓存失效），而且里面的限制本身就是中文语境的
+#    （「不超过16个字」翻成 "no more than 16 characters" 就不对了）。
+#    涉及：llm.rs 的附件文本块、reply_ops.rs 的起标题提示词、config.rs 的默认系统提示词、
+#    prompts.rs 的内置预设（后者按首次运行时的语言生成，见 lib 说明）。
 SKIP = {
     "简体中文",
     "繁體中文",
     "日本語",
+    # ---- 3) 写给模型看的提示词 ----
+    "\n\n---\n**附件文件: {}**\n{fence}{ext}\n{text}\n{fence}",
+    "用不超过16个字给对话起标题，只输出标题本身，不要标点包裹。",
+    "你是强大的个人 AI 工作台 Perch，专精代码开发、架构设计与智能问答。请使用 Markdown 规范输出。",
+    # ---- 2) 数据层：认旧标签用的关键词 ----
+    "推理",
     # brand.rs 的厂商中文名（display_name 里有对应的繁体 / 拉丁写法）
     "OpenAI o 系列",
     "OpenAI 平台",
@@ -498,4 +536,4 @@ SKIP = {
 }
 
 # 写进 src/i18n.rs 的分节注释，一眼看出这批 key 覆盖了哪些界面
-BATCH_TITLE = "4.4-a：渠道操作 / 应用层提示 / 附件 / 备份"
+BATCH_TITLE = "4.4-b：请求链路的错误信息"

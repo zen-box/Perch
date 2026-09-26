@@ -261,7 +261,7 @@ impl AppState {
 
         cx.spawn(async move |this, cx| {
             let result = runtime()
-                .spawn(async move { provider_api::fetch_models(&provider).await })
+                .spawn(async move { provider_api::fetch_models(&provider, lang).await })
                 .await
                 .unwrap_or_else(|e| Err(tr_args(lang, Key::FetchModelsFailed, &[&e.to_string()])));
 
@@ -376,7 +376,7 @@ impl AppState {
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = runtime()
-                .spawn(async move { provider_api::fetch_models(&provider).await })
+                .spawn(async move { provider_api::fetch_models(&provider, lang).await })
                 .await
                 .unwrap_or_else(|error| Err(tr_args(lang, Key::ConnectionTestFailed, &[&error.to_string()])));
             update_state(&this, cx, |state, cx| {
