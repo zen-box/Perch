@@ -154,6 +154,7 @@ fn save_bytes_in(base_dir: &Path, data: &[u8], original_name: &str, mime_type: &
         drop(file);
 
         if let Err(e) = fs::rename(&staging_path, &abs_path) {
+            // 清理失败也无所谓：staging 文件名带随机 UUID，不会被当成正常附件读出来
             let _ = fs::remove_file(&staging_path);
             return Err(e);
         }

@@ -231,6 +231,7 @@ fn image_cache_path(uri: &str) -> std::path::PathBuf {
     uri.hash(&mut hasher);
     let hash = hasher.finish();
     let cache_dir = crate::paths::data_dir().join("cache").join("images");
+    // 建不出来也无所谓：下面写缓存会失败并被忽略，图片本身照样能显示
     let _ = std::fs::create_dir_all(&cache_dir);
     cache_dir.join(format!("{hash:016x}"))
 }

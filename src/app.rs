@@ -51,6 +51,21 @@ pub fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
+/// 后台任务里更新 `AppState`，实体已经不在了就静默跳过。
+///
+/// `WeakEntity::update` 的 `Err` 只有"实体已释放"一个含义（窗口关了、程序正在退出），
+/// 这时候更新状态没有任何意义，也没有补救动作可做——正是 §6 说的"失败了也无所谓"。
+/// 把这条 `let _ =` 收在这里解释一次，省得十来个后台任务各写一遍。
+pub(crate) fn update_state<C, R>(
+    this: &WeakEntity<AppState>,
+    cx: &mut C,
+    update: impl FnOnce(&mut AppState, &mut Context<AppState>) -> R,
+) where
+    C: AppContext,
+{
+    let _ = this.update(cx, update);
+}
+
 pub struct AppState {
     pub storage: StorageData,
     pub config: AppConfig,
@@ -322,7 +337,7 @@ impl AppState {
 
         chat_input.update(cx, |input, cx| input.focus(window, cx));
 
-        Self {
+        let mut state = Self {
             storage,
             config,
             view_mode: ViewMode::Chat,
@@ -389,7 +404,16 @@ impl AppState {
             scroll_to_end_pending: false,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
+        };
+        // 旧数据迁移是在 data_dir() 里做的，那会儿还没有 AppState，失败信息先攒着，
+        // 到这里才弹得出来。迁移失败会让程序当成全新安装，必须让用户看到。
+        for message in crate::paths::take_migration_failures() {
+            state.toast(
+                ToastLevel::Error,
+                format!("旧数据迁移失败，可能读不到历史数据：{message}"),
+            );
         }
+        state
     }
 
     pub fn language(&self) -> AppLanguage {
@@ -406,6 +430,19 @@ impl AppState {
         if let Err(error) = self.storage.save() {
             self.toast(ToastLevel::Error, format!("对话保存失败: {error}"));
             cx.notify();
+        }
+    }
+
+    /// 保存配置。返回是否成功，调用方要弹成功提示时用它决定。
+    /// §6：保存失败必须让用户看到，不能 `let _ = self.config.save()` 一吞了事。
+    pub(crate) fn persist_config(&mut self, cx: &mut Context<Self>) -> bool {
+        match self.config.save() {
+            Ok(()) => true,
+            Err(error) => {
+                self.toast(ToastLevel::Error, format!("配置保存失败: {error}"));
+                cx.notify();
+                false
+            }
         }
     }
 
@@ -492,7 +529,7 @@ impl AppState {
     pub fn set_dark_mode(&mut self, is_dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.is_dark = is_dark;
         self.config.is_dark = is_dark;
-        let _ = self.config.save();
+        self.persist_config(cx);
         apply_theme(is_dark, Some(window), cx);
         cx.notify();
     }
@@ -697,7 +734,7 @@ impl AppState {
     pub fn toggle_provider_enabled(&mut self, provider_id: &str, cx: &mut Context<Self>) {
         if let Some(provider) = self.config.providers.iter_mut().find(|p| p.id == provider_id) {
             provider.enabled = !provider.enabled;
-            let _ = self.config.save();
+            self.persist_config(cx);
             cx.notify();
         }
     }
@@ -707,7 +744,7 @@ impl AppState {
             && let Some(model) = provider.models.iter_mut().find(|m| m.id == model_id)
         {
             model.enabled = !model.enabled;
-            let _ = self.config.save();
+            self.persist_config(cx);
             cx.notify();
         }
     }
@@ -792,6 +829,8 @@ impl AppState {
             return false;
         }
         if let Err(error) = self.config.add_provider(new_provider) {
+            // 渠道没加上，把刚存进去的 Key 一起删掉。删不掉也无所谓：
+            // 渠道没建起来，这个引用不会再被谁读到。
             let _ = AppConfig::store_provider_key(&format!("provider/{provider_id}"), "");
             self.toast(ToastLevel::Error, format!("渠道添加失败: {error}"));
             cx.notify();
@@ -808,27 +847,31 @@ impl AppState {
 
     pub fn switch_language(&mut self, lang: AppLanguage, window: &mut Window, cx: &mut Context<Self>) {
         self.config.language = lang.as_str().to_string();
-        let _ = self.config.save();
+        let saved = self.persist_config(cx);
         apply_locale(lang);
         self.chat_input
             .update(cx, |i, cx| i.set_placeholder(tr(lang, "input_placeholder"), window, cx));
         self.search_session_input
             .update(cx, |i, cx| i.set_placeholder(tr(lang, "search_chat"), window, cx));
-        self.toast(ToastLevel::Success, tr(lang, "lang_switched"));
+        // 存不下来就别报"已切换"，免得用户以为下次启动还是这个语言
+        if saved {
+            self.toast(ToastLevel::Success, tr(lang, "lang_switched"));
+        }
         cx.notify();
     }
 
     pub fn set_temperature(&mut self, temp: f32, cx: &mut Context<Self>) {
         self.config.temperature = temp;
-        let _ = self.config.save();
+        self.persist_config(cx);
         cx.notify();
     }
 
     pub fn save_system_prompt(&mut self, cx: &mut Context<Self>) {
         let prompt = self.cfg_system_prompt_input.read(cx).value().trim().to_string();
         self.config.system_prompt = prompt;
-        let _ = self.config.save();
-        self.toast(ToastLevel::Success, "系统提示词已保存");
+        if self.persist_config(cx) {
+            self.toast(ToastLevel::Success, "系统提示词已保存");
+        }
         cx.notify();
     }
 
@@ -864,13 +907,26 @@ impl AppState {
     }
 
     pub fn delete_model_from_provider(&mut self, provider_id: &str, model_id: &str, cx: &mut Context<Self>) {
-        self.config.delete_model(provider_id, model_id);
-        self.toast(ToastLevel::Info, "模型已删除");
+        match self.config.delete_model(provider_id, model_id) {
+            Ok(()) => self.toast(ToastLevel::Info, "模型已删除"),
+            Err(error) => self.toast(ToastLevel::Error, format!("配置保存失败: {error}")),
+        }
         cx.notify();
     }
 
     pub fn toggle_model_pin(&mut self, provider_id: &str, model_id: &str, cx: &mut Context<Self>) {
-        self.config.toggle_model_pinned(provider_id, model_id);
+        if let Err(error) = self.config.toggle_model_pinned(provider_id, model_id) {
+            self.toast(ToastLevel::Error, format!("配置保存失败: {error}"));
+        }
+        cx.notify();
+    }
+
+    /// 设置默认渠道与模型（设置页那个模型下拉框用的）。
+    /// 界面不直接改 `config`，一律走这里，顺带把保存失败报出来。
+    pub fn set_default_model(&mut self, provider_id: &str, model_id: &str, cx: &mut Context<Self>) {
+        if let Err(error) = self.config.select_model(provider_id, model_id) {
+            self.toast(ToastLevel::Error, format!("配置保存失败: {error}"));
+        }
         cx.notify();
     }
 
@@ -890,7 +946,7 @@ impl AppState {
                 .await
                 .unwrap_or_else(|e| Err(format!("拉取失败: {}", e)));
 
-            let _ = this.update(cx, |state, cx| {
+            update_state(&this, cx, |state, cx| {
                 match result {
                     Ok(models) if models.is_empty() => state.toast(ToastLevel::Error, "接口没有返回模型"),
                     Ok(models) => {
@@ -991,7 +1047,7 @@ impl AppState {
                 .spawn(async move { provider_api::fetch_models(&provider).await })
                 .await
                 .unwrap_or_else(|error| Err(format!("连接测试失败: {error}")));
-            let _ = this.update(cx, |state, cx| {
+            update_state(&this, cx, |state, cx| {
                 match result {
                     Ok(models) => state.toast(ToastLevel::Success, format!("连接成功，发现 {} 个模型", models.len())),
                     Err(error) => state.toast(ToastLevel::Error, error),

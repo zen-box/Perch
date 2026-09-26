@@ -192,7 +192,7 @@ pub fn sync_cache_background(force: bool) {
                 Err(_) => return,
             };
 
-            // 写入本地缓存
+            // 写入本地缓存。写不进去也无所谓：缓存只是省一次网络请求，下次启动会重新拉
             let _ = write_atomic(&path, &text);
 
             // 更新内存

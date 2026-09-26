@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::*;
 use uuid::Uuid;
 
-use crate::app::{AppState, ToastLevel, ViewMode, runtime};
+use crate::app::{AppState, ToastLevel, ViewMode, runtime, update_state};
 use crate::clipboard::{self, PastePayload};
 use crate::file_store;
 use crate::model::{Attachment, AttachmentKind};
@@ -19,7 +19,7 @@ impl AppState {
                 .spawn_blocking(move || paths.iter().map(|path| import_file(path)).collect::<Vec<_>>())
                 .await
                 .unwrap_or_else(|error| vec![Err(format!("添加附件失败：{error}"))]);
-            let _ = this.update(cx, |state, cx| state.finish_attachment_import(results, cx));
+            update_state(&this, cx, |state, cx| state.finish_attachment_import(results, cx));
         })
         .detach();
     }
@@ -76,7 +76,7 @@ impl AppState {
 
         cx.spawn(async move |this, cx| {
             let Ok(Some(paths)) = rx.await else { return };
-            let _ = this.update(cx, |state, cx| state.add_attachment_paths(paths, cx));
+            update_state(&this, cx, |state, cx| state.add_attachment_paths(paths, cx));
         })
         .detach();
     }
@@ -132,7 +132,7 @@ impl AppState {
                 .spawn_blocking(move || import_clipboard_image(&image))
                 .await
                 .unwrap_or_else(|error| Err(format!("粘贴图片失败：{error}")));
-            let _ = this.update(cx, |state, cx| {
+            update_state(&this, cx, |state, cx| {
                 match result {
                     Ok(attachment) => {
                         state.pending_attachments.push(attachment);
@@ -149,6 +149,18 @@ impl AppState {
     pub fn remove_pending_attachment(&mut self, attachment_id: &str, cx: &mut Context<Self>) {
         if let Some(pos) = self.pending_attachments.iter().position(|a| a.id == attachment_id) {
             self.pending_attachments.remove(pos);
+            cx.notify();
+        }
+    }
+
+    /// 在文件管理器里定位附件。
+    ///
+    /// 打不开必须提示：用户点了「打开」却一点反应都没有，只会以为程序卡住了。
+    /// 其它平台暂时没接，界面那边也只在 Windows 下挂这个回调。
+    #[cfg(target_os = "windows")]
+    pub fn reveal_attachment(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if let Err(error) = std::process::Command::new("explorer").arg(path).spawn() {
+            self.toast(ToastLevel::Error, format!("打开文件失败: {error}"));
             cx.notify();
         }
     }

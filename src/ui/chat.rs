@@ -690,7 +690,7 @@ fn attachment_badge(att: &Attachment, p: &Palette) -> (IconName, Hsla, &'static 
     }
 }
 
-fn render_message_attachments(attachments: &[Attachment], p: &Palette) -> impl IntoElement {
+fn render_message_attachments(app: &Entity<AppState>, attachments: &[Attachment], p: &Palette) -> impl IntoElement {
     h_flex()
         .gap_2()
         .flex_wrap()
@@ -701,6 +701,7 @@ fn render_message_attachments(attachments: &[Attachment], p: &Palette) -> impl I
             let name = att.name.clone();
             let view_path = abs_path.clone();
             let view_title = name.clone();
+            let open_app = app.clone();
             let (icon, badge_color, type_label) = attachment_badge(att, p);
 
             let size_kb = (att.size as f32 / 1024.0).max(0.1);
@@ -744,10 +745,15 @@ fn render_message_attachments(attachments: &[Attachment], p: &Palette) -> impl I
                     .min_w(px(160.))
                     .max_w(px(240.))
                     .hover(|style| style.border_color(p.primary.opacity(0.8)))
-                    .on_click(move |_, _, _| {
+                    .on_click(move |_, _, cx| {
                         #[cfg(target_os = "windows")]
                         {
-                            let _ = std::process::Command::new("explorer").arg(&view_path).spawn();
+                            open_app.update(cx, |this, cx| this.reveal_attachment(&view_path, cx));
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            // 其它平台还没接文件管理器，先什么也不做
+                            let _ = (cx, &view_path, &open_app);
                         }
                     })
                     .child(
@@ -826,7 +832,7 @@ fn render_user_message(
             )
         })
         .when(has_attachments, |this| {
-            this.child(render_message_attachments(&attachments, p))
+            this.child(render_message_attachments(app, &attachments, p))
         })
         .when(has_content, |this| {
             this.child(

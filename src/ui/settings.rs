@@ -285,8 +285,7 @@ fn render_general(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> 
                                                 .checked(pid == provider_id && mid == model_id)
                                                 .on_click(move |_, _, cx| {
                                                     app.update(cx, |this, cx| {
-                                                        this.config.select_model(&pid, &mid);
-                                                        cx.notify();
+                                                        this.set_default_model(&pid, &mid, cx);
                                                     });
                                                 }),
                                         )

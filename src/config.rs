@@ -271,6 +271,7 @@ fn sanitize_legacy_cwd_config(config: &AppConfig) {
         return;
     }
     if let Ok(json) = serde_json::to_string_pretty(config) {
+        // 清理失败也无所谓：这只是历史遗留文件，清不掉不影响程序运行，下次启动还会再试一遍
         let _ = write_atomic(path, &json);
     }
 }
@@ -422,10 +423,11 @@ impl AppConfig {
         (provider.id.clone(), model)
     }
 
-    pub fn select_model(&mut self, provider_id: &str, model_id: &str) {
+    /// 设置默认渠道与模型。保存失败由调用方（AppState 层）提示用户。
+    pub fn select_model(&mut self, provider_id: &str, model_id: &str) -> std::io::Result<()> {
         self.active_provider_id = provider_id.to_string();
         self.model = model_id.to_string();
-        let _ = self.save();
+        self.save()
     }
 
     pub fn add_provider(&mut self, provider: ProviderConfig) -> Result<(), std::io::Error> {
@@ -471,27 +473,31 @@ impl AppConfig {
         Ok(())
     }
 
-    pub fn delete_model(&mut self, provider_id: &str, model_id: &str) {
-        if let Some(p) = self.providers.iter_mut().find(|p| p.id == provider_id) {
-            p.models.retain(|m| m.id != model_id);
-            if self.active_provider_id == provider_id && self.model == model_id {
-                if let Some(first) = p.models.first() {
-                    self.model = first.id.clone();
-                } else {
-                    self.model = "default".to_string();
-                }
-            }
-            let _ = self.save();
+    /// 删除模型。没找到对应渠道时什么也不做，返回 `Ok`。
+    pub fn delete_model(&mut self, provider_id: &str, model_id: &str) -> std::io::Result<()> {
+        let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) else {
+            return Ok(());
+        };
+        provider.models.retain(|m| m.id != model_id);
+        if self.active_provider_id == provider_id && self.model == model_id {
+            self.model = match provider.models.first() {
+                Some(first) => first.id.clone(),
+                None => "default".to_string(),
+            };
         }
+        self.save()
     }
 
-    pub fn toggle_model_pinned(&mut self, provider_id: &str, model_id: &str) {
-        if let Some(p) = self.providers.iter_mut().find(|p| p.id == provider_id)
-            && let Some(m) = p.models.iter_mut().find(|m| m.id == model_id)
-        {
-            m.is_pinned = !m.is_pinned;
-            let _ = self.save();
-        }
+    /// 置顶/取消置顶模型。没找到对应渠道或模型时什么也不做，返回 `Ok`。
+    pub fn toggle_model_pinned(&mut self, provider_id: &str, model_id: &str) -> std::io::Result<()> {
+        let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) else {
+            return Ok(());
+        };
+        let Some(model) = provider.models.iter_mut().find(|m| m.id == model_id) else {
+            return Ok(());
+        };
+        model.is_pinned = !model.is_pinned;
+        self.save()
     }
 }
 

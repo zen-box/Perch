@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use gpui_kit::*;
 use tokio::sync::oneshot;
 
-use crate::app::{AppState, ToastLevel, runtime};
+use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::backup::{self, BackupFile};
 use crate::config::{ChannelType, ModelConfig, ProviderConfig, format_header_lines, parse_header_lines};
 use crate::llm::{ChatMessageReq, ChatRequest, StreamEvent, stream_chat};
@@ -567,7 +567,7 @@ impl AppState {
         cx.spawn(async move |this, cx| {
             let path = receiver.await.ok().and_then(|result| result.ok()).flatten();
             let Some(path) = path else { return };
-            let _ = this.update(cx, |state, cx| {
+            update_state(&this, cx, |state, cx| {
                 match backup::write_backup(
                     &path,
                     &state.storage.active_session_id,
@@ -597,7 +597,7 @@ impl AppState {
         cx.spawn(async move |this, cx| {
             let Ok(Some(path)) = rx.await else { return };
             let loaded = backup::read_backup(&path);
-            let _ = this.update(cx, |state, cx| {
+            update_state(&this, cx, |state, cx| {
                 match loaded {
                     Ok(file) => {
                         state.pending_import = Some(file);
@@ -987,11 +987,11 @@ impl AppState {
                     stream_chat(request, tx, Some(cancel_rx)).await;
                 });
                 while let Some(event) = rx.recv().await {
-                    let _ = this.update(cx, |state, cx| {
+                    update_state(&this, cx, |state, cx| {
                         state.apply_stream_event(&key, &message_id, variant_id.as_deref(), event, cx)
                     });
                 }
-                let _ = this.update(cx, |state, cx| {
+                update_state(&this, cx, |state, cx| {
                     state.apply_stream_event(&key, &message_id, variant_id.as_deref(), StreamEvent::Done, cx)
                 });
             })
@@ -1115,7 +1115,7 @@ impl AppState {
             if title.is_empty() {
                 return;
             }
-            let _ = this.update(cx, |state, cx| {
+            update_state(&this, cx, |state, cx| {
                 if let Some(session) = state
                     .storage
                     .sessions

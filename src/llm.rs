@@ -1,7 +1,7 @@
 use crate::config::ChannelType;
 use crate::model::{Attachment, AttachmentKind, ReasoningLevel};
 use futures::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::{Client, Proxy};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -490,7 +490,6 @@ pub(crate) fn build_request(request: &ChatRequest) -> Result<BuiltRequest, Strin
         HeaderValue::from_str(value).map_err(|_| format!("自定义请求头的值包含非法字符: {name}"))?;
         headers.push((name.to_string(), value.clone()));
     }
-    let _ = HeaderMap::new();
     Ok(BuiltRequest { url, body, headers })
 }
 

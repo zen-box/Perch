@@ -40,6 +40,7 @@ impl PromptLibrary {
         let path = data_file(PROMPTS_FILE);
         if !path.exists() {
             let library = Self::defaults();
+            // 写不进去也无所谓：默认提示词库是代码里生成的，下次启动会再建一遍
             let _ = library.save();
             return library;
         }
