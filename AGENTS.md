@@ -404,14 +404,13 @@ cx.spawn(async move |this, cx| {
 | 2 | 约 600 处写死中文，只有 24 处 `tr()`；`tr` 遇到未知 key 返回空字符串 | `ui/*`、`i18n.rs` | ⚠ 国际化方案待定 |
 | 3 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
 | 4 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
-| 5 | 保存失败被吞掉，用户看不到（`app.rs` 6 处 `let _ = self.config.save()`、`config.rs` 3 处 `let _ = self.save()`） | `app.rs`、`config.rs` | 按 [§6](#6-错误处理) 改成 `toast` 提示；`config.rs` 那几个 `&mut self` 方法要改成返回 `Result`，由 AppState 层统一提示 |
-| 6 | 启动或初始化失败直接 panic（7 处） | `main.rs`（72）、`app.rs`（50、168）、`config.rs`（323）、`model.rs`（392）、`paths.rs`（117）、`llm.rs`（674） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
-| 7 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
-| 8 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
-| 9 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
-| 10 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
-| 11 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
-| 12 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/chat.rs`（896）、`ui/dialogs.rs`（520） | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
+| 5 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
+| 6 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
+| 7 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
+| 8 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
+| 9 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
+| 10 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
+| 11 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/chat.rs`、`ui/dialogs.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
 
