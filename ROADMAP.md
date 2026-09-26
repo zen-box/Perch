@@ -5,14 +5,33 @@
 > 核心原则：**先把普通对话做扎实，再做多模态（识图、附件），最后做 MCP / Skills / Agent。**
 >
 > ⚠️ **2026-09-26 更新**：程序已从 `personal-control` 改名为 **Perch**（数据目录 `%APPDATA%\Perch`、凭据管理器服务名 `Perch`，旧数据首次启动自动迁移）。
-> 另外，下面"当前进度"已经**落后于代码**：P1 的参数面板、消息操作、多模型对比、提示词库、渠道测试连接其实都已实现，
-> 实际未做的只剩 **MCP** 与**模型自主工具调用**。后续以代码为准，别照抄本文档的待办清单。
+> 界面国际化已全部完成（0 处待迁中文 / 427 个 key，见 `I18N_PLAN.md`）。
 
-## 当前进度（2026-09-25）
+## 进度总览（2026-09-26 实测核对）
 
-- **已完成**：数据目录迁移；标题栏语言入口与组件库语言同步；收起输入框 Agent 开关；本地工具开关默认关闭；流式消息按 ID 更新；SQLite 会话和消息持久化、旧 JSON 导入与保留；API Key 改存系统凭据管理器；按对话记忆模型及新对话默认模型；按标题和消息正文搜索会话；常用语言代码高亮依赖；按渠道类型拉取模型和测试连接。
-- **部分完成**：界面国际化（仍有硬编码中文）；存储改造（SQLite 已接入，界面仍把全部会话消息载入内存，尚未按需加载）。
-- **未完成**：下文 P1 的参数面板、提示词管理、消息操作、多模型对比、对话管理其余功能、渠道网络功能；P2 多模态；P3 工具生态。以下章节仍是待办清单，不代表已交付。
+| 阶段 | 状态 | 说明 |
+| --- | --- | --- |
+| P0 小调整 | ✅ **完成** | 标题栏语言入口、Agent 开关已删、数据目录迁移与 `write_atomic` |
+| P1 普通对话体验 | ✅ **完成** | 对话级参数、提示词库、消息操作、多模型对比、置顶/收藏/文件夹、内容搜索、自动标题、JSON 备份、代码高亮、测试连接、凭据管理器 |
+| P2 多模态 | ✅ **基本完成** | 见下方明细，只差"拖拽文件"与"图片压缩"两项 |
+| P3 工具生态 | ❌ **未开工** | 已核实：`llm.rs` 里 `"tools"` 出现 0 次，工具调用协议完全不存在 |
+| P4 打磨（技术债） | 📋 **已立项** | 9 条，见 `TECH_DEBT.md`（含实测规模与排期建议） |
+
+### P2 明细（2026-09-26 实测）
+
+| 子项 | 状态 |
+| --- | --- |
+| `Attachment` / `AttachmentKind` 数据结构、`ChatMessage.attachments` | ✅ `model.rs` |
+| 四渠道图片与文档格式（`image_url` / `input_image` / `image` / `inline_data`） | ✅ `llm.rs`，含 PDF（Claude `document` 块）的测试 |
+| 模型能力标记 `Capability::{Vision, Files, ...}` | ✅ `model_info.rs`，输入框会拦"当前模型不支持识图" |
+| 粘贴图片（`Textarea::on_paste`）、粘贴复制的文件、文件选择对话框 | ✅ `clipboard.rs` + `attachment_ops.rs` |
+| 输入框上方的附件卡片、可删除、点击定位 | ✅ `ui/composer.rs` + `ui/chat.rs::attachment_badge` |
+| 消息内图片缩略图、点击看大图 | ✅ `ui/markdown_image.rs` |
+| 文本类附件读成"文件名 + 代码块"拼进提示词 | ✅ `llm.rs::effective_message_text` |
+| 单附件大小限制 | ✅ `file_store::MAX_ATTACHMENT_BYTES` |
+| **拖拽文件进窗口** | ❌ 未做（`on_drop::<ExternalPaths>` 全项目搜不到） |
+| **图片压缩** | ❌ 未做（超限直接拒绝，不压缩） |
+| **PDF/Word 文本提取** | ⬜ 计划内就没排前期（PDF 走原生 `document` 块，Word 仅识别不提取） |
 
 ---
 
@@ -32,134 +51,118 @@
 - 设置页：通用、模型渠道（列表加详情）、MCP 占位页、关于
 - 深浅色主题、Dialog / Notification、快捷键（Ctrl+N / Ctrl+B / Ctrl+, / Esc）
 
-**已知问题 / 技术债**（建议在 P0、P1 中顺手解决）
-
-| 问题 | 位置 | 影响 |
-| --- | --- | --- |
-| 会话消息仍全部加载到内存 | `model.rs`、`app.rs`、`ui/chat.rs` | SQLite 已接入，但长历史的启动和内存成本仍随消息量增长 |
-| 本地工具同步执行，会卡住界面 | `app.rs` 中的 `execute_agent_tool` 直接调用 `execute_local_tool` | `/bash` 执行慢命令时界面无响应 |
-| 拉取模型只支持 OpenAI 风格的 `/v1/models` 加 Bearer 鉴权 | `app.rs` 中的 `fetch_models_from_provider` | Claude、Gemini 渠道拉取会失败 |
-| ~~国际化只覆盖约 30 个词条，大部分文案写死为中文~~ | 已完成（2026-09-26）：界面文案全部走 `i18n::tr` / `tr_args`，白名单外的硬编码中文由 `i18n::tests::no_hardcoded_chinese_outside_whitelist` 守住 | 不再有半翻译状态 |
-| `ChatSession.folder` 字段尚未用于管理界面 | `model.rs` | 还不能按文件夹整理对话 |
+**已知问题 / 技术债**：已迁到 **`TECH_DEBT.md`**（含实测规模、改法与排期建议）。
+AGENTS.md §13 仍是权威清单（写给写代码的人），本文只留进度。
 
 ---
 
-## 三、P0：小调整（约半天）
+## 三、P0：小调整 ✅ 完成
 
-### 1. 语言切换移到标题栏
-- 在标题栏右侧（主题按钮旁）加一个语言按钮：`Button` 配合 `dropdown_menu`，菜单项使用 `PopupMenuItem::new(..).checked(..)`。
-- **注意**：标题栏整体是拖拽区，按钮必须加 `.occlude()`，否则在 Windows 上点击会被当成拖动窗口。
-- 切换时同时调用 `gpui_kit::component::set_locale(..)`，让组件库自带的文案（弹窗的确定/取消等）一起切换。
-- **前置条件**：先把 `ui/*.rs` 里写死的中文抽到 `i18n.rs`（或改用组件库已经在用的 `rust-i18n` + `locales/*.yml`），否则切换后会是半翻译状态。
-- 设置页里的语言选项可以保留，也可以删掉，避免同一个功能出现在两处。
+### 1. 语言切换移到标题栏 ✅
+标题栏右侧语言按钮 + `dropdown_menu_with_anchor`，切换时同步 `gpui_kit::component::set_locale`。
+⚠️ 踩过的坑：`.occlude()` 打在按钮自己身上会导致祖先 Popup 的命中框不算 hovered、
+下拉开关监听被跳过——遮挡要放在外层容器上。
 
-### 2. 收起 Agent 相关入口
-- 去掉输入框工具栏上目前没有实际作用的 Agent 开关。
-- `/ls`、`/git` 等快捷按钮和空状态里的工具卡片改为：在输入框里输入 `/` 时弹出命令菜单，或者在设置里提供“启用本地工具”开关，默认关闭。
-- 空状态的建议卡片换成普通对话场景，例如“解释代码”“润色文字”“翻译”“总结长文”。
+### 2. 收起 Agent 相关入口 ✅
+输入框的 Agent 开关已删（`agent_mode_enabled` 字段已从代码中移除）；
+本地工具改为设置里的开关、默认关闭。
 
-### 3. 数据目录迁移
-- 把数据放到用户目录，例如 Windows 上的 `%APPDATA%\Perch\`，可以用 `dirs` 或 `directories` crate 获取路径。
-- 首次启动时，如果当前目录下存在旧的 JSON 文件，就自动迁移过去。
-- 写文件改为先写临时文件再 rename，避免写到一半时崩溃把数据弄坏。
+### 3. 数据目录迁移 ✅
+`%APPDATA%\Perch\`；旧目录 `PersonalControl` 首次启动自动复制（**复制不移动**，旧目录保留作回退）；
+所有写入走 `paths::write_atomic`（先写临时文件再 rename）。
+
 
 ---
 
-## 四、P1：普通对话体验（核心）
+## 四、P1：普通对话体验（核心） ✅ 完成
 
-### 1. 对话级参数
-- **按对话记忆模型**：启用 `ChatSession.model`，在输入框切换模型时只改当前对话；全局设置里的模型作为新对话的默认值。
-- **参数面板**：在对话标题栏或输入框加一个“参数”按钮，打开 Popover 或侧边 Sheet，包含：
-  - 系统提示词（覆盖全局设置）
-  - temperature、top_p、max_tokens
-  - 上下文条数（只发送最近 N 条消息，控制成本）
-  - 推理强度：OpenAI 的 `reasoning_effort`、Claude 的 thinking budget、Gemini 的 `thinkingConfig`，只对支持的模型显示
-  - 流式输出开关
-- **数据结构**：在 `ChatSession` 里加一个 `#[serde(default)] params: Option<ChatParams>`，为空时使用全局默认值。
-- `llm.rs` 的 `stream_chat` 改为接收一个参数结构体，不再逐个传参，由各渠道自己决定哪些参数可用。
+> 2026-09-26 实测：全部子项都已实现，分布在
+> `params_ops.rs` / `prompt_ops.rs` / `reply_ops.rs` / `session_ops.rs` / `session_folder_ops.rs` /
+> `provider_ops.rs` / `ui/params.rs` / `ui/prompt_*.rs` 等模块。下面保留原始设计意图供参考。
 
-### 2. 提示词（Prompt）管理
-- **提示词库 / 助手预设**：每个预设包含名称、图标、系统提示词、默认模型和参数。新建对话时可以选择预设，类似 Cherry Studio 的“助手”或 LobeChat 的 Agent，但不涉及工具调用。
-- **快捷插入**：在输入框输入 `/` 时搜索提示词模板。
-- **模板变量**：支持 `{{date}}`、`{{clipboard}}`、`{{selection}}` 等变量。
-- 数据可以单独存成一个 `prompts.json`。
+### 1. 对话级参数 ✅
+- **按对话记忆模型**：`ChatSession.model`
+- **参数面板**：`ui/params.rs`，含系统提示词覆盖、temperature、top_p、max_tokens、
+  上下文条数、推理强度（OpenAI `reasoning_effort` / Claude thinking budget / Gemini `thinkingConfig`）、流式开关
+- **数据结构**：`ChatSession.params: Option<ChatParams>`，为空时用全局默认值
 
-### 3. 消息操作
-- **重新生成**，并支持“用其他模型重答”。这是聚合类产品很有特色的能力。
-- **编辑用户消息并重新发送**：先做“截断后重发”，分支对话可以后置。
-- 删除单条消息、引用回复、继续生成。
-- 以上操作都放在消息悬停时出现的操作栏里（和现在的复制按钮放在一起）。
+### 2. 提示词（Prompt）管理 ✅
+- **提示词库 / 助手预设**：`prompts.rs` + `ui/prompt_*.rs`，每个预设含名称、图标、正文
+- **快捷插入**：输入框 `{{` 触发模板补全
+- **模板变量**：`{{date}}`、`{{clipboard}}`、`{{selection}}`
+- 存在独立的 `prompts.json`
 
-### 4. 多模型对比（可选，差异化功能）
-- 同一个问题同时发给 2 到 3 个模型，结果并排显示，方便比较后选一个继续对话。
-- 依赖第 3 项“用其他模型重答”的基础设施，可以放在 P1 的最后。
+### 3. 消息操作 ✅
+- **重新生成** + **用其他模型重答**
+- **编辑用户消息并重新发送**
+- 删除单条消息、引用回复
+- 操作栏在消息悬停时出现
 
-### 5. 对话管理
-- 置顶、收藏、文件夹（`ChatSession.folder` 字段已经存在）。
-- 搜索范围从标题扩展到消息内容。
-- 用便宜的模型自动生成标题，目前是截取第一句话。
-- 导入和导出：已有 Markdown 导出，再加 JSON 全量备份和恢复。
+### 4. 多模型对比 ✅
+`send_compare`，最多 2 个模型并排，可选用其中一个的结果继续会话。
 
-### 6. 渲染
-- **代码高亮**：开启 gpui-kit 的 tree-sitter 功能即可，界面代码不用改（首次编译需要下载语法包）：
-  ```toml
-  gpui-kit = { version = "0.6.6", features = ["tree-sitter-rust", "tree-sitter-python", "tree-sitter-javascript", "tree-sitter-typescript", "tree-sitter-bash"] }
-  ```
-- 数学公式（LaTeX）、Mermaid：先确认 `TextView` 的支持情况，不支持的话放到后面。
-- 长对话性能：已经使用虚拟列表，后续需要关注超长单条消息的渲染耗时。
+### 5. 对话管理 ✅
+置顶、收藏、文件夹（`session_folder_ops.rs`）、按标题与消息正文搜索、自动标题（用便宜模型起）、
+Markdown 导出 + JSON 全量备份与恢复（`backup.rs` / `backup_ops.rs`）。
 
-### 7. 渠道与网络
-- **拉取模型按渠道类型区分**：
-  - Claude：`GET /v1/models`，请求头为 `x-api-key` 和 `anthropic-version`
-  - Gemini：`GET /v1beta/models?key=...`
-- 渠道详情页加一个“测试连接”按钮。
-- 支持自定义请求头、代理、超时时间（目前固定为 90 秒）、失败自动重试。
+### 6. 渲染 ✅
+- **代码高亮**：gpui-kit 的 tree-sitter feature 已开（rust / python / javascript / typescript / bash）
+- 数学公式（LaTeX）、Mermaid：未做，属计划外
+- 长对话性能：虚拟列表已用
 
-### 8. 数据与安全
-- API Key 改存到系统凭据管理器（`keyring` crate，Windows 上对应“凭据管理器”），JSON 里只保留引用。
-- 流式写入改为按消息 id 定位，不再使用 `last_mut()`，同时修复“生成中删除对话后 `is_streaming` 无法复位”的问题。
+### 7. 渠道与网络 ✅
+- **拉取模型按渠道类型区分**：`provider_api.rs`，OpenAI `Bearer` / Claude `x-api-key` + `anthropic-version` / Gemini `?key=`
+- 渠道详情页的「测试连接」（`provider_ops.rs::test_provider_connection`）
+- 自定义请求头、代理、超时、失败重试 ✅
+  ⚠️ 例外：**拉取模型与测试连接不走代理**，见 `TECH_DEBT.md` #6
+
+### 8. 数据与安全 ✅
+- API Key 存系统凭据管理器（`keyring`），JSON 里只留 `api_key_ref`
+- 流式写入按消息 id 定位（修复了"生成中删除对话后 `is_streaming` 不复位"）
 
 ---
 
-## 五、P2：多模态（识图、附件）
+## 五、P2：多模态（识图、附件） ✅ 基本完成
 
-### 1. 数据结构（先做）
+> 2026-09-26 实测：除"拖拽文件"与"图片压缩"外均已实现。明细见开头「P2 明细」。
+
+### 1. 数据结构 ✅
 ```rust
-// ChatMessage 新增字段，旧数据默认为空
 #[serde(default)]
 pub attachments: Vec<Attachment>,
 
 pub struct Attachment {
     pub id: String,
-    pub kind: AttachmentKind, // Image / Text / Pdf / Other
+    pub kind: AttachmentKind, // Image / Text / Document / Other
     pub name: String,
     pub mime: String,
-    pub path: String,         // 复制到数据目录下的 attachments/，不直接内嵌 base64，避免 JSON 过大
+    pub path: String,         // 复制到数据目录下的 attachments/
     pub size: u64,
+    pub hash: String,         // 按内容去重
 }
 ```
-`ChatMessageReq.content` 从 `String` 改成“内容分段”（文本、图片、文档），由各渠道分别序列化。
 
-### 2. 各渠道格式
+### 2. 各渠道格式 ✅
 
 | 渠道 | 图片 | 文档 |
 | --- | --- | --- |
-| OpenAI Chat | `{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}` | 文本类附件拼接进文本 |
-| OpenAI Responses | `{"type":"input_image","image_url":"data:..."}` | `input_file` |
-| Claude | `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"..."}}` | `{"type":"document",...}`（PDF） |
-| Gemini | `{"inline_data":{"mime_type":"image/png","data":"..."}}` | 同为 `inline_data` |
+| OpenAI Chat | `{"type":"image_url",...}` | 文本类附件拼接进文本 |
+| OpenAI Responses | `{"type":"input_image",...}` | `input_file` |
+| Claude | `{"type":"image","source":{...}}` | `{"type":"document",...}`（PDF） |
+| Gemini | `{"inline_data":{...}}` | 同为 `inline_data` |
 
-### 3. 模型能力标记
-- `ModelConfig` 增加 `capabilities`（vision、reasoning、tools 等）。目前的 `tags` 是自由文本，不适合用于逻辑判断。
-- 如果当前模型不支持识图，而用户添加了图片，就在输入框上方提示，并提供“切换到支持识图的模型”的入口。
+### 3. 模型能力标记 ✅
+`ModelConfig::capabilities`（Vision / Files / Tools / WebSearch / ImageOutput）。
+当前模型不支持识图而用户加了图片时，输入框上方会提示。
 
-### 4. 界面
-- 支持粘贴图片（`Textarea::on_paste`）和拖拽文件（GPUI 的 `on_drop::<ExternalPaths>`）。
-- 在输入框上方以缩略图或文件卡片的形式展示附件，可以删除。gpui-kit 自带 `attachment` 组件，可以先评估是否能用。
-- 消息中显示图片缩略图（`img()`），点击查看大图。
-- 文本类附件（txt、md、代码文件）读取内容后，以“文件名 + 代码块”的形式拼进提示词。
-- PDF、Word 的文本提取放到后面。
-- 限制单个附件大小；图片过大时先压缩（`image` crate）。
+### 4. 界面 ✅（缺 2 项）
+- 粘贴图片与粘贴复制的文件 ✅；**拖拽文件 ❌ 未做**
+- 输入框上方附件卡片、可删除 ✅
+- 消息中图片缩略图、点击看大图 ✅
+- 文本类附件读成"文件名 + 代码块" ✅
+- 单个附件大小限制 ✅；**图片压缩 ❌ 未做**（超限直接拒绝）
+- PDF 走各渠道原生 `document` / `inline_data` 块；Word 仅识别类型、不提取文本
+
 
 ---
 
@@ -191,18 +194,36 @@ pub struct Attachment {
 
 ---
 
-## 七、建议的迭代顺序
+## 七、建议的迭代顺序（2026-09-26 重排）
 
-| 里程碑 | 内容 | 预计工作量 |
-| --- | --- | --- |
-| v0.2 | P0 全部：标题栏语言切换（含文案抽取）、收起 Agent 入口、数据目录迁移 | 1～2 天 |
-| v0.3 | 对话级参数、按对话记忆模型、消息操作（重新生成、编辑、删除）、代码高亮 | 3～5 天 |
-| v0.4 | 提示词库 / 助手预设、对话管理（置顶、文件夹、内容搜索）、渠道测试连接、API Key 存入系统凭据 | 3～5 天 |
-| v0.5 | 多模态：数据结构、图片粘贴和拖拽、各渠道图片格式、文本类附件 | 4～6 天 |
-| v0.6 | 工具调用协议加 Agent 循环，本地工具迁移过去 | 4～6 天 |
-| v0.7 | MCP 客户端与管理界面、Skills | 5～8 天 |
+原计划把 P3 拆成 v0.6 / v0.7 两个里程碑。因为 P1 / P2 已经做完，这里改成"接下来做什么"。
 
-多模型对比可以根据精力插在 v0.4 之后。
+| 顺序 | 内容 | 状态 | 规模 |
+| --- | --- | --- | --- |
+| ← 已完成 | v0.2 ~ v0.5（P0 / P1 / P2） | ✅ | — |
+| **下一步** | **P3-1 工具调用协议**：四渠道统一 `ToolCall` / `ToolResult`，重写 `handle_sse_line` 认识 event 名 | ❌ 未开工 | 大 |
+| | **P3-2 Agent 循环**：模型请求工具 → 用户授权 → 执行 → 回传 → 继续；本地工具迁过去 | ❌ | 中 |
+| | **P3-3 MCP**：`rmcp` 客户端（stdio + Streamable HTTP）+ 设置页服务器列表 | ❌ | 中 |
+| | **P3-4 Skills**：SKILL.md 文件夹 + 渐进加载 | ❌ | 中 |
+| | **P4 技术债**：9 条，见 `TECH_DEBT.md` | 📋 | 约 425 行（不含 #7/#8） |
+
+### 为什么建议先做 P3/P4 的功能、技术债插空清（2026-09-26 结论）
+
+1. **P3 的地基是零。** 已核实 `llm.rs` 里 `"tools"` 出现 0 次，
+   `tool_calls` / `tool_use` / `functionCall` / `functionDeclarations` / `tool_result` / `functionResponse`
+   一个都没有。这是从零新建的一层，不受现有技术债拖累。
+2. **9 条技术债里只有 3 条会被 P3 碰到，其中 2 条正是 P3 的前置：**
+   - `TECH_DEBT.md` #4（本地工具同步执行）——P3 要把本地工具改写成"模型调用 + 权限分级 + 可中断"，
+     那个函数会整体重写。现在改一遍，P3 再改一遍。
+   - #7（OpenAI Responses 格式）——P3 必须重写 `handle_sse_line` 让它认 SSE event 名，
+     而那正是 #7 的根因所在。**同一段代码不该动两遍。**
+   - #8（消息常驻内存）——P3 会给消息加上 `tool_calls` / `tool_result` 字段、体积变大，
+     但数据结构那时才定型。现在改是在旧结构上改一遍、将来再改一遍。
+3. **另外 6 条与 P3/P4 无关，合计约 425 行**，建议**跟着功能顺手清**
+   （做渠道功能时清 #6、改消息渲染时清 #9、改设置页时清 #5），比专门排一批划算。
+
+**唯一建议现在就做的：#3（启动失败 panic）**——约 120 行，与任何功能都不冲突，
+且它是"配置损坏时程序闪退、不给任何提示"，属用户会真实遇到的问题。
 
 ---
 
@@ -211,18 +232,25 @@ pub struct Attachment {
 | 文件 | 内容 |
 | --- | --- |
 | `src/main.rs` | 入口、快捷键、窗口创建（Root 加 Workspace 两层） |
-| `src/app.rs` | `AppState`：状态与全部业务逻辑、tokio 运行时 |
+| `src/app.rs` | `AppState`：状态、界面偏好、tokio 运行时（`runtime()`） |
 | `src/theme.rs` | 主题色（在 shadcn 默认主题上叠加靛蓝主色） |
+| `src/i18n.rs` | 界面文案表（`i18n!` 宏生成 `Key` 枚举），见 `AGENTS.md` §9.10 |
+| `src/paths.rs` | 数据目录与文件名、原子写、旧数据迁移 |
+| `src/storage.rs` | SQLite 持久化（会话 / 消息 / 元数据） |
 | `src/ui/mod.rs` | `Workspace`（弹窗和通知层）、标题栏、`Palette`、通用小组件 |
-| `src/ui/chat.rs` | 侧边栏、消息列表、空状态、授权卡片、输入框 |
-| `src/ui/model_picker.rs` | 模型选择弹层 |
-| `src/ui/settings.rs` | 设置页（通用、渠道、MCP、关于） |
-| `src/ui/dialogs.rs` | 各类弹窗 |
-| `src/llm.rs` | 各渠道的流式请求 |
-| `src/config.rs`、`src/model.rs` | 配置与对话数据结构、持久化 |
+| `src/ui/chat.rs` | 对话主区域、消息分发；侧边栏在 `ui/sidebar.rs` |
+| `src/ui/composer.rs` | 输入框与附件区 |
+| `src/ui/markdown_image.rs` | Markdown 里的图片渲染（含远程图片与磁盘缓存） |
+| `src/ui/settings*.rs` | 设置页（通用 / 渠道 / 提示词 / 其他） |
+| `src/llm.rs` | 各渠道的请求构造与流式解析 |
+| `src/image_http.rs` | 图片下载客户端（拦截本机与局域网地址） |
+| `TECH_DEBT.md` | 技术债工单（含实测规模与排期建议） |
 
 **开发时的注意事项**
-- 标题栏里的可点击元素都要加 `.occlude()`，否则在 Windows 上点击会被当成拖动窗口。
-- 弹窗内容在 `Workspace` 渲染时构建，可以读取 `AppState`；但不要在 `AppState` 的 `render` 或 `update` 期间再去 `read` 它自己，否则会 panic。
+- 标题栏里的可点击元素都要加 `.occlude()`，**且遮挡要放在外层容器上**——打在按钮自己身上会导致
+  祖先 Popup 的命中框不算 hovered、下拉开关被跳过（踩过一次）。
+- 弹窗内容在 `Workspace` 渲染时构建，可以读取 `AppState`；**但不要在 `AppState` 的 `render` 或
+  `update` 期间再去 `read` 它自己**，否则会 panic。`cx.listener` 回调里同理。
 - 调用 reqwest 或其他依赖 tokio 的代码时，要通过 `app::runtime().spawn(..)`，不能直接用 `tokio::spawn`。
 - 业务方法拿不到 `Window`，要弹提示就调用 `self.toast(..)`，渲染时会统一弹出。
+- 完整的开发规范见 **`AGENTS.md`**（权威文档，动手前必读）。

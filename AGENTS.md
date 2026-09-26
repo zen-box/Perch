@@ -420,13 +420,16 @@ cx.spawn(async move |this, cx| {
 
 下面是现有代码里已知的问题。**不要照着这些写法写新代码。**标"改到时修"的，碰到相关代码时顺手修掉；标 ⚠ 的需要用户先拍板。
 
+> **排期与实测规模见 `TECH_DEBT.md`**（每条的净改动量、改法、是否会阻塞 P3/P4）。
+> 本表是"写给写代码的人的禁令"，那份是"工单"。**删条目时两处一起删。**
+
 | # | 问题 | 位置 | 处理 |
 | --- | --- | --- | --- |
 | 1 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
 | 2 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
 | 3 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
 | 4 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
-| 5 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
+| 5 | 重复的小组件：`section` 和 `form_card`（几乎逐行相同）、`labeled` 和 `row_title`（都是"标题+说明"） | `ui/settings.rs`、`ui/model_editor_dialog.rs`、`ui/params.rs` | 合并到 `ui/widgets.rs`。⚠️ 本条目原先还列了 `filter_chip` 和 `chip`，**2026-09-26 核实为错判**——前者是 `Button`、后者是手绘 `Div`，视觉与交互都不同，不该合并 |
 | 6 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
 | 7 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
 | 8 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
