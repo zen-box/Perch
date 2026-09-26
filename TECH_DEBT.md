@@ -13,7 +13,7 @@
 
 ## 二、总览
 
-代码规模：**51 个 rs 文件 / 17882 行**（非测试 15786 行）。
+代码规模：**54 个 rs 文件 / 19069 行**（P3-1 拆出 `llm_request.rs` / `llm_stream.rs` / `llm_tools.rs` 后）。
 下面"规模"是逐条读过代码后估的**净改动量**（不含格式化噪声）。
 
 | # | 问题 | 性质 | 规模 | 阻塞谁 | 建议 |
@@ -21,12 +21,17 @@
 | 3 | 启动/初始化失败直接 panic（7 处） | 技术债 | ~120 行 | 无 | **随时可做**，唯一两条"用户能感知"的之一 |
 | 4 | 本地工具同步执行，卡住界面 | 技术债 | ~60 行 | **P3 依赖** | 等 P3 |
 | 6 | 拉取模型、测试连接不走渠道代理 | 技术债（已是 bug） | ~25 行 | 无 | **随时可做**，最便宜 |
-| 9 | 2 处 `too_many_arguments` | 技术债 | ~100 行 | 无 | **随时可做**，顺手拆函数 |
+| 8 | 2 处 `too_many_arguments` | 技术债 | ~100 行 | 无 | **随时可做**，顺手拆函数 |
 | 5 | 重复小组件 | 技术债（**表有错判**） | ~100 行 | 无 | 顺手修，见下 |
 | 1 | 远程图片自动落盘、无上限、无清理 | **待拍板** | ~50 行 | 无 | 需你定行为 |
 | 2 | models.dev 自动同步（自建线程 / 不走代理 / 静默） | **待拍板** | ~30 行 | 无 | 需你定是否保留 |
-| 7 | OpenAI Responses 渠道格式不对 | 技术债 | ~150 行 | 无 | 与 P3 同批 |
-| 8 | 全部会话消息常驻内存 | **架构** | 300~700 行 | P3/P4 | 放 v2，见第四节 |
+| 7 | 全部会话消息常驻内存 | **架构** | 300~700 行 | P3/P4 | 放 v2，见第四节 |
+
+> ✅ **2026-09-26 结清：原 #7「OpenAI Responses 渠道格式不对」**（约 150 行）。
+> P3-1 打通工具调用协议时一并修好——`handle_sse_line` 重写后保留 `event:` 行，
+> `OpenAiResponses` 在 `emit_delta` / `emit_complete` 里拆成独立分支。
+> 回归测试 `llm::tests::responses_streaming_uses_event_names`。
+> **原 #8、#9 顺次上移为 #7、#8**，本文档与 `AGENTS.md §13` 已同步。
 
 ## 三、逐条详情
 
@@ -71,7 +76,7 @@
 `provider_api::fetch_models` 需要多接一个 `proxy: &str` 参数——注意它的调用点在
 `provider_ops.rs`，`AppConfig` 里已有代理字段可取。
 
-### #9 `too_many_arguments` ×2 —— 顺带拆函数
+### #8 `too_many_arguments` ×2 —— 顺带拆函数
 
 | 函数 | 参数 | 体量 | 调用点 | 做法 |
 | --- | --- | --- | --- | --- |
@@ -128,21 +133,28 @@
 - 是否保留自动同步？（保留的话改成 `runtime()` + 走代理 + `AppConfig` 加 `models_dev_enabled` 开关
   + 失败弹一次 toast，约 30 行；参考 `ui/settings_general.rs:153` 的 `Switch` 范式）
 
-### #7 OpenAI Responses 渠道格式不对 —— 与 P3 同批
+### ~~#7 OpenAI Responses 渠道格式不对~~ —— ✅ 2026-09-26 已结清
 
-⚠️ 澄清一个容易误判的点：**URL 已经对了**（`llm.rs:518` 会拼 `/responses`），
-错的是**请求体与响应解析**都按 Chat Completions 来：
+**结清时的实际情况**（留作记录，别再按这个改）：
 
-1. `openai_body()` 发的是 `messages` → Responses 规范要 `input`。
-2. `emit_delta` / `emit_complete` 解析 `/choices/0/delta/content` → Responses 是
-   `response.output_text.delta` 这类**带 event 名的 SSE 事件**。
-3. `handle_sse_line`（`llm.rs:352`，21 行）**把 `event:` 行整个丢掉**，只取 `data:` 之后的 JSON。
-   Responses 的流式**必须看 event 名**才能分辨是文本增量还是工具参数增量——这条与 P3 直接相关。
+1. **URL 一直是对的**（`openai_url` 会拼 `/responses`）——当时列这条债时差点误判成 URL 问题。
+2. 错在 `openai_body()` 发的是 `messages`；`emit_delta` / `emit_complete` 解析 `/choices/0/...`。
+3. `handle_sse_line` **把 `event:` 行整个丢掉**，只取 `data:` 之后的 JSON。
 
-所以至少要动 3 处，**且必须先抓一份真实的 Responses SSE 样本**再动手（我不建议凭规范文档盲写）。
-建议和 P3 的协议层一起做：那本来就要重写 `handle_sse_line` 让它认识 event 名。
+**怎么修的（P3-1 顺带做掉）**：
 
-### #8 全部会话消息常驻内存 —— 放 v2
+- `handle_sse_line` 重写：`event:` 行存进跨行变量、空行清空、`data: [DONE]` 触发收尾。
+  顺带修掉一个隐患——旧代码用 `line.trim()`，而 `\r\n` 行尾的 `\r` 会让事件名带上 `\r`。
+- `emit_delta` / `emit_complete` 里 `OpenAiResponses` **拆成独立分支**，按事件名分派
+  （`response.output_text.delta` / `response.reasoning_summary_text.delta` /
+  `response.output_item.added` / `response.function_call_arguments.delta`）。
+  非流式的 `emit_complete` 改读 `output[]` 数组、按 `type` 分派。
+- 回归测试：`llm::tests::responses_streaming_uses_event_names`。
+
+⚠️ **遗留一项，另记**（见文末「新发现」）：`openai_body()` 对 Responses 依旧发 `messages`。
+真的要用 Responses 渠道时得单独拆 body 函数——和"协议层"不是同一个话题。
+
+### #7 全部会话消息常驻内存 —— 放 v2
 
 `storage.rs:79` 加载时把**所有会话的所有消息** `SELECT ... ORDER BY position` 全部读进内存。
 `.messages` 字段散在 **56 处**（`session_ops.rs` 16、`llm.rs` 11、`model.rs` 10、`reply_ops.rs` 5、
@@ -164,17 +176,15 @@
    `"tools"` 出现 **0 次**，`tool_calls` / `tool_use` / `functionCall` / `functionDeclarations`
    / `tool_result` / `functionResponse` **一个都没有**。这是从零开始的一层。
 
-2. **9 条里只有 3 条会被 P3 碰到，其中 2 条正是 P3 的前置。**
+2. **9 条里只有 2 条会被 P3 碰到。**（原 #7「Responses 格式」已在 P3-1 结清，见上）
    - #4（本地工具阻塞）——P3 要把本地工具改写成"模型调用 + 权限分级 + 可中断"，
      这个函数会**整体重写**。现在改成异步，P3 时再改一遍。
-   - #7（Responses 格式）——P3 必须重写 `handle_sse_line` 让它认 event 名，
-     正好是 #7 的根因所在。**同一段代码不该动两遍。**
-   - #8（消息常驻内存）——P3 会让消息多出 `tool_calls` / `tool_result` 字段、体积变大，
+   - #7（消息常驻内存）——P3 会让消息多出工具调用相关字段、体积变大，
      内存压力只会更明显，但那时的数据结构才定型。现在改是在旧结构上改一遍再改一遍。
 
-3. **另外 6 条和 P3/P4 完全无关，随时可做**，而且加起来只要约 **425 行**。
+3. **另外 6 条和 P3/P4 完全无关，随时可做**，加起来约 **425 行**。
    与其现在做，不如等它们**自己浮上来**：做到哪块顺手清哪块（#6 做渠道功能时、
-   #9 改消息渲染时、#5 改设置页时），这比专门排一批划算。
+   #8 改消息渲染时、#5 改设置页时），这比专门排一批划算。
 
 4. **P1/P2 已完成，P3/P4 是最后两个大块。** 做完功能再统一优化，能避免"优化完又被新功能推翻"。
 
@@ -183,7 +193,21 @@
 
 ---
 
-## 五、维护约定
+## 五、新发现（P3-1 期间）
+
+- **`openai_body()` 对 Responses 渠道仍发 `messages`，规范要的是 `input`。**
+  P3-1 把响应侧的解析修对了（按 `event:` 名分派），但**请求侧没动**——因为
+  拆 body 函数不属于"工具调用协议"这件事，混在一起会让这一批改动说不清。
+  真要启用 Responses 渠道时单独做：把 `openai_body` 拆成 `openai_chat_body` /
+  `openai_responses_body`，后者发 `input` 并且消息结构也不同（`input` 是"项"的数组）。
+
+- **`ChatMessageReq` 的字段在长**（`role` / `content` / `attachments` / `tool_calls` /
+  `tool_call_id` / `tool_name`）。P3-2 还要加"权限决定"之类的东西时不建议再往上堆，
+  考虑按角色拆枚举（`user` / `assistant` / `tool`，各带自己的字段）。
+
+---
+
+## 六、维护约定
 
 - 改完一项：**本文与 AGENTS.md §13 两处一起删**。
 - ⚠️ **删条目会让编号顺移，两处的交叉引用必须同步改**（已经踩过三次）。

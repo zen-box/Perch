@@ -14,20 +14,20 @@
 | P0 小调整 | ✅ **完成** | 标题栏语言入口、Agent 开关已删、数据目录迁移与 `write_atomic` |
 | P1 普通对话体验 | ✅ **完成** | 对话级参数、提示词库、消息操作、多模型对比、置顶/收藏/文件夹、内容搜索、自动标题、JSON 备份、代码高亮、测试连接、凭据管理器 |
 | P2 多模态 | ✅ **基本完成** | 见下方明细，只差"拖拽文件"与"图片压缩"两项 |
-| P3 工具生态 | ❌ **未开工** | 已核实：`llm.rs` 里 `"tools"` 出现 0 次，工具调用协议完全不存在 |
-| P4 打磨（技术债） | 📋 **已立项** | 9 条，见 `TECH_DEBT.md`（含实测规模与排期建议） |
+| P3 工具生态 | 🚧 **进行中** | **P3-1 工具调用协议已完成**（2026-09-26）；P3-2~P3-4 未开工 |
+| P4 打磨（技术债） | 📋 **已立项** | 8 条（原 9 条，Responses 那条已在 P3-1 结清），见 `TECH_DEBT.md` |
 
 ### P2 明细（2026-09-26 实测）
 
 | 子项 | 状态 |
 | --- | --- |
 | `Attachment` / `AttachmentKind` 数据结构、`ChatMessage.attachments` | ✅ `model.rs` |
-| 四渠道图片与文档格式（`image_url` / `input_image` / `image` / `inline_data`） | ✅ `llm.rs`，含 PDF（Claude `document` 块）的测试 |
+| 四渠道图片与文档格式（`image_url` / `input_image` / `image` / `inline_data`） | ✅ `llm_request.rs`（早期在 `llm.rs`，P3-1 拆出），含 PDF（Claude `document` 块）的测试 |
 | 模型能力标记 `Capability::{Vision, Files, ...}` | ✅ `model_info.rs`，输入框会拦"当前模型不支持识图" |
 | 粘贴图片（`Textarea::on_paste`）、粘贴复制的文件、文件选择对话框 | ✅ `clipboard.rs` + `attachment_ops.rs` |
 | 输入框上方的附件卡片、可删除、点击定位 | ✅ `ui/composer.rs` + `ui/chat.rs::attachment_badge` |
 | 消息内图片缩略图、点击看大图 | ✅ `ui/markdown_image.rs` |
-| 文本类附件读成"文件名 + 代码块"拼进提示词 | ✅ `llm.rs::effective_message_text` |
+| 文本类附件读成"文件名 + 代码块"拼进提示词 | ✅ `llm_request.rs::effective_message_text` |
 | 单附件大小限制 | ✅ `file_store::MAX_ATTACHMENT_BYTES` |
 | **拖拽文件进窗口** | ❌ 未做（`on_drop::<ExternalPaths>` 全项目搜不到） |
 | **图片压缩** | ❌ 未做（超限直接拒绝，不压缩） |
@@ -168,13 +168,34 @@ pub struct Attachment {
 
 ## 六、P3：工具生态（MCP / Skills / Agent）
 
-### 1. 工具调用协议（地基）
-在 `llm.rs` 里为各渠道实现工具调用，并统一成内部的 `ToolCall` / `ToolResult` 事件：
-- OpenAI：请求带 `tools`，响应里是 `tool_calls`，结果以 `role: "tool"` 回传
-- Claude：请求带 `tools`，响应里是 `tool_use` 块，结果以 `tool_result` 块回传
-- Gemini：请求带 `functionDeclarations`，响应里是 `functionCall`，结果以 `functionResponse` 回传
+### 1. 工具调用协议（地基）—— ✅ 2026-09-26 P3-1 完成
 
-然后实现“模型请求工具 → 用户授权 → 执行 → 回传结果 → 模型继续”的循环。现有的权限卡片可以复用。
+在 `llm_tools.rs` 里为各渠道实现工具调用，并统一成内部的 `ToolCall` / `ToolResult` 事件：
+
+| 渠道 | 工具声明 | 工具调用 | 结果回传 |
+| --- | --- | --- | --- |
+| OpenAI Chat | `tools[].function` | `tool_calls` | `role: "tool"` + `tool_call_id` |
+| OpenAI Responses | 同上（声明） | `output[].type = "function_call"` | 同上 |
+| Claude | `tools[].input_schema` | `tool_use` 内容块 | user 消息里的 `tool_result` 块 |
+| Gemini | `tools[].functionDeclarations` | `parts[].functionCall` | `parts[].functionResponse` |
+
+**已完成的部分（P3-1）**：
+
+- 内部类型 `ToolSpec` / `ToolCall` / `ToolResult`；`ChatRequest.tools`、
+  `ChatMessageReq.tool_calls` / `tool_call_id` / `tool_name`。
+- 四渠道请求体序列化（`openai_tools` / `claude_tools` / `gemini_tools`、
+  `openai_tool_calls`、`claude_message`）。
+- **`handle_sse_line` 重写**：保留 `event:` 行（跨行保存、空行清空），
+  工具参数按渠道分片攒齐再解析（`ToolCallState`）。
+- `StreamEvent::ToolCall` 事件；`emit_delta` / `emit_complete` 逐渠道加工具分支，
+  并把 `OpenAiResponses` 拆成独立分支（**顺带结清技术债原 #7**）。
+- **无 tools 时请求体逐字段不变**（有测试锁住），老会话的 prompt 缓存不受影响。
+
+**还没做的**：`openai_body()` 对 Responses 仍发 `messages`（规范要 `input`）——
+真要用该渠道时单独拆 body 函数，已记进 `TECH_DEBT.md` 第五节。
+
+接下来实现"模型请求工具 → 用户授权 → 执行 → 回传结果 → 模型继续"的循环（P3-2）。
+现有的权限卡片可以复用。
 
 ### 2. MCP
 - 使用官方 Rust SDK `rmcp`，支持 stdio 和 Streamable HTTP 两种传输。
@@ -201,26 +222,25 @@ pub struct Attachment {
 | 顺序 | 内容 | 状态 | 规模 |
 | --- | --- | --- | --- |
 | ← 已完成 | v0.2 ~ v0.5（P0 / P1 / P2） | ✅ | — |
-| **下一步** | **P3-1 工具调用协议**：四渠道统一 `ToolCall` / `ToolResult`，重写 `handle_sse_line` 认识 event 名 | ❌ 未开工 | 大 |
-| | **P3-2 Agent 循环**：模型请求工具 → 用户授权 → 执行 → 回传 → 继续；本地工具迁过去 | ❌ | 中 |
+| ✅ 已完成 | **P3-1 工具调用协议**：四渠道统一 `ToolCall` / `ToolResult`，重写 `handle_sse_line` 认识 event 名 | ✅ 2026-09-26 | 大 |
+| **下一步** | **P3-2 Agent 循环**：模型请求工具 → 用户授权 → 执行 → 回传 → 继续；本地工具迁过去 | ❌ | 中 |
 | | **P3-3 MCP**：`rmcp` 客户端（stdio + Streamable HTTP）+ 设置页服务器列表 | ❌ | 中 |
 | | **P3-4 Skills**：SKILL.md 文件夹 + 渐进加载 | ❌ | 中 |
-| | **P4 技术债**：9 条，见 `TECH_DEBT.md` | 📋 | 约 425 行（不含 #7/#8） |
+| | **P4 技术债**：8 条，见 `TECH_DEBT.md` | 📋 | 约 275 行（不含 #1/#2/#7 需拍板/架构的） |
 
 ### 为什么建议先做 P3/P4 的功能、技术债插空清（2026-09-26 结论）
 
-1. **P3 的地基是零。** 已核实 `llm.rs` 里 `"tools"` 出现 0 次，
+1. **P3 的地基是零。** P3-1 动工前核实过 `llm.rs` 里 `"tools"` 出现 0 次，
    `tool_calls` / `tool_use` / `functionCall` / `functionDeclarations` / `tool_result` / `functionResponse`
    一个都没有。这是从零新建的一层，不受现有技术债拖累。
-2. **9 条技术债里只有 3 条会被 P3 碰到，其中 2 条正是 P3 的前置：**
+2. **技术债里只有少数会被 P3 碰到**（原 #7「Responses 格式」确实是 P3 前置，
+   已在 P3-1 一并结清，印证了这条判断）：
    - `TECH_DEBT.md` #4（本地工具同步执行）——P3 要把本地工具改写成"模型调用 + 权限分级 + 可中断"，
      那个函数会整体重写。现在改一遍，P3 再改一遍。
-   - #7（OpenAI Responses 格式）——P3 必须重写 `handle_sse_line` 让它认 SSE event 名，
-     而那正是 #7 的根因所在。**同一段代码不该动两遍。**
-   - #8（消息常驻内存）——P3 会给消息加上 `tool_calls` / `tool_result` 字段、体积变大，
+   - #7（消息常驻内存）——P3 会给消息加上工具调用相关字段、体积变大，
      但数据结构那时才定型。现在改是在旧结构上改一遍、将来再改一遍。
 3. **另外 6 条与 P3/P4 无关，合计约 425 行**，建议**跟着功能顺手清**
-   （做渠道功能时清 #6、改消息渲染时清 #9、改设置页时清 #5），比专门排一批划算。
+   （做渠道功能时清 #6、改消息渲染时清 #8、改设置页时清 #5），比专门排一批划算。
 
 **唯一建议现在就做的：#3（启动失败 panic）**——约 120 行，与任何功能都不冲突，
 且它是"配置损坏时程序闪退、不给任何提示"，属用户会真实遇到的问题。
@@ -242,7 +262,10 @@ pub struct Attachment {
 | `src/ui/composer.rs` | 输入框与附件区 |
 | `src/ui/markdown_image.rs` | Markdown 里的图片渲染（含远程图片与磁盘缓存） |
 | `src/ui/settings*.rs` | 设置页（通用 / 渠道 / 提示词 / 其他） |
-| `src/llm.rs` | 各渠道的请求构造与流式解析 |
+| `src/llm.rs` | 发送入口：`stream_chat` 重试循环、SSE 读取、`StreamEvent` 定义 |
+| `src/llm_request.rs` | 各渠道的请求体构造（含 tools 序列化） |
+| `src/llm_stream.rs` | 各渠道的流式响应解析 |
+| `src/llm_tools.rs` | 工具调用协议（`ToolSpec` / `ToolCall` / `ToolResult`） |
 | `src/image_http.rs` | 图片下载客户端（拦截本机与局域网地址） |
 | `TECH_DEBT.md` | 技术债工单（含实测规模与排期建议） |
 

@@ -7,6 +7,7 @@ use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::config::{ChannelType, ModelConfig, ProviderConfig};
 use crate::i18n::{AppLanguage, Key, tr};
 use crate::llm::{ChatMessageReq, ChatRequest, StreamEvent, stream_chat};
+use crate::llm_tools::tool_call_label;
 use crate::model::{ChatMessage, MessageVariant, ReasoningLevel, ResolvedParams};
 
 /// 一次流式请求：会话里对应哪条消息、哪个版本，以及组装好的请求体。
@@ -392,6 +393,9 @@ fn chat_request(
         reasoning,
         max_output,
         model_thinks: model.thinks(),
+        // P3-1 只打通协议层：界面还没地方让用户挂工具，所以这里先固定为空。
+        // 请求体里因此不会出现 tools 字段，线上行为与改动前一致。
+        tools: Vec::new(),
         extra_headers: provider
             .extra_headers
             .iter()
@@ -412,6 +416,9 @@ fn apply_to_message(message: &mut ChatMessage, event: &StreamEvent) {
     match event {
         StreamEvent::Thinking(text) => message.reasoning_content.get_or_insert_with(String::new).push_str(text),
         StreamEvent::Content(text) => message.content.push_str(text),
+        // 消息上存的是给人看的短标签（`Vec<String>`，界面上当 chip 渲染），
+        // 不是完整的调用记录。完整记录留给 P3-2 的 Agent 循环去存。
+        StreamEvent::ToolCall(call) => message.tool_calls.push(tool_call_label(call)),
         StreamEvent::Metrics {
             tokens_prompt,
             tokens_completion,
@@ -435,6 +442,9 @@ fn apply_to_variant(variant: &mut MessageVariant, event: &StreamEvent) {
     match event {
         StreamEvent::Thinking(text) => variant.reasoning_content.get_or_insert_with(String::new).push_str(text),
         StreamEvent::Content(text) => variant.content.push_str(text),
+        // 变体没有 tool_calls 字段：它记录的是「同一次请求的另一种答案」，
+        // 工具调用属于整条消息层面的事，落在 Message 上。
+        StreamEvent::ToolCall(_) => {}
         StreamEvent::Metrics {
             tokens_prompt,
             tokens_completion,

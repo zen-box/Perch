@@ -63,7 +63,9 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
   ↓
 应用层   app.rs、*_ops.rs                   AppState：状态、业务流程、后台任务、提示
   ↓
-服务层   llm.rs、provider_api.rs、          与外部通信、系统能力
+服务层   llm.rs、llm_request.rs、          与外部通信、系统能力
+         llm_stream.rs、llm_tools.rs、
+         provider_api.rs、
          image_http.rs、models_dev.rs、agent.rs
   ↓
 数据层   config.rs、model.rs、storage.rs、   数据结构、持久化、纯计算
@@ -71,6 +73,11 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
          file_store.rs、model_info.rs、brand.rs、
          clipboard.rs、analytics.rs
 ```
+
+> `llm.rs` 是发送与重试的入口（`stream_chat`），它下面拆成三块，互不引用：
+> `llm_request.rs` 管请求体怎么拼、`llm_stream.rs` 管流式响应怎么解、
+> `llm_tools.rs` 管工具调用协议。四者都在服务层内部，方向是单向的
+> （`llm` → 其余三个），不要反过来引用。
 
 - 下层不能引用上层。数据层和服务层不 `use crate::app` 或 `crate::ui`；`app.rs` 不使用 `ui::` 里定义的类型。
 - 数据层和服务层不依赖 GPUI 的 `Context`、`Window`、`Entity`。`brand.rs` 实现 `AssetSource`、`image_http.rs` 实现 `HttpClient` 属于接口适配，是例外；`clipboard.rs` 只用 gpui 的数据类型（`ClipboardEntry`、`Image`）做纯计算，不碰 `Context` / `Window`，同样允许。
@@ -85,7 +92,8 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 | 对话、消息、附件的数据结构 | `model.rs` |
 | 数据库表和读写 | `storage.rs`（改表结构要升版本号、写迁移） |
 | 数据文件路径 | `paths.rs`：数据目录、`APP_NAME` / `LEGACY_APP_NAME`，以及全部数据文件名常量（`CONFIG_FILE`、`SESSIONS_FILE`、`DATABASE_FILE`、`PROMPTS_FILE`、`MODELS_DEV_CACHE_FILE`）和旧名对照表 `LEGACY_FILES`。写文件一律用 `write_atomic` / `write_atomic_bytes` |
-| 大模型请求格式 | `llm.rs`（请求体构建写成纯函数并测试） |
+| 大模型请求格式 | `llm_request.rs`（请求体构建写成纯函数并测试）；发送与重试在 `llm.rs::stream_chat`，流式响应解析在 `llm_stream.rs` |
+| 工具调用协议（工具声明、调用、结果） | `llm_tools.rs`。要加新渠道就在这里加一组 `xxx_tools` / `xxx_message` 翻译函数 |
 | 渠道管理接口（拉取模型、测试连接） | `provider_api.rs` |
 | 一组新的业务操作 | 新建 `xxx_ops.rs`，写 `impl AppState { … }`；不要再往 `app.rs`、`session_ops.rs` 里加 |
 | 剪贴板内容的识别和转换 | `clipboard.rs`（纯数据层：接收 `&[ClipboardEntry]`，判断该粘贴什么、把图片转成可保存格式）。**读剪贴板本身**在 `attachment_ops.rs` 里调 `cx.read_from_clipboard()`，不要直接调 Win32 剪贴板接口 |
@@ -98,7 +106,7 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 
 ### 3.3 规模
 
-- 单个文件（不算测试）超过 **800 行** 就要拆。目前没有超标文件（最大的 `llm.rs` 非测试 796 行）：新功能不要再往大文件里加；改到其中某块时，顺手把那块拆成新文件。
+- 单个文件（不算测试）超过 **800 行** 就要拆。目前没有超标文件（最大的 `llm_request.rs` 非测试 411 行）：新功能不要再往大文件里加；改到其中某块时，顺手把那块拆成新文件。
 - 界面函数超过约 100 行，或链式调用嵌套超过 4 层，拆出 `render_xxx` 子函数。
 - 每个 `xxx_ops.rs` 只负责一个领域，例如会话、模型、附件、渠道。
 
@@ -427,15 +435,21 @@ cx.spawn(async move |this, cx| {
 | --- | --- | --- | --- |
 | 1 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
 | 2 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
-| 3 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
+| 3 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm_request.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
 | 4 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
 | 5 | 重复的小组件：`section` 和 `form_card`（几乎逐行相同）、`labeled` 和 `row_title`（都是"标题+说明"） | `ui/settings.rs`、`ui/model_editor_dialog.rs`、`ui/params.rs` | 合并到 `ui/widgets.rs`。⚠️ 本条目原先还列了 `filter_chip` 和 `chip`，**2026-09-26 核实为错判**——前者是 `Button`、后者是手绘 `Div`，视觉与交互都不同，不该合并 |
 | 6 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
-| 7 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
-| 8 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
-| 9 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
+| 7 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
+| 8 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
+
+> **2026-09-26 已修并删除**：原 #7「OpenAI Responses 渠道仍按 Chat Completions 格式发请求」——
+> P3-1 打通工具调用协议时一并修好。现在 `OpenAiResponses` 在 `emit_delta` / `emit_complete` 里
+> 是独立分支：请求体走 `input`，解析走 `response.output_text.delta` 与 `output[].type`，
+> 且 `handle_sse_line` 不再丢弃 `event:` 行。回归测试
+> `llm::tests::responses_streaming_uses_event_names` 锁住。
+> 删除后原 #8、#9 顺次上移为 #7、#8。
 
 ---
 
