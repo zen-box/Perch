@@ -70,8 +70,14 @@ impl PromptLibrary {
                 params: ChatParams::default(),
             }],
             templates: vec![
-                template("翻译", "请把下面的内容翻译成英文（如果原文是英文则翻译成中文），保留原有格式：\n"),
-                template("润色文字", "请帮我润色下面这段文字，使表达更通顺专业，并说明主要改动：\n"),
+                template(
+                    "翻译",
+                    "请把下面的内容翻译成英文（如果原文是英文则翻译成中文），保留原有格式：\n",
+                ),
+                template(
+                    "润色文字",
+                    "请帮我润色下面这段文字，使表达更通顺专业，并说明主要改动：\n",
+                ),
                 template("总结要点", "请用要点的形式总结下面的内容：\n"),
                 template("解释代码", "请逐段解释下面这段代码：\n{{selection}}"),
             ],
@@ -100,7 +106,11 @@ mod tests {
 
     #[test]
     fn expands_known_variables_and_leaves_unknown_text() {
-        let expanded = expand_variables("今天是 {{date}}，剪贴板：{{clipboard}}，选区：{{selection}}", "copied", "selected");
+        let expanded = expand_variables(
+            "今天是 {{date}}，剪贴板：{{clipboard}}，选区：{{selection}}",
+            "copied",
+            "selected",
+        );
         assert!(expanded.contains("copied"));
         assert!(expanded.contains("selected"));
         assert!(expanded.contains(&Local::now().format("%Y-%m-%d").to_string()));

@@ -11,8 +11,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Root, Selectable as _, Sizable as _, TitleBar, WindowExt as _, h_flex,
-    v_flex,
+    ActiveTheme as _, Icon, Root, Selectable as _, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -47,13 +46,16 @@ impl Render for Workspace {
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
 
-        let mouse_guard = canvas(|_, _, _| (), |_, (), window, _| {
-            window.on_mouse_event(|event: &MouseMoveEvent, phase, window, cx| {
-                if phase.capture() && event.pressed_button != Some(MouseButton::Left) {
-                    gpui_kit::base::TextSelection::end(window, cx);
-                }
-            });
-        });
+        let mouse_guard = canvas(
+            |_, _, _| (),
+            |_, (), window, _| {
+                window.on_mouse_event(|event: &MouseMoveEvent, phase, window, cx| {
+                    if phase.capture() && event.pressed_button != Some(MouseButton::Left) {
+                        gpui_kit::base::TextSelection::end(window, cx);
+                    }
+                });
+            },
+        );
 
         div()
             .size_full()
@@ -220,21 +222,16 @@ impl Render for AppState {
             .bg(p.background)
             .text_color(p.foreground)
             .child(self.render_title_bar(&p, cx))
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .map(|this| match view_mode {
-                        ViewMode::Chat => this
-                            .when(!self.sidebar_collapsed, |this| {
-                                this.child(chat::render_sidebar(self, &p, cx))
-                            })
-                            .child(chat::render_chat_panel(self, &p, cx)),
-                        ViewMode::Settings => this.child(settings::render_settings(self, &p, cx)),
-                    }),
-            )
+            .child(div().flex().flex_1().min_h_0().w_full().map(|this| {
+                match view_mode {
+                    ViewMode::Chat => this
+                        .when(!self.sidebar_collapsed, |this| {
+                            this.child(chat::render_sidebar(self, &p, cx))
+                        })
+                        .child(chat::render_chat_panel(self, &p, cx)),
+                    ViewMode::Settings => this.child(settings::render_settings(self, &p, cx)),
+                }
+            }))
     }
 }
 
@@ -266,12 +263,7 @@ impl AppState {
                         )
                     })
                     .child(icon_tile(IconName::Sparkles, px(18.), p.primary, p.primary_foreground))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Perch"),
-                    ),
+                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Perch")),
             )
             .child(
                 h_flex()
@@ -300,7 +292,11 @@ impl AppState {
                             .ghost()
                             .small()
                             .icon(if is_dark { IconName::Sun } else { IconName::Moon })
-                            .tooltip(if is_dark { "切换到浅色模式" } else { "切换到深色模式" })
+                            .tooltip(if is_dark {
+                                "切换到浅色模式"
+                            } else {
+                                "切换到深色模式"
+                            })
                             .occlude()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.set_dark_mode(!is_dark, window, cx);

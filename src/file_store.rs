@@ -1,8 +1,8 @@
+use base64::Engine;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use base64::Engine;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::model::AttachmentKind;
@@ -28,7 +28,13 @@ pub fn hash_bytes(data: &[u8]) -> String {
 pub fn sanitize_file_name(name: &str) -> String {
     let clean: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if clean.is_empty() || clean.starts_with('.') {
         format!("file_{}", clean.trim_start_matches('.'))
@@ -72,9 +78,18 @@ pub fn detect_kind_and_mime(path_or_name: &str) -> (AttachmentKind, &'static str
 
         // PDF 与办公文档
         "pdf" => (AttachmentKind::Document, "application/pdf"),
-        "doc" | "docx" => (AttachmentKind::Document, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-        "xls" | "xlsx" => (AttachmentKind::Document, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-        "ppt" | "pptx" => (AttachmentKind::Document, "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        "doc" | "docx" => (
+            AttachmentKind::Document,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+        "xls" | "xlsx" => (
+            AttachmentKind::Document,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        "ppt" | "pptx" => (
+            AttachmentKind::Document,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
 
         // 文本与常见代码类
         "txt" => (AttachmentKind::Text, "text/plain"),
@@ -162,10 +177,7 @@ fn save_bytes_in(base_dir: &Path, data: &[u8], original_name: &str, mime_type: &
 pub fn save_file_from_path(src: &Path) -> std::io::Result<SavedFile> {
     check_attachment_size(fs::metadata(src)?.len())?;
     let data = fs::read(src)?;
-    let name = src
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("attachment");
+    let name = src.file_name().and_then(|n| n.to_str()).unwrap_or("attachment");
     let (_, mime) = detect_kind_and_mime(name);
     save_bytes(&data, name, mime)
 }

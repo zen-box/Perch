@@ -21,13 +21,13 @@ pub fn render_settings(state: &mut AppState, p: &Palette, cx: &mut Context<AppSt
         .flex()
         .size_full()
         .child(render_nav(state, p, cx))
-         .child(match state.settings_tab {
-             SettingsTab::General => render_general(state, p, cx).into_any_element(),
-             SettingsTab::Providers => render_providers(state, p, cx).into_any_element(),
-             SettingsTab::Prompts => render_prompts(state, p, cx).into_any_element(),
-             SettingsTab::McpServers => render_mcp(p).into_any_element(),
-             SettingsTab::About => render_about(p).into_any_element(),
-         })
+        .child(match state.settings_tab {
+            SettingsTab::General => render_general(state, p, cx).into_any_element(),
+            SettingsTab::Providers => render_providers(state, p, cx).into_any_element(),
+            SettingsTab::Prompts => render_prompts(state, p, cx).into_any_element(),
+            SettingsTab::McpServers => render_mcp(p).into_any_element(),
+            SettingsTab::About => render_about(p).into_any_element(),
+        })
 }
 
 fn render_nav(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
@@ -35,8 +35,8 @@ fn render_nav(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl
     let tabs = [
         (SettingsTab::General, IconName::Settings2, tr(lang, "general_settings")),
         (SettingsTab::Providers, IconName::Cloud, tr(lang, "provider_settings")),
-         (SettingsTab::Prompts, IconName::BookOpen, "提示词"),
-         (SettingsTab::McpServers, IconName::Plug, tr(lang, "mcp_settings")),
+        (SettingsTab::Prompts, IconName::BookOpen, "提示词"),
+        (SettingsTab::McpServers, IconName::Plug, tr(lang, "mcp_settings")),
         (SettingsTab::About, IconName::Info, tr(lang, "about_settings")),
     ];
 
@@ -235,60 +235,65 @@ fn render_general(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> 
     let appearance = section(
         "外观",
         p,
-        vec![
-            setting_row("主题", "选择浅色或深色界面", p, {
-                let app = app.clone();
-                segmented(
-                    "theme",
-                    vec![(false, "浅色".into()), (true, "深色".into())],
-                    state.is_dark,
-                    p,
-                    move |is_dark, window, cx| app.update(cx, |this, cx| this.set_dark_mode(is_dark, window, cx)),
-                )
-            }),
-        ],
+        vec![setting_row("主题", "选择浅色或深色界面", p, {
+            let app = app.clone();
+            segmented(
+                "theme",
+                vec![(false, "浅色".into()), (true, "深色".into())],
+                state.is_dark,
+                p,
+                move |is_dark, window, cx| app.update(cx, |this, cx| this.set_dark_mode(is_dark, window, cx)),
+            )
+        })],
     );
 
     let conversation = section(
         "对话",
         p,
         vec![
-            setting_row(
-                "新对话默认模型",
-                "只影响之后创建的对话",
-                p,
-                {
-                    let (provider_id, model_id) = state.config.default_model_selection();
-                    let label = state.config.providers.iter()
-                        .find(|provider| provider.id == provider_id)
-                        .and_then(|provider| provider.models.iter().find(|model| model.id == model_id))
-                        .map(|model| model.name.clone())
-                        .unwrap_or_else(|| "选择模型".to_string());
-                    let providers = state.config.providers.clone();
-                    let app = app.clone();
-                    Button::new("default-model")
-                        .outline()
-                        .small()
-                        .label(label)
-                        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-                            providers.iter().filter(|provider| provider.enabled).fold(menu, |menu, provider| {
-                                provider.models.iter().filter(|model| model.enabled).fold(menu, |menu, model| {
-                                    let app = app.clone();
-                                    let pid = provider.id.clone();
-                                    let mid = model.id.clone();
-                                    menu.item(PopupMenuItem::new(format!("{} / {}", provider.name, model.name))
-                                        .checked(pid == provider_id && mid == model_id)
-                                        .on_click(move |_, _, cx| {
-                                            app.update(cx, |this, cx| {
-                                                this.config.select_model(&pid, &mid);
-                                                cx.notify();
-                                            });
-                                        }))
-                                })
+            setting_row("新对话默认模型", "只影响之后创建的对话", p, {
+                let (provider_id, model_id) = state.config.default_model_selection();
+                let label = state
+                    .config
+                    .providers
+                    .iter()
+                    .find(|provider| provider.id == provider_id)
+                    .and_then(|provider| provider.models.iter().find(|model| model.id == model_id))
+                    .map(|model| model.name.clone())
+                    .unwrap_or_else(|| "选择模型".to_string());
+                let providers = state.config.providers.clone();
+                let app = app.clone();
+                Button::new("default-model")
+                    .outline()
+                    .small()
+                    .label(label)
+                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                        providers
+                            .iter()
+                            .filter(|provider| provider.enabled)
+                            .fold(menu, |menu, provider| {
+                                provider
+                                    .models
+                                    .iter()
+                                    .filter(|model| model.enabled)
+                                    .fold(menu, |menu, model| {
+                                        let app = app.clone();
+                                        let pid = provider.id.clone();
+                                        let mid = model.id.clone();
+                                        menu.item(
+                                            PopupMenuItem::new(format!("{} / {}", provider.name, model.name))
+                                                .checked(pid == provider_id && mid == model_id)
+                                                .on_click(move |_, _, cx| {
+                                                    app.update(cx, |this, cx| {
+                                                        this.config.select_model(&pid, &mid);
+                                                        cx.notify();
+                                                    });
+                                                }),
+                                        )
+                                    })
                             })
-                        })
-                },
-            ),
+                    })
+            }),
             setting_row(
                 tr(lang, "temperature"),
                 format!("当前 {:.1}，数值越低回答越稳定，越高越有创意", temperature),
@@ -311,7 +316,12 @@ fn render_general(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> 
                 .child(
                     v_flex()
                         .gap_0p5()
-                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(tr(lang, "system_prompt")))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(tr(lang, "system_prompt")),
+                        )
                         .child(
                             div()
                                 .text_xs()
@@ -351,7 +361,11 @@ fn render_general(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> 
         tr(lang, "general_settings"),
         "外观与默认的对话参数",
         p,
-        v_flex().gap_8().child(appearance).child(conversation).child(local_tools),
+        v_flex()
+            .gap_8()
+            .child(appearance)
+            .child(conversation)
+            .child(local_tools),
     )
 }
 
@@ -454,13 +468,11 @@ fn render_providers(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -
                                                 .child(format!("{} 个模型", provider.models.len())),
                                         ),
                                 )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .size(px(8.))
-                                        .rounded_full()
-                                        .bg(if provider.enabled { p.success } else { p.border }),
-                                )
+                                .child(div().flex_none().size(px(8.)).rounded_full().bg(if provider.enabled {
+                                    p.success
+                                } else {
+                                    p.border
+                                }))
                         }),
                 )
                 .overflow_y_scrollbar(),
@@ -493,11 +505,16 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
             .justify_center()
             .gap_3()
             .child(icon_tile(IconName::Cloud, px(44.), p.muted, p.muted_foreground))
-            .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(if state.config.providers.is_empty() {
-                "还没有模型渠道"
-            } else {
-                "选择一个渠道查看配置"
-            }))
+            .child(
+                div()
+                    .text_base()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(if state.config.providers.is_empty() {
+                        "还没有模型渠道"
+                    } else {
+                        "选择一个渠道查看配置"
+                    }),
+            )
             .child(
                 div()
                     .text_sm()
@@ -528,7 +545,13 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                 .flex_1()
                 .min_w_0()
                 .gap_1()
-                .child(div().truncate().text_xl().font_weight(FontWeight::SEMIBOLD).child(provider.name.clone()))
+                .child(
+                    div()
+                        .truncate()
+                        .text_xl()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(provider.name.clone()),
+                )
                 .child(h_flex().child(Tag::secondary().small().child(provider.channel_type.label()))),
         )
         .child(
@@ -561,17 +584,31 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                 .gap_4()
                 .px_4()
                 .py_4()
-                 .child(
-                     v_flex()
-                         .gap_1p5()
-                         .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(tr(lang, "api_key")))
-                         .child(div().py(px(4.)).child(Input::new(&state.cfg_api_key_input).mask_toggle())),
-                 )
                 .child(
                     v_flex()
                         .gap_1p5()
-                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(tr(lang, "base_url")))
-                         .child(div().py(px(4.)).child(Input::new(&state.cfg_base_url_input)))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(tr(lang, "api_key")),
+                        )
+                        .child(
+                            div()
+                                .py(px(4.))
+                                .child(Input::new(&state.cfg_api_key_input).mask_toggle()),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .gap_1p5()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(tr(lang, "base_url")),
+                        )
+                        .child(div().py(px(4.)).child(Input::new(&state.cfg_base_url_input)))
                         .child(
                             div()
                                 .text_xs()
@@ -579,11 +616,42 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                                 .child("一般以 /v1 结尾，例如 https://api.openai.com/v1"),
                         ),
                 )
-                 .child(v_flex().gap_1p5().child(div().text_sm().font_weight(FontWeight::MEDIUM).child("代理")).child(div().py(px(4.)).child(Input::new(&state.cfg_proxy_input))))
-                 .child(h_flex().gap_3()
-                     .child(v_flex().flex_1().gap_1p5().child(div().text_sm().child("超时（秒）")).child(div().py(px(4.)).child(Input::new(&state.cfg_timeout_input))))
-                     .child(v_flex().flex_1().gap_1p5().child(div().text_sm().child("失败重试")).child(div().py(px(4.)).child(Input::new(&state.cfg_retries_input)))))
-                 .child(v_flex().gap_1p5().child(div().text_sm().font_weight(FontWeight::MEDIUM).child("自定义请求头")).child(Textarea::new(&state.cfg_headers_input)).child(div().text_xs().text_color(p.muted_foreground).child("每行一个 Name: Value")))
+                .child(
+                    v_flex()
+                        .gap_1p5()
+                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("代理"))
+                        .child(div().py(px(4.)).child(Input::new(&state.cfg_proxy_input))),
+                )
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .gap_1p5()
+                                .child(div().text_sm().child("超时（秒）"))
+                                .child(div().py(px(4.)).child(Input::new(&state.cfg_timeout_input))),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .gap_1p5()
+                                .child(div().text_sm().child("失败重试"))
+                                .child(div().py(px(4.)).child(Input::new(&state.cfg_retries_input))),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .gap_1p5()
+                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("自定义请求头"))
+                        .child(Textarea::new(&state.cfg_headers_input))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(p.muted_foreground)
+                                .child("每行一个 Name: Value"),
+                        ),
+                )
                 .child(
                     h_flex()
                         .justify_end()
@@ -699,9 +767,17 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                                 Button::new(("pin-model", ix))
                                     .ghost()
                                     .xsmall()
-                                    .icon(if model.is_pinned { IconName::PinOff } else { IconName::Pin })
+                                    .icon(if model.is_pinned {
+                                        IconName::PinOff
+                                    } else {
+                                        IconName::Pin
+                                    })
                                     .selected(model.is_pinned)
-                                    .tooltip(if model.is_pinned { "取消置顶" } else { "置顶到模型列表顶部" })
+                                    .tooltip(if model.is_pinned {
+                                        "取消置顶"
+                                    } else {
+                                        "置顶到模型列表顶部"
+                                    })
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.toggle_model_pin(&pin_ids.0, &pin_ids.1, cx);
                                     })),
@@ -771,17 +847,13 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                         ),
                 ),
         )
-        .child(
-            v_flex()
-                .rounded_lg()
-                .border_1()
-                .border_color(p.border)
-                .children(model_rows.into_iter().enumerate().map(|(ix, row)| {
-                    div()
-                        .when(ix > 0, |this| this.border_t_1().border_color(p.border))
-                        .child(row)
-                })),
-        );
+        .child(v_flex().rounded_lg().border_1().border_color(p.border).children(
+            model_rows.into_iter().enumerate().map(|(ix, row)| {
+                div()
+                    .when(ix > 0, |this| this.border_t_1().border_color(p.border))
+                    .child(row)
+            }),
+        ));
 
     div()
         .flex_1()
@@ -809,44 +881,119 @@ fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Context<AppSta
         .into_any_element()
 }
 
- fn render_prompts(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
-     let presets = state.prompts.presets.clone();
-     let templates = state.prompts.templates.clone();
-     let preset_rows = presets.iter().enumerate().map(|(ix, preset)| {
-         let use_id = preset.id.clone();
-         let delete_id = preset.id.clone();
-         h_flex().justify_between().px_4().py_2().child(div().text_sm().child(format!("{} {}", preset.icon, preset.name))).child(
-             h_flex().gap_1()
-                 .child(Button::new(("use-preset", ix)).ghost().xsmall().label("使用").on_click(cx.listener(move |this, _, window, cx| this.create_session_from_preset(&use_id, window, cx))))
-                 .child(Button::new(("delete-preset", ix)).ghost().xsmall().icon(IconName::Trash).on_click(cx.listener(move |this, _, _, cx| this.delete_prompt(&delete_id, false, cx)))),
-         ).into_any_element()
-     }).collect::<Vec<_>>();
-     let template_rows = templates.iter().enumerate().map(|(ix, template)| {
-         let id = template.id.clone();
-         h_flex().justify_between().px_4().py_2().child(div().text_sm().child(template.name.clone())).child(
-             Button::new(("delete-template", ix)).ghost().xsmall().icon(IconName::Trash).on_click(cx.listener(move |this, _, _, cx| this.delete_prompt(&id, true, cx))),
-         ).into_any_element()
-     }).collect::<Vec<_>>();
-     page(
-         "settings-prompts",
-         "提示词",
-         "助手预设用于新建对话，模板可在输入框输入 /名称 后回车插入",
-         p,
-         v_flex().gap_8()
-             .child(section("助手预设", p, if preset_rows.is_empty() { vec![div().px_4().py_3().text_sm().child("还没有预设").into_any_element()] } else { preset_rows }))
-             .child(section("提示词模板", p, if template_rows.is_empty() { vec![div().px_4().py_3().text_sm().child("还没有模板").into_any_element()] } else { template_rows }))
-             .child(v_flex().gap_3().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("新建"))
-                 .child(Input::new(&state.prompt_name_input))
-                 .child(Input::new(&state.prompt_icon_input))
-                 .child(Textarea::new(&state.prompt_body_input))
-                 .child(h_flex().gap_2()
-                     .child(Button::new("save-preset").outline().small().label("保存为预设").on_click(cx.listener(|this, _, window, cx| { this.save_prompt_from_inputs(false, window, cx); })))
-                     .child(Button::new("save-template").primary().small().label("保存为模板").on_click(cx.listener(|this, _, window, cx| { this.save_prompt_from_inputs(true, window, cx); }))))),
-     )
- }
- 
- // ================= MCP / 关于 =================
- 
+fn render_prompts(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+    let presets = state.prompts.presets.clone();
+    let templates = state.prompts.templates.clone();
+    let preset_rows = presets
+        .iter()
+        .enumerate()
+        .map(|(ix, preset)| {
+            let use_id = preset.id.clone();
+            let delete_id = preset.id.clone();
+            h_flex()
+                .justify_between()
+                .px_4()
+                .py_2()
+                .child(div().text_sm().child(format!("{} {}", preset.icon, preset.name)))
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .child(Button::new(("use-preset", ix)).ghost().xsmall().label("使用").on_click(
+                            cx.listener(move |this, _, window, cx| {
+                                this.create_session_from_preset(&use_id, window, cx)
+                            }),
+                        ))
+                        .child(
+                            Button::new(("delete-preset", ix))
+                                .ghost()
+                                .xsmall()
+                                .icon(IconName::Trash)
+                                .on_click(cx.listener(move |this, _, _, cx| this.delete_prompt(&delete_id, false, cx))),
+                        ),
+                )
+                .into_any_element()
+        })
+        .collect::<Vec<_>>();
+    let template_rows = templates
+        .iter()
+        .enumerate()
+        .map(|(ix, template)| {
+            let id = template.id.clone();
+            h_flex()
+                .justify_between()
+                .px_4()
+                .py_2()
+                .child(div().text_sm().child(template.name.clone()))
+                .child(
+                    Button::new(("delete-template", ix))
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Trash)
+                        .on_click(cx.listener(move |this, _, _, cx| this.delete_prompt(&id, true, cx))),
+                )
+                .into_any_element()
+        })
+        .collect::<Vec<_>>();
+    page(
+        "settings-prompts",
+        "提示词",
+        "助手预设用于新建对话，模板可在输入框输入 /名称 后回车插入",
+        p,
+        v_flex()
+            .gap_8()
+            .child(section(
+                "助手预设",
+                p,
+                if preset_rows.is_empty() {
+                    vec![div().px_4().py_3().text_sm().child("还没有预设").into_any_element()]
+                } else {
+                    preset_rows
+                },
+            ))
+            .child(section(
+                "提示词模板",
+                p,
+                if template_rows.is_empty() {
+                    vec![div().px_4().py_3().text_sm().child("还没有模板").into_any_element()]
+                } else {
+                    template_rows
+                },
+            ))
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("新建"))
+                    .child(Input::new(&state.prompt_name_input))
+                    .child(Input::new(&state.prompt_icon_input))
+                    .child(Textarea::new(&state.prompt_body_input))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Button::new("save-preset")
+                                    .outline()
+                                    .small()
+                                    .label("保存为预设")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.save_prompt_from_inputs(false, window, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("save-template")
+                                    .primary()
+                                    .small()
+                                    .label("保存为模板")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.save_prompt_from_inputs(true, window, cx);
+                                    })),
+                            ),
+                    ),
+            ),
+    )
+}
+
+// ================= MCP / 关于 =================
+
 // ================= MCP / 关于 =================
 
 fn render_mcp(p: &Palette) -> impl IntoElement {
@@ -879,9 +1026,15 @@ fn render_mcp(p: &Palette) -> impl IntoElement {
 fn render_about(p: &Palette) -> impl IntoElement {
     let features = [
         (IconName::HardDrive, "数据只保存在本地，没有任何云端遥测"),
-        (IconName::Layers, "支持 OpenAI Chat、OpenAI Responses、Gemini、Claude 四种接口规范"),
+        (
+            IconName::Layers,
+            "支持 OpenAI Chat、OpenAI Responses、Gemini、Claude 四种接口规范",
+        ),
         (IconName::Zap, "原生 SSE 流式解析，Markdown 实时渲染"),
-        (IconName::SquareTerminal, "内置本地工具：/ls、/read、/git、/bash（执行前需授权）"),
+        (
+            IconName::SquareTerminal,
+            "内置本地工具：/ls、/read、/git、/bash（执行前需授权）",
+        ),
         (IconName::Languages, "界面支持简体中文、繁體中文、English、日本語"),
     ];
 

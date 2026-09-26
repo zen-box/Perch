@@ -74,89 +74,89 @@ impl ReasoningLevel {
     }
 }
 
- fn default_stream() -> bool {
-     true
- }
- 
- /// 对话级参数。字段为空时使用全局设置。
- #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
- pub struct ChatParams {
-     #[serde(default)]
-     pub system_prompt: Option<String>,
-     #[serde(default)]
-     pub temperature: Option<f32>,
-     #[serde(default)]
-     pub top_p: Option<f32>,
-     #[serde(default)]
-     pub max_tokens: Option<u32>,
-     /// 只发送最近 N 条消息。空表示全部发送。
-     #[serde(default)]
-     pub context_limit: Option<usize>,
-     /// 空表示使用模型设置里的默认思考强度
-     #[serde(default)]
-     pub reasoning: Option<ReasoningLevel>,
-     #[serde(default = "default_stream")]
-     pub stream: bool,
- }
- 
- impl Default for ChatParams {
-     fn default() -> Self {
-         Self {
-             system_prompt: None,
-             temperature: None,
-             top_p: None,
-             max_tokens: None,
-             context_limit: None,
-             reasoning: None,
-             stream: true,
-         }
-     }
- }
- 
- impl ChatParams {
-     pub fn is_unset(&self) -> bool {
-         self.system_prompt.as_ref().is_none_or(|text| text.trim().is_empty())
-             && self.temperature.is_none()
-             && self.top_p.is_none()
-             && self.max_tokens.is_none()
-             && self.context_limit.is_none()
-             && self.reasoning.is_none()
-             && self.stream
-     }
- }
- 
- #[derive(Clone, Debug)]
- pub struct ResolvedParams {
-     pub system_prompt: String,
-     pub temperature: f32,
-     pub top_p: Option<f32>,
-     pub max_tokens: Option<u32>,
-     pub context_limit: Option<usize>,
-     pub reasoning: Option<ReasoningLevel>,
-     pub stream: bool,
- }
- 
- /// 同一次提问的多模型对比结果。采用之前不写入主 content。
- #[derive(Clone, Debug, Serialize, Deserialize)]
- pub struct MessageVariant {
-     pub id: String,
-     pub provider_id: String,
-     pub model: String,
-     pub content: String,
-     #[serde(default)]
-     pub reasoning_content: Option<String>,
-     #[serde(default)]
-     pub error: Option<String>,
-     #[serde(default)]
-     pub is_streaming: bool,
-     #[serde(default)]
-     pub prompt_tokens: usize,
-     #[serde(default)]
-     pub completion_tokens: usize,
-     #[serde(default)]
-     pub speed_tps: f32,
-     #[serde(default)]
-     pub latency_ms: u64,
+fn default_stream() -> bool {
+    true
+}
+
+/// 对话级参数。字段为空时使用全局设置。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChatParams {
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    /// 只发送最近 N 条消息。空表示全部发送。
+    #[serde(default)]
+    pub context_limit: Option<usize>,
+    /// 空表示使用模型设置里的默认思考强度
+    #[serde(default)]
+    pub reasoning: Option<ReasoningLevel>,
+    #[serde(default = "default_stream")]
+    pub stream: bool,
+}
+
+impl Default for ChatParams {
+    fn default() -> Self {
+        Self {
+            system_prompt: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            context_limit: None,
+            reasoning: None,
+            stream: true,
+        }
+    }
+}
+
+impl ChatParams {
+    pub fn is_unset(&self) -> bool {
+        self.system_prompt.as_ref().is_none_or(|text| text.trim().is_empty())
+            && self.temperature.is_none()
+            && self.top_p.is_none()
+            && self.max_tokens.is_none()
+            && self.context_limit.is_none()
+            && self.reasoning.is_none()
+            && self.stream
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ResolvedParams {
+    pub system_prompt: String,
+    pub temperature: f32,
+    pub top_p: Option<f32>,
+    pub max_tokens: Option<u32>,
+    pub context_limit: Option<usize>,
+    pub reasoning: Option<ReasoningLevel>,
+    pub stream: bool,
+}
+
+/// 同一次提问的多模型对比结果。采用之前不写入主 content。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MessageVariant {
+    pub id: String,
+    pub provider_id: String,
+    pub model: String,
+    pub content: String,
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub is_streaming: bool,
+    #[serde(default)]
+    pub prompt_tokens: usize,
+    #[serde(default)]
+    pub completion_tokens: usize,
+    #[serde(default)]
+    pub speed_tps: f32,
+    #[serde(default)]
+    pub latency_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,52 +294,52 @@ pub struct ChatSession {
     pub provider_id: String,
     pub created_at: String,
     pub updated_at: String,
-     pub messages: Vec<ChatMessage>,
-     #[serde(default)]
-     pub pinned: bool,
-     #[serde(default)]
-     pub favorite: bool,
-     #[serde(default)]
-     pub title_auto: bool,
-     #[serde(default)]
-     pub params: Option<ChatParams>,
- }
+    pub messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
+    pub favorite: bool,
+    #[serde(default)]
+    pub title_auto: bool,
+    #[serde(default)]
+    pub params: Option<ChatParams>,
+}
 
 impl ChatSession {
-     pub fn new(title: String, folder: String, model: String, provider_id: String) -> Self {
-         let now = Local::now().format("%Y-%m-%d %H:%M").to_string();
-         Self {
-             id: Uuid::new_v4().to_string(),
-             title,
-             folder,
-             model,
-             provider_id,
-             created_at: now.clone(),
-             updated_at: now,
-             messages: Vec::new(),
-             pinned: false,
-             favorite: false,
-             title_auto: true,
-             params: None,
-         }
-     }
- 
-     pub fn resolved_params(&self, global_prompt: &str, global_temperature: f32) -> ResolvedParams {
-         let params = self.params.clone().unwrap_or_default();
-         ResolvedParams {
-             system_prompt: params
-                 .system_prompt
-                 .filter(|text| !text.trim().is_empty())
-                 .unwrap_or_else(|| global_prompt.to_string()),
-             temperature: params.temperature.unwrap_or(global_temperature),
-             top_p: params.top_p,
-             max_tokens: params.max_tokens.filter(|value| *value > 0),
-             context_limit: params.context_limit.filter(|value| *value > 0),
-             reasoning: params.reasoning,
-             stream: params.stream,
-         }
-     }
- 
+    pub fn new(title: String, folder: String, model: String, provider_id: String) -> Self {
+        let now = Local::now().format("%Y-%m-%d %H:%M").to_string();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            title,
+            folder,
+            model,
+            provider_id,
+            created_at: now.clone(),
+            updated_at: now,
+            messages: Vec::new(),
+            pinned: false,
+            favorite: false,
+            title_auto: true,
+            params: None,
+        }
+    }
+
+    pub fn resolved_params(&self, global_prompt: &str, global_temperature: f32) -> ResolvedParams {
+        let params = self.params.clone().unwrap_or_default();
+        ResolvedParams {
+            system_prompt: params
+                .system_prompt
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| global_prompt.to_string()),
+            temperature: params.temperature.unwrap_or(global_temperature),
+            top_p: params.top_p,
+            max_tokens: params.max_tokens.filter(|value| *value > 0),
+            context_limit: params.context_limit.filter(|value| *value > 0),
+            reasoning: params.reasoning,
+            stream: params.stream,
+        }
+    }
+
     pub fn api_turns(&self, limit: Option<usize>) -> Vec<(String, String, Vec<Attachment>)> {
         let mut items: Vec<(String, String, Vec<Attachment>)> = self
             .messages
@@ -376,13 +376,13 @@ impl ChatSession {
             .map(|(role, content, _)| (role, content))
             .collect()
     }
- 
-     pub fn has_unresolved_compare(&self) -> bool {
-         self.messages
-             .iter()
-             .any(|message| !message.variants.is_empty() && message.content.is_empty())
-     }
- }
+
+    pub fn has_unresolved_compare(&self) -> bool {
+        self.messages
+            .iter()
+            .any(|message| !message.variants.is_empty() && message.content.is_empty())
+    }
+}
 
 pub struct StorageData {
     pub active_session_id: String,
@@ -429,14 +429,14 @@ impl StorageData {
         if !sessions.iter().any(|session| session.id == active_session_id) {
             active_session_id = sessions[0].id.clone();
         }
-         for session in &mut sessions {
-             for message in &mut session.messages {
-                 message.is_streaming = false;
-                 for variant in &mut message.variants {
-                     variant.is_streaming = false;
-                 }
-             }
-         }
+        for session in &mut sessions {
+            for message in &mut session.messages {
+                message.is_streaming = false;
+                for variant in &mut message.variants {
+                    variant.is_streaming = false;
+                }
+            }
+        }
         let data = StorageData {
             active_session_id,
             sessions,
@@ -448,7 +448,9 @@ impl StorageData {
     }
 
     pub fn save(&self) -> StorageResult<()> {
-        self.database.borrow_mut().save(&self.active_session_id, &self.sessions)?;
+        self.database
+            .borrow_mut()
+            .save(&self.active_session_id, &self.sessions)?;
         self.revision.set(self.revision.get().wrapping_add(1));
         Ok(())
     }
@@ -462,7 +464,9 @@ impl StorageData {
     }
 
     pub fn get_active_session(&self) -> Option<&ChatSession> {
-        self.sessions.iter().find(|s| s.id == self.active_session_id)
+        self.sessions
+            .iter()
+            .find(|s| s.id == self.active_session_id)
             .or_else(|| self.sessions.first())
     }
 
@@ -475,7 +479,12 @@ impl StorageData {
     }
 
     pub fn create_session(&mut self, title: &str, folder: &str, model: &str, provider_id: &str) -> String {
-        let session = ChatSession::new(title.to_string(), folder.to_string(), model.to_string(), provider_id.to_string());
+        let session = ChatSession::new(
+            title.to_string(),
+            folder.to_string(),
+            model.to_string(),
+            provider_id.to_string(),
+        );
         let id = session.id.clone();
         self.sessions.insert(0, session);
         self.active_session_id = id.clone();
@@ -485,7 +494,12 @@ impl StorageData {
     pub fn delete_session(&mut self, id: &str) {
         self.sessions.retain(|s| s.id != id);
         if self.sessions.is_empty() {
-            let session = ChatSession::new("新对话".to_string(), "默认".to_string(), "deepseek-chat".to_string(), String::new());
+            let session = ChatSession::new(
+                "新对话".to_string(),
+                "默认".to_string(),
+                "deepseek-chat".to_string(),
+                String::new(),
+            );
             self.active_session_id = session.id.clone();
             self.sessions.push(session);
         } else if self.active_session_id == id {
@@ -543,11 +557,10 @@ mod tests {
         assert_eq!(data.sessions.len(), 1);
         assert_eq!(data.sessions[0].title, "Second");
         assert_eq!(data.sessions[0].provider_id, "provider");
-        let count: i64 = rusqlite::Connection::open(&db_path).unwrap().query_row(
-            "SELECT count(*) FROM messages",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = rusqlite::Connection::open(&db_path)
+            .unwrap()
+            .query_row("SELECT count(*) FROM messages", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -572,7 +585,9 @@ mod tests {
         let legacy_path = dir.path().join("missing.json");
         let mut data = StorageData::open(&db_path, &legacy_path).unwrap();
         let first_id = data.active_session_id.clone();
-        data.sessions[0].messages.push(ChatMessage::new_user("find %_ literally".into()));
+        data.sessions[0]
+            .messages
+            .push(ChatMessage::new_user("find %_ literally".into()));
         let second_id = data.create_session("Other title", "默认", "model", "provider");
         data.save().unwrap();
 
@@ -589,11 +604,10 @@ mod tests {
         fs::write(&legacy_path, "not JSON").unwrap();
 
         assert!(StorageData::open(&db_path, &legacy_path).is_err());
-        let count: i64 = rusqlite::Connection::open(&db_path).unwrap().query_row(
-            "SELECT count(*) FROM sessions",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = rusqlite::Connection::open(&db_path)
+            .unwrap()
+            .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 0);
     }
 }

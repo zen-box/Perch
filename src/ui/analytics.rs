@@ -28,7 +28,7 @@ pub enum AnalyticsTab {
 
 #[derive(Clone, Debug)]
 pub struct DayStat {
-    pub date_str: String, // "09-26"
+    pub date_str: String,  // "09-26"
     pub full_date: String, // "2026-09-26"
     pub input_tokens: usize,
     pub output_tokens: usize,
@@ -170,10 +170,8 @@ pub fn collect_stats(state: &AppState, range: TimeRange) -> AnalyticsSummary {
         });
     }
 
-    let mut model_list: Vec<(String, usize, usize, f64)> = model_map
-        .into_iter()
-        .map(|(m, (i, o, c))| (m, i, o, c))
-        .collect();
+    let mut model_list: Vec<(String, usize, usize, f64)> =
+        model_map.into_iter().map(|(m, (i, o, c))| (m, i, o, c)).collect();
     model_list.sort_by(|a, b| (b.1 + b.2).cmp(&(a.1 + a.2)));
 
     let mut models = Vec::new();

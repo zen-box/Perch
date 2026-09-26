@@ -55,7 +55,11 @@ pub fn execute_local_tool(name: &str, arg: &str) -> AgentToolResult {
             }
         }
         "list_dir" => {
-            let dir_str = if arg.trim().is_empty() { "." } else { arg.trim().trim_matches('"') };
+            let dir_str = if arg.trim().is_empty() {
+                "."
+            } else {
+                arg.trim().trim_matches('"')
+            };
             match fs::read_dir(dir_str) {
                 Ok(entries) => {
                     let mut items = Vec::new();
@@ -83,29 +87,27 @@ pub fn execute_local_tool(name: &str, arg: &str) -> AgentToolResult {
                 },
             }
         }
-        "git_status" => {
-            match Command::new("git").arg("status").arg("--short").output() {
-                Ok(output) => {
-                    let text = String::from_utf8_lossy(&output.stdout).to_string();
-                    let trimmed = text.trim();
-                    let summary = if trimmed.is_empty() {
-                        "Clean working tree (no changes)".to_string()
-                    } else {
-                        trimmed.to_string()
-                    };
-                    AgentToolResult {
-                        display: "Git status".to_string(),
-                        output: summary,
-                        is_error: false,
-                    }
+        "git_status" => match Command::new("git").arg("status").arg("--short").output() {
+            Ok(output) => {
+                let text = String::from_utf8_lossy(&output.stdout).to_string();
+                let trimmed = text.trim();
+                let summary = if trimmed.is_empty() {
+                    "Clean working tree (no changes)".to_string()
+                } else {
+                    trimmed.to_string()
+                };
+                AgentToolResult {
+                    display: "Git status".to_string(),
+                    output: summary,
+                    is_error: false,
                 }
-                Err(e) => AgentToolResult {
-                    display: "Git status (Error)".to_string(),
-                    output: format!("Git command failed: {}", e),
-                    is_error: true,
-                },
             }
-        }
+            Err(e) => AgentToolResult {
+                display: "Git status (Error)".to_string(),
+                output: format!("Git command failed: {}", e),
+                is_error: true,
+            },
+        },
         "bash" | "exec_command" => {
             let cmd_str = arg.trim();
             #[cfg(target_os = "windows")]
@@ -114,9 +116,7 @@ pub fn execute_local_tool(name: &str, arg: &str) -> AgentToolResult {
                 .output();
 
             #[cfg(not(target_os = "windows"))]
-            let output_res = Command::new("sh")
-                .args(["-c", cmd_str])
-                .output();
+            let output_res = Command::new("sh").args(["-c", cmd_str]).output();
 
             match output_res {
                 Ok(output) => {
@@ -131,7 +131,11 @@ pub fn execute_local_tool(name: &str, arg: &str) -> AgentToolResult {
                     };
                     AgentToolResult {
                         display: format!("Bash > {}", cmd_str),
-                        output: if combined.trim().is_empty() { "(Empty output)".to_string() } else { combined },
+                        output: if combined.trim().is_empty() {
+                            "(Empty output)".to_string()
+                        } else {
+                            combined
+                        },
                         is_error: !output.status.success(),
                     }
                 }
@@ -151,17 +155,31 @@ pub fn execute_local_tool(name: &str, arg: &str) -> AgentToolResult {
 }
 
 /// 导出当前对话为 Markdown 文档
-pub fn export_session_to_markdown(title: &str, messages: &[crate::model::ChatMessage]) -> Result<String, std::io::Error> {
+pub fn export_session_to_markdown(
+    title: &str,
+    messages: &[crate::model::ChatMessage],
+) -> Result<String, std::io::Error> {
     let sanitized_title = title.replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_");
     let filename = format!("{}.md", sanitized_title);
-    let mut md = format!("# {}\n\n*Exported from Perch on {}*\n\n---\n\n", title, chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+    let mut md = format!(
+        "# {}\n\n*Exported from Perch on {}*\n\n---\n\n",
+        title,
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    );
 
     for msg in messages {
-        let speaker = if msg.role == "user" { "### 👤 User" } else { "### 🤖 Assistant" };
+        let speaker = if msg.role == "user" {
+            "### 👤 User"
+        } else {
+            "### 🤖 Assistant"
+        };
         md.push_str(&format!("{} ({})\n\n", speaker, msg.created_at));
 
         if let Some(reasoning) = &msg.reasoning_content {
-            md.push_str(&format!("> **Thought Process:**\n> {}\n\n", reasoning.replace('\n', "\n> ")));
+            md.push_str(&format!(
+                "> **Thought Process:**\n> {}\n\n",
+                reasoning.replace('\n', "\n> ")
+            ));
         }
 
         md.push_str(&format!("{}\n\n---\n\n", msg.content));

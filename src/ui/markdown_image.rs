@@ -25,7 +25,11 @@ struct ChatImage {
 
 impl ChatImage {
     fn title(&self) -> String {
-        if self.alt.trim().is_empty() { "图片".to_string() } else { self.alt.trim().to_string() }
+        if self.alt.trim().is_empty() {
+            "图片".to_string()
+        } else {
+            self.alt.trim().to_string()
+        }
     }
 }
 
@@ -57,9 +61,7 @@ pub fn normalize_markdown_image_urls(src: &str) -> String {
                 if trimmed.to_ascii_lowercase().starts_with("data:") {
                     out.push_str(alt_part);
                     let unbracketed = trimmed.trim_start_matches('<').trim_end_matches('>');
-                    let cleaned = unbracketed
-                        .replace(['\r', '\n'], "")
-                        .replace(' ', "%20");
+                    let cleaned = unbracketed.replace(['\r', '\n'], "").replace(' ', "%20");
                     out.push_str(&cleaned);
                     out.push(')');
                     rest = &url_part[paren_end + 1..];
@@ -231,7 +233,14 @@ fn render_loaded_base64(
         .cursor_pointer()
         .on_mouse_down(MouseButton::Left, |_, _, cx| GlobalState::suppress_text_selection(cx))
         .on_click(move |_, window, cx| {
-            open_base64_viewer(img_for_viewer.clone(), raw_for_viewer.clone(), title.clone(), Some(natural), window, cx);
+            open_base64_viewer(
+                img_for_viewer.clone(),
+                raw_for_viewer.clone(),
+                title.clone(),
+                Some(natural),
+                window,
+                cx,
+            );
         })
         .child(
             img(gpui_image)
@@ -276,32 +285,39 @@ fn render_failed(url: String, image: &ChatImage, error: String, p: &Palette) -> 
     let reason = error.lines().next().unwrap_or("").chars().take(160).collect::<String>();
     let retry_url = url.clone();
     let open_url = url;
-    image_card(&id, IconName::ImageOff, format!("图片加载失败：{}", image.title()), reason, None, p)
-        .child(
-            h_flex()
-                .flex_none()
-                .gap_1()
-                .child(
-                    Button::new(SharedString::from(format!("{id}-retry")))
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::RotateCw)
-                        .tooltip("重试")
-                        .on_click(move |_, window, cx| {
-                            cx.remove_asset::<ImgResourceLoader>(&Resource::Uri(retry_url.clone().into()));
-                            window.refresh();
-                        }),
-                )
-                .child(
-                    Button::new(SharedString::from(format!("{id}-open")))
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::ExternalLink)
-                        .tooltip("在浏览器中打开")
-                        .on_click(move |_, _, cx| cx.open_url(&open_url)),
-                ),
-        )
-        .into_any_element()
+    image_card(
+        &id,
+        IconName::ImageOff,
+        format!("图片加载失败：{}", image.title()),
+        reason,
+        None,
+        p,
+    )
+    .child(
+        h_flex()
+            .flex_none()
+            .gap_1()
+            .child(
+                Button::new(SharedString::from(format!("{id}-retry")))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::RotateCw)
+                    .tooltip("重试")
+                    .on_click(move |_, window, cx| {
+                        cx.remove_asset::<ImgResourceLoader>(&Resource::Uri(retry_url.clone().into()));
+                        window.refresh();
+                    }),
+            )
+            .child(
+                Button::new(SharedString::from(format!("{id}-open")))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::ExternalLink)
+                    .tooltip("在浏览器中打开")
+                    .on_click(move |_, _, cx| cx.open_url(&open_url)),
+            ),
+    )
+    .into_any_element()
 }
 
 /// GPUI 会在错误外面包一层「loading image asset from ...」，这里取出真正的原因
@@ -356,11 +372,20 @@ fn image_card(
                         .truncate()
                         .text_xs()
                         .text_color(p.muted_foreground)
-                        .child(if detail.is_empty() { "远程图片".to_string() } else { detail }),
+                        .child(if detail.is_empty() {
+                            "远程图片".to_string()
+                        } else {
+                            detail
+                        }),
                 ),
         )
         .children(action.map(|label| {
-            div().flex_none().text_xs().font_weight(FontWeight::MEDIUM).text_color(p.primary).child(label)
+            div()
+                .flex_none()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(p.primary)
+                .child(label)
         }))
 }
 
@@ -402,7 +427,14 @@ pub fn open_image_viewer(url: String, title: String, natural: Option<(f32, f32)>
                     .w_full()
                     .gap_3()
                     .justify_between()
-                    .child(div().min_w_0().truncate().text_xs().text_color(p.muted_foreground).child(host))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(p.muted_foreground)
+                            .child(host),
+                    )
                     .child(
                         h_flex()
                             .flex_none()
@@ -515,12 +547,7 @@ pub fn open_base64_viewer(
 }
 
 /// 在应用内放大查看本地图片附件
-pub fn open_local_image_viewer(
-    path: std::path::PathBuf,
-    title: String,
-    window: &mut Window,
-    cx: &mut App,
-) {
+pub fn open_local_image_viewer(path: std::path::PathBuf, title: String, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, window, cx| {
         let p = Palette::new(cx);
         let viewport = window.viewport_size();
@@ -545,7 +572,14 @@ pub fn open_local_image_viewer(
                     .w_full()
                     .gap_3()
                     .justify_between()
-                    .child(div().min_w_0().truncate().text_xs().text_color(p.muted_foreground).child(file_path_str))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(p.muted_foreground)
+                            .child(file_path_str),
+                    )
                     .child(
                         Button::new("local-image-close")
                             .primary()
@@ -567,8 +601,16 @@ fn element_id(prefix: &str, url: &str) -> SharedString {
 }
 
 fn fit_size(width: f32, height: f32, requested_width: Option<f32>, requested_height: Option<f32>) -> (f32, f32) {
-    let mut width = if width > 1. { width } else { requested_width.unwrap_or(320.) };
-    let mut height = if height > 1. { height } else { requested_height.unwrap_or(180.) };
+    let mut width = if width > 1. {
+        width
+    } else {
+        requested_width.unwrap_or(320.)
+    };
+    let mut height = if height > 1. {
+        height
+    } else {
+        requested_height.unwrap_or(180.)
+    };
     if let Some(requested) = requested_width.filter(|value| *value > 1.) {
         let scale = requested / width;
         width = requested;

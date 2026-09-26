@@ -128,11 +128,24 @@ pub fn detect(model_id: &str, tags: &str) -> ModelSpec {
         }
     };
     if [
-        "vision", "-vl", "vl-", "qvq", "pixtral", "llava", "internvl", "minicpm-v",
-        "sensenova-u", "-u1", "step-1v", "step-2", "glm-4v", "glm-4.5v", "glm-5v",
+        "vision",
+        "-vl",
+        "vl-",
+        "qvq",
+        "pixtral",
+        "llava",
+        "internvl",
+        "minicpm-v",
+        "sensenova-u",
+        "-u1",
+        "step-1v",
+        "step-2",
+        "glm-4v",
+        "glm-4.5v",
+        "glm-5v",
     ]
-        .iter()
-        .any(|word| name.contains(word))
+    .iter()
+    .any(|word| name.contains(word))
     {
         add(Vision);
     }
@@ -140,8 +153,21 @@ pub fn detect(model_id: &str, tags: &str) -> ModelSpec {
         add(WebSearch);
     }
     if [
-        "dall-e", "gpt-image", "imagen", "flux", "stable-diffusion", "sdxl", "sd3", "cogview", "wanx", "seedream",
-        "kolors", "midjourney", "qwen-image", "hunyuan-image", "-image",
+        "dall-e",
+        "gpt-image",
+        "imagen",
+        "flux",
+        "stable-diffusion",
+        "sdxl",
+        "sd3",
+        "cogview",
+        "wanx",
+        "seedream",
+        "kolors",
+        "midjourney",
+        "qwen-image",
+        "hunyuan-image",
+        "-image",
     ]
     .iter()
     .any(|word| name.contains(word))
@@ -150,7 +176,9 @@ pub fn detect(model_id: &str, tags: &str) -> ModelSpec {
     }
     if spec.reasoning_levels.is_empty()
         && !name.contains("non-reasoning")
-        && ["reasoner", "reasoning", "thinking", "-r1", "qwq"].iter().any(|word| name.contains(word))
+        && ["reasoner", "reasoning", "thinking", "-r1", "qwq"]
+            .iter()
+            .any(|word| name.contains(word))
     {
         spec.always_thinks = true;
     }
@@ -214,7 +242,11 @@ fn family_spec(name: &str) -> ModelSpec {
             return spec(100_000, 4_096, &[], &[]);
         }
         // Claude 4 及之后都支持扩展思考。没收录的新版本按 32K 输出算，保证不超限
-        let output = if CLAUDE_4.is_match(name) && !CLAUDE_OPUS_4_EARLY.is_match(name) { 64_000 } else { 32_000 };
+        let output = if CLAUDE_4.is_match(name) && !CLAUDE_OPUS_4_EARLY.is_match(name) {
+            64_000
+        } else {
+            32_000
+        };
         return spec(200_000, output, MULTIMODAL, &[Off, Low, Medium, High]);
     }
 
@@ -276,14 +308,26 @@ fn family_spec(name: &str) -> ModelSpec {
         if has("vl") || has("qvq") || has("omni") {
             capabilities.push(Vision);
         }
-        if ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-flash", "qwen2.5", "qwen3", "qwq"]
-            .iter()
-            .any(|prefix| starts(prefix))
+        if [
+            "qwen-max",
+            "qwen-plus",
+            "qwen-turbo",
+            "qwen-flash",
+            "qwen2.5",
+            "qwen3",
+            "qwq",
+        ]
+        .iter()
+        .any(|prefix| starts(prefix))
         {
             capabilities.push(Tools);
         }
         let base = spec(0, 0, &capabilities, &[]);
-        return if has("qwq") || has("qvq") || has("thinking") { thinking(base) } else { base };
+        return if has("qwq") || has("qvq") || has("thinking") {
+            thinking(base)
+        } else {
+            base
+        };
     }
 
     // ---------- 智谱 GLM ----------
@@ -293,7 +337,11 @@ fn family_spec(name: &str) -> ModelSpec {
             capabilities.push(Vision);
         }
         let base = spec(0, 0, &capabilities, &[]);
-        return if has("thinking") || has("glm-z1") { thinking(base) } else { base };
+        return if has("thinking") || has("glm-z1") {
+            thinking(base)
+        } else {
+            base
+        };
     }
 
     // ---------- 月之暗面 Kimi ----------
@@ -336,19 +384,42 @@ fn family_spec(name: &str) -> ModelSpec {
         let base = spec(0, 0, &[Tools], &[]);
         return if has("m1") { thinking(base) } else { base };
     }
-    if ["mistral", "mixtral", "codestral", "pixtral", "magistral", "ministral", "devstral"]
-        .iter()
-        .any(|word| has(word))
+    if [
+        "mistral",
+        "mixtral",
+        "codestral",
+        "pixtral",
+        "magistral",
+        "ministral",
+        "devstral",
+    ]
+    .iter()
+    .any(|word| has(word))
     {
-        let context = if has("codestral") { 256_000 } else if has("large") { 131_072 } else { 0 };
+        let context = if has("codestral") {
+            256_000
+        } else if has("large") {
+            131_072
+        } else {
+            0
+        };
         let capabilities: &[Capability] = if has("pixtral") { &[Vision, Tools] } else { &[Tools] };
         let base = spec(context, 0, capabilities, &[]);
         return if has("magistral") { thinking(base) } else { base };
     }
     if has("llama") {
-        let modern = ["llama-3.1", "llama-3.2", "llama-3.3", "llama-4", "llama3.1", "llama3.2", "llama3.3", "llama4"]
-            .iter()
-            .any(|word| has(word));
+        let modern = [
+            "llama-3.1",
+            "llama-3.2",
+            "llama-3.3",
+            "llama-4",
+            "llama3.1",
+            "llama3.2",
+            "llama3.3",
+            "llama4",
+        ]
+        .iter()
+        .any(|word| has(word));
         let vision = has("vision") || has("llama-4") || has("llama4");
         let capabilities: &[Capability] = match (vision, modern) {
             (true, _) => &[Vision, Tools],
@@ -367,7 +438,11 @@ fn family_spec(name: &str) -> ModelSpec {
             capabilities.push(Vision);
         }
         let base = spec(131_072, 8_192, &capabilities, &[]);
-        return if has("reasoner") || has("thinking") { thinking(base) } else { base };
+        return if has("reasoner") || has("thinking") {
+            thinking(base)
+        } else {
+            base
+        };
     }
     ModelSpec::default()
 }
@@ -376,7 +451,11 @@ fn family_spec(name: &str) -> ModelSpec {
 fn size_suffix(name: &str) -> Option<u32> {
     let captures = SIZE_SUFFIX.captures(name)?;
     let number: f64 = captures.get(1)?.as_str().parse().ok()?;
-    let unit = if captures.get(2)?.as_str() == "m" { 1_048_576.0 } else { 1_024.0 };
+    let unit = if captures.get(2)?.as_str() == "m" {
+        1_048_576.0
+    } else {
+        1_024.0
+    };
     let value = number * unit;
     (1_000.0..=100_000_000.0).contains(&value).then_some(value as u32)
 }
@@ -429,7 +508,9 @@ pub fn parse_tokens(text: &str) -> Result<Option<u32>, String> {
     } else {
         (lower.as_str(), 1.0)
     };
-    let value: f64 = number.parse().map_err(|_| format!("「{text}」不是有效的数字，可以写 128000、128K 或 1M"))?;
+    let value: f64 = number
+        .parse()
+        .map_err(|_| format!("「{text}」不是有效的数字，可以写 128000、128K 或 1M"))?;
     let value = (value * multiplier).round();
     if !(1.0..=100_000_000.0).contains(&value) {
         return Err(format!("「{text}」超出了合理范围"));
@@ -472,7 +553,11 @@ mod tests {
     #[test]
     fn suffixes_and_keywords_fill_the_gaps() {
         assert_eq!(detect("moonshot-v1-128k", "").context_window, Some(131_072));
-        assert!(detect("moonshot-v1-8k-vision-preview", "").capabilities.contains(&Vision));
+        assert!(
+            detect("moonshot-v1-8k-vision-preview", "")
+                .capabilities
+                .contains(&Vision)
+        );
         assert!(detect("qwen2.5-vl-72b-instruct", "").capabilities.contains(&Vision));
         assert!(detect("qwq-32b", "").always_thinks);
         assert!(detect("dall-e-3", "").capabilities.contains(&ImageOutput));

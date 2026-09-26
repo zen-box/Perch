@@ -15,13 +15,21 @@ use crate::config::ModelConfig;
 /// 当前对话使用的模型 ID，以及它在渠道里的配置（找不到时为空）
 fn current_model(state: &AppState) -> (String, Option<ModelConfig>) {
     let session = state.storage.get_active_session();
-    let provider_id = session.map(|s| s.provider_id.as_str()).filter(|id| !id.is_empty())
+    let provider_id = session
+        .map(|s| s.provider_id.as_str())
+        .filter(|id| !id.is_empty())
         .unwrap_or(&state.config.active_provider_id);
     let default_model = state.config.default_model_selection().1;
-    let model_id = session.map(|s| s.model.as_str()).filter(|id| !id.is_empty() && *id != "default")
+    let model_id = session
+        .map(|s| s.model.as_str())
+        .filter(|id| !id.is_empty() && *id != "default")
         .unwrap_or(&default_model)
         .to_string();
-    let config = state.config.providers.iter().find(|p| p.id == provider_id)
+    let config = state
+        .config
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
         .or_else(|| state.config.get_active_provider())
         .and_then(|p| p.models.iter().find(|m| m.id == model_id))
         .cloned();
@@ -71,9 +79,16 @@ fn render_model_list(
         let state = app.read(cx);
         (
             state.config.providers.clone(),
-            state.storage.get_active_session().map(|s| s.provider_id.clone())
-                .filter(|id| !id.is_empty()).unwrap_or_else(|| state.config.active_provider_id.clone()),
-            state.storage.get_active_session().map(|s| s.model.clone())
+            state
+                .storage
+                .get_active_session()
+                .map(|s| s.provider_id.clone())
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| state.config.active_provider_id.clone()),
+            state
+                .storage
+                .get_active_session()
+                .map(|s| s.model.clone())
                 .filter(|id| !id.is_empty() && id != "default")
                 .unwrap_or_else(|| state.config.default_model_selection().1),
             state.model_picker_search_input.clone(),
@@ -141,14 +156,9 @@ fn render_model_list(
                         this.child(Icon::new(IconName::Pin).size(px(12.)).text_color(p.muted_foreground))
                     })
                     .child(model_badges(model, &p))
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(16.))
-                            .when(is_selected, |this| {
-                                this.child(Icon::new(IconName::Check).size(px(14.)).text_color(p.primary))
-                            }),
-                    )
+                    .child(div().flex_none().w(px(16.)).when(is_selected, |this| {
+                        this.child(Icon::new(IconName::Check).size(px(14.)).text_color(p.primary))
+                    }))
                     .into_any_element(),
             );
         }
@@ -160,10 +170,11 @@ fn render_model_list(
     v_flex()
         .gap_1()
         .child(
-            Input::new(&search_input)
-                .small()
-                .cleanable(true)
-                .prefix(Icon::new(IconName::Search).small().text_color(cx.theme().muted_foreground)),
+            Input::new(&search_input).small().cleanable(true).prefix(
+                Icon::new(IconName::Search)
+                    .small()
+                    .text_color(cx.theme().muted_foreground),
+            ),
         )
         .map(|this| {
             if has_models {
@@ -180,7 +191,11 @@ fn render_model_list(
                         .py_6()
                         .text_sm()
                         .text_color(p.muted_foreground)
-                        .child(if query.is_empty() { "还没有可用的模型" } else { "没有匹配的模型" })
+                        .child(if query.is_empty() {
+                            "还没有可用的模型"
+                        } else {
+                            "没有匹配的模型"
+                        })
                         .child(
                             Button::new("goto-providers")
                                 .outline()

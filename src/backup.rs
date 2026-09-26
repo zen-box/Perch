@@ -18,7 +18,13 @@ pub struct BackupFile {
     pub config: AppConfig,
 }
 
-pub fn write_backup(path: &Path, active_session_id: &str, sessions: &[ChatSession], prompts: &PromptLibrary, config: &AppConfig) -> Result<(), String> {
+pub fn write_backup(
+    path: &Path,
+    active_session_id: &str,
+    sessions: &[ChatSession],
+    prompts: &PromptLibrary,
+    config: &AppConfig,
+) -> Result<(), String> {
     let mut sessions = sessions.to_vec();
     for session in &mut sessions {
         for message in &mut session.messages {
@@ -75,7 +81,14 @@ mod tests {
             extra_headers: Vec::new(),
         });
         let session = ChatSession::new("标题".into(), "默认".into(), "model".into(), "p".into());
-        write_backup(&path, &session.id, &[session.clone()], &PromptLibrary::default(), &config).unwrap();
+        write_backup(
+            &path,
+            &session.id,
+            &[session.clone()],
+            &PromptLibrary::default(),
+            &config,
+        )
+        .unwrap();
         let raw = fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("secret-value"));
         let backup = read_backup(&path).unwrap();

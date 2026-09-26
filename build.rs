@@ -46,7 +46,11 @@ fn embed_brand_icons() {
     let mut code = String::from("/// 构建时从 assets/brand 嵌入的品牌图标：(文件名, SVG 内容)\n");
     code.push_str("pub static BRAND_ICONS: &[(&str, &[u8])] = &[\n");
     for name in &names {
-        writeln!(code, "    ({name:?}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/brand/{name}\"))),").unwrap();
+        writeln!(
+            code,
+            "    ({name:?}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/brand/{name}\"))),"
+        )
+        .unwrap();
     }
     code.push_str("];\n");
     fs::write(out_dir.join("brand_icons.rs"), code).expect("write brand_icons.rs");

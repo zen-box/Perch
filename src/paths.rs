@@ -99,19 +99,14 @@ pub fn data_file(name: &str) -> PathBuf {
     if path.exists() {
         return path;
     }
-    let legacy_name = LEGACY_FILES
-        .iter()
-        .find(|(_, new)| *new == name)
-        .map(|(old, _)| *old);
+    let legacy_name = LEGACY_FILES.iter().find(|(_, new)| *new == name).map(|(old, _)| *old);
     let mut candidates = vec![Path::new(name).to_path_buf()];
     if let Some(old) = legacy_name {
         candidates.push(Path::new(old).to_path_buf());
     }
     for legacy in candidates {
         if legacy.exists() {
-            fs::copy(&legacy, &path).unwrap_or_else(|error| {
-                panic!("Unable to migrate {}: {error}", legacy.display())
-            });
+            fs::copy(&legacy, &path).unwrap_or_else(|error| panic!("Unable to migrate {}: {error}", legacy.display()));
             break;
         }
     }

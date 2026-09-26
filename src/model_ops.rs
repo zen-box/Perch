@@ -61,9 +61,19 @@ impl AppState {
         let is_new = original_id.is_none();
         let id = draft.id.clone();
         // 显示名称和 ID 相同时输入框留空，占位文字会提示
-        let name = if draft.name == draft.id { String::new() } else { draft.name.clone() };
-        let context = draft.context_window.map(model_info::format_tokens_exact).unwrap_or_default();
-        let output = draft.max_output.map(model_info::format_tokens_exact).unwrap_or_default();
+        let name = if draft.name == draft.id {
+            String::new()
+        } else {
+            draft.name.clone()
+        };
+        let context = draft
+            .context_window
+            .map(model_info::format_tokens_exact)
+            .unwrap_or_default();
+        let output = draft
+            .max_output
+            .map(model_info::format_tokens_exact)
+            .unwrap_or_default();
         self.model_editor = Some(ModelEditor {
             provider_id,
             original_id,
@@ -71,10 +81,14 @@ impl AppState {
             context_error: None,
             output_error: None,
         });
-        self.model_edit_id_input.update(cx, |input, cx| input.set_value(&id, window, cx));
-        self.model_edit_name_input.update(cx, |input, cx| input.set_value(&name, window, cx));
-        self.model_edit_context_input.update(cx, |input, cx| input.set_value(&context, window, cx));
-        self.model_edit_output_input.update(cx, |input, cx| input.set_value(&output, window, cx));
+        self.model_edit_id_input
+            .update(cx, |input, cx| input.set_value(&id, window, cx));
+        self.model_edit_name_input
+            .update(cx, |input, cx| input.set_value(&name, window, cx));
+        self.model_edit_context_input
+            .update(cx, |input, cx| input.set_value(&context, window, cx));
+        self.model_edit_output_input
+            .update(cx, |input, cx| input.set_value(&output, window, cx));
         if is_new {
             self.model_edit_id_input.update(cx, |input, cx| input.focus(window, cx));
         }
@@ -87,7 +101,11 @@ impl AppState {
             update(&mut editor.draft);
             // 默认强度必须是支持的档位之一
             let levels = editor.draft.effective_reasoning_levels();
-            if editor.draft.default_reasoning.is_some_and(|level| !levels.contains(&level)) {
+            if editor
+                .draft
+                .default_reasoning
+                .is_some_and(|level| !levels.contains(&level))
+            {
                 editor.draft.default_reasoning = None;
             }
             cx.notify();
@@ -102,7 +120,9 @@ impl AppState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.model_editor.as_mut() else { return };
+        let Some(editor) = self.model_editor.as_mut() else {
+            return;
+        };
         match field {
             TokenField::Context => {
                 editor.draft.context_window = value;
@@ -128,7 +148,9 @@ impl AppState {
             TokenField::Context => self.model_edit_context_input.read(cx).value().to_string(),
             TokenField::Output => self.model_edit_output_input.read(cx).value().to_string(),
         };
-        let Some(editor) = self.model_editor.as_mut() else { return };
+        let Some(editor) = self.model_editor.as_mut() else {
+            return;
+        };
         let (value, error) = match model_info::parse_tokens(&text) {
             Ok(value) => (value, None),
             Err(error) => (None, Some(error)),
@@ -201,7 +223,9 @@ impl AppState {
 
     /// 返回 true 表示保存成功，弹窗可以关闭
     pub fn confirm_model_editor(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(editor) = self.model_editor.clone() else { return false };
+        let Some(editor) = self.model_editor.clone() else {
+            return false;
+        };
         let id = if editor.is_new() {
             self.model_edit_id_input.read(cx).value().trim().to_string()
         } else {
@@ -234,7 +258,12 @@ impl AppState {
             cx.notify();
             return false;
         }
-        let Some(provider) = self.config.providers.iter_mut().find(|provider| provider.id == editor.provider_id) else {
+        let Some(provider) = self
+            .config
+            .providers
+            .iter_mut()
+            .find(|provider| provider.id == editor.provider_id)
+        else {
             return false;
         };
 
@@ -253,7 +282,14 @@ impl AppState {
         match self.config.save() {
             Ok(()) => {
                 self.model_editor = None;
-                self.toast(ToastLevel::Success, if is_new { "模型已添加" } else { "模型设置已保存" });
+                self.toast(
+                    ToastLevel::Success,
+                    if is_new {
+                        "模型已添加"
+                    } else {
+                        "模型设置已保存"
+                    },
+                );
                 cx.notify();
                 true
             }

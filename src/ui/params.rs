@@ -1,5 +1,5 @@
- use super::brand_icon::model_avatar;
 use super::Palette;
+use super::brand_icon::model_avatar;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
@@ -36,11 +36,17 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
         let session = state.storage.get_active_session();
         let params = session.and_then(|session| session.params.clone()).unwrap_or_default();
         let model = session.and_then(|session| {
-            state.config.providers.iter().find(|provider| provider.id == session.provider_id).and_then(|provider| {
-                provider.models.iter().find(|model| model.id == session.model).cloned()
-            })
+            state
+                .config
+                .providers
+                .iter()
+                .find(|provider| provider.id == session.provider_id)
+                .and_then(|provider| provider.models.iter().find(|model| model.id == session.model).cloned())
         });
-        let levels = model.as_ref().map(|model| model.effective_reasoning_levels()).unwrap_or_default();
+        let levels = model
+            .as_ref()
+            .map(|model| model.effective_reasoning_levels())
+            .unwrap_or_default();
         (params, levels, model.and_then(|model| model.default_reasoning))
     };
     let prompt = app.read(cx).params_prompt_input.clone();
@@ -56,15 +62,27 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
         .max_h(px(480.))
         .overflow_y_scrollbar()
         .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("对话参数"))
-        .child(div().text_xs().text_color(p.muted_foreground).child("留空或选择“默认”时使用全局设置"))
+        .child(
+            div()
+                .text_xs()
+                .text_color(p.muted_foreground)
+                .child("留空或选择“默认”时使用全局设置"),
+        )
         .child(Textarea::new(&prompt))
         .child(choice_row(
             app,
             "temp",
             "温度",
-            temperature.map(|value| format!("{value:.1}")).unwrap_or_else(|| "默认".into()),
+            temperature
+                .map(|value| format!("{value:.1}"))
+                .unwrap_or_else(|| "默认".into()),
             temperature,
-            vec![(None, "默认"), (Some(0.2), "0.2"), (Some(0.7), "0.7"), (Some(1.0), "1.0")],
+            vec![
+                (None, "默认"),
+                (Some(0.2), "0.2"),
+                (Some(0.7), "0.7"),
+                (Some(1.0), "1.0"),
+            ],
             &p,
             |value, this, cx| this.patch_params(cx, |params| params.temperature = value),
         ))
@@ -72,9 +90,16 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
             app,
             "top-p",
             "top_p",
-            top_p.map(|value| format!("{value:.2}")).unwrap_or_else(|| "默认".into()),
+            top_p
+                .map(|value| format!("{value:.2}"))
+                .unwrap_or_else(|| "默认".into()),
             top_p,
-            vec![(None, "默认"), (Some(0.8), "0.8"), (Some(0.95), "0.95"), (Some(1.0), "1.0")],
+            vec![
+                (None, "默认"),
+                (Some(0.8), "0.8"),
+                (Some(0.95), "0.95"),
+                (Some(1.0), "1.0"),
+            ],
             &p,
             |value, this, cx| this.patch_params(cx, |params| params.top_p = value),
         ))
@@ -82,9 +107,16 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
             app,
             "max-tokens",
             "最大 tokens",
-            max_tokens.map(|value| value.to_string()).unwrap_or_else(|| "默认".into()),
+            max_tokens
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "默认".into()),
             max_tokens,
-            vec![(None, "默认"), (Some(1024u32), "1024"), (Some(4096), "4096"), (Some(8192), "8192")],
+            vec![
+                (None, "默认"),
+                (Some(1024u32), "1024"),
+                (Some(4096), "4096"),
+                (Some(8192), "8192"),
+            ],
             &p,
             |value, this, cx| this.patch_params(cx, |params| params.max_tokens = value),
         ))
@@ -92,9 +124,16 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
             app,
             "context",
             "上下文条数",
-            context_limit.map(|value| value.to_string()).unwrap_or_else(|| "全部".into()),
+            context_limit
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "全部".into()),
             context_limit,
-            vec![(None, "全部"), (Some(10usize), "10"), (Some(20), "20"), (Some(40), "40")],
+            vec![
+                (None, "全部"),
+                (Some(10usize), "10"),
+                (Some(20), "20"),
+                (Some(40), "40"),
+            ],
             &p,
             |value, this, cx| this.patch_params(cx, |params| params.context_limit = value),
         ))
@@ -106,22 +145,33 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
                 Some(level) => format!("默认（{}）", level.label()),
                 None => "默认".to_string(),
             };
-            let value_label = current.map(|level| level.label().to_string()).unwrap_or_else(|| default_label.clone());
+            let value_label = current
+                .map(|level| level.label().to_string())
+                .unwrap_or_else(|| default_label.clone());
             this.child(labeled(
                 "思考强度".to_string(),
                 value_label,
                 &p,
                 h_flex().flex_wrap().gap_1().children(
-                    std::iter::once(None).chain(levels.iter().copied().map(Some)).enumerate().map(|(ix, level)| {
-                        let app = app.clone();
-                        Button::new(("reason", ix))
-                            .xsmall()
-                            .map(|button| if current == level { button.primary() } else { button.ghost() })
-                            .label(level.map(ReasoningLevel::label).unwrap_or("默认"))
-                            .on_click(move |_, _, cx| {
-                                app.update(cx, |this, cx| this.patch_params(cx, |params| params.reasoning = level));
-                            })
-                    }),
+                    std::iter::once(None)
+                        .chain(levels.iter().copied().map(Some))
+                        .enumerate()
+                        .map(|(ix, level)| {
+                            let app = app.clone();
+                            Button::new(("reason", ix))
+                                .xsmall()
+                                .map(|button| {
+                                    if current == level {
+                                        button.primary()
+                                    } else {
+                                        button.ghost()
+                                    }
+                                })
+                                .label(level.map(ReasoningLevel::label).unwrap_or("默认"))
+                                .on_click(move |_, _, cx| {
+                                    app.update(cx, |this, cx| this.patch_params(cx, |params| params.reasoning = level));
+                                })
+                        }),
                 ),
             ))
         })
@@ -137,54 +187,62 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
                     }
                 })),
         )
-        .child(Button::new("reset-params").outline().small().label("恢复默认").on_click({
-            let app = app.clone();
-            move |_, window, cx| app.update(cx, |this, cx| this.reset_params(window, cx))
-        }))
+        .child(
+            Button::new("reset-params")
+                .outline()
+                .small()
+                .label("恢复默认")
+                .on_click({
+                    let app = app.clone();
+                    move |_, window, cx| app.update(cx, |this, cx| this.reset_params(window, cx))
+                }),
+        )
 }
 
- fn labeled(title: String, value: String, p: &Palette, control: impl IntoElement) -> AnyElement {
-     v_flex()
-         .gap_1()
-         .child(
-             h_flex()
-                 .justify_between()
-                 .child(div().text_sm().child(title))
-                 .child(div().text_xs().text_color(p.muted_foreground).child(value)),
-         )
-         .child(control)
-         .into_any_element()
- }
+fn labeled(title: String, value: String, p: &Palette, control: impl IntoElement) -> AnyElement {
+    v_flex()
+        .gap_1()
+        .child(
+            h_flex()
+                .justify_between()
+                .child(div().text_sm().child(title))
+                .child(div().text_xs().text_color(p.muted_foreground).child(value)),
+        )
+        .child(control)
+        .into_any_element()
+}
 
- fn choice_row<T: Copy + PartialEq + 'static>(
-     app: &Entity<AppState>,
-     id_prefix: &'static str,
-     title: &str,
-     current: String,
-     selected: Option<T>,
-     options: Vec<(Option<T>, &'static str)>,
-     p: &Palette,
-     on_select: impl Fn(Option<T>, &mut AppState, &mut Context<AppState>) + 'static,
- ) -> AnyElement {
-     let on_select = std::rc::Rc::new(on_select);
-     labeled(
-         title.to_string(),
-         current,
-         p,
-         h_flex().gap_1().children(options.into_iter().enumerate().map(|(ix, (value, label))| {
-             let app = app.clone();
-             let on_select = on_select.clone();
-             let active = value == selected;
-             Button::new((id_prefix, ix))
-                 .xsmall()
-                 .map(|button| if active { button.primary() } else { button.ghost() })
-                 .label(label)
-                 .on_click(move |_, _, cx| {
-                     app.update(cx, |this, cx| on_select(value, this, cx));
-                 })
-         })),
-     )
- }
+fn choice_row<T: Copy + PartialEq + 'static>(
+    app: &Entity<AppState>,
+    id_prefix: &'static str,
+    title: &str,
+    current: String,
+    selected: Option<T>,
+    options: Vec<(Option<T>, &'static str)>,
+    p: &Palette,
+    on_select: impl Fn(Option<T>, &mut AppState, &mut Context<AppState>) + 'static,
+) -> AnyElement {
+    let on_select = std::rc::Rc::new(on_select);
+    labeled(
+        title.to_string(),
+        current,
+        p,
+        h_flex()
+            .gap_1()
+            .children(options.into_iter().enumerate().map(|(ix, (value, label))| {
+                let app = app.clone();
+                let on_select = on_select.clone();
+                let active = value == selected;
+                Button::new((id_prefix, ix))
+                    .xsmall()
+                    .map(|button| if active { button.primary() } else { button.ghost() })
+                    .label(label)
+                    .on_click(move |_, _, cx| {
+                        app.update(cx, |this, cx| on_select(value, this, cx));
+                    })
+            })),
+    )
+}
 
 pub fn render_compare_button(state: &AppState, cx: &mut Context<AppState>) -> impl IntoElement {
     let app = cx.entity();
@@ -202,7 +260,11 @@ pub fn render_compare_button(state: &AppState, cx: &mut Context<AppState>) -> im
                 .xsmall()
                 .icon(IconName::Columns2)
                 .when(compare_count >= 2, |this| this.primary())
-                .label(if compare_count == 0 { "对比".into() } else { format!("对比 {compare_count}") }),
+                .label(if compare_count == 0 {
+                    "对比".into()
+                } else {
+                    format!("对比 {compare_count}")
+                }),
         )
         .content(move |_, _, cx| render_compare(&app, cx))
 }
@@ -338,7 +400,15 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
                             Some(m) => model_avatar(m, px(18.), &p),
                             None => super::brand_icon::model_id_avatar(&current_target.1, px(18.), &p),
                         })
-                        .child(div().flex_1().min_w_0().truncate().text_sm().font_weight(FontWeight::MEDIUM).child(current_name))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(current_name),
+                        )
                         .child(
                             div()
                                 .px_1p5()
@@ -354,9 +424,18 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
         .child(
             v_flex()
                 .gap_1()
-                .child(div().text_xs().text_color(p.muted_foreground).child("选择 1 到 2 个模型与当前模型对比："))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child("选择 1 到 2 个模型与当前模型对比："),
+                )
                 .child(if rows.is_empty() {
-                    div().text_sm().text_color(p.muted_foreground).child("没有其他已启用的模型").into_any_element()
+                    div()
+                        .text_sm()
+                        .text_color(p.muted_foreground)
+                        .child("没有其他已启用的模型")
+                        .into_any_element()
                 } else {
                     div()
                         .max_h(px(200.))
@@ -368,7 +447,11 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
             Button::new("run-compare")
                 .primary()
                 .small()
-                .label(if can_run { format!("开始对比 ({total_count} 个模型)") } else { "请选择对比模型".into() })
+                .label(if can_run {
+                    format!("开始对比 ({total_count} 个模型)")
+                } else {
+                    "请选择对比模型".into()
+                })
                 .disabled(!can_run)
                 .on_click(cx.listener(move |popover, _, window, cx| {
                     run_app.update(cx, |this, cx| this.send_compare(window, cx));
@@ -376,4 +459,3 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
                 })),
         )
 }
-

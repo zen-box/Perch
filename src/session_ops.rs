@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use gpui_kit::*;
 use tokio::sync::oneshot;
 
-use crate::app::{runtime, AppState, ToastLevel};
+use crate::app::{AppState, ToastLevel, runtime};
 use crate::backup::{self, BackupFile};
-use crate::config::{format_header_lines, parse_header_lines, ChannelType, ModelConfig, ProviderConfig};
+use crate::config::{ChannelType, ModelConfig, ProviderConfig, format_header_lines, parse_header_lines};
 use crate::llm::{ChatMessageReq, ChatRequest, StreamEvent, stream_chat};
 use crate::model::{AttachmentKind, ChatMessage, ChatParams, MessageVariant, ReasoningLevel, ResolvedParams};
-use crate::prompts::{PromptPreset, PromptTemplate, expand_variables};
 use crate::paths::data_dir;
+use crate::prompts::{PromptPreset, PromptTemplate, expand_variables};
 
 struct Job {
     key: String,
@@ -39,12 +39,23 @@ impl AppState {
 
     pub fn active_target(&self) -> (String, String) {
         let (default_provider, default_model) = self.config.default_model_selection();
-        self.storage.get_active_session().map(|session| {
-            (
-                if session.provider_id.is_empty() { default_provider.clone() } else { session.provider_id.clone() },
-                if session.model.is_empty() || session.model == "default" { default_model.clone() } else { session.model.clone() },
-            )
-        }).unwrap_or((default_provider, default_model))
+        self.storage
+            .get_active_session()
+            .map(|session| {
+                (
+                    if session.provider_id.is_empty() {
+                        default_provider.clone()
+                    } else {
+                        session.provider_id.clone()
+                    },
+                    if session.model.is_empty() || session.model == "default" {
+                        default_model.clone()
+                    } else {
+                        session.model.clone()
+                    },
+                )
+            })
+            .unwrap_or((default_provider, default_model))
     }
 
     pub fn compare_targets(&self) -> Vec<(String, String)> {
@@ -63,7 +74,11 @@ impl AppState {
         if (user_prompt.is_empty() && self.pending_attachments.is_empty()) || self.is_streaming {
             return;
         }
-        if self.storage.get_active_session().is_some_and(|session| session.has_unresolved_compare()) {
+        if self
+            .storage
+            .get_active_session()
+            .is_some_and(|session| session.has_unresolved_compare())
+        {
             self.toast(ToastLevel::Error, "请先采用一条对比回答，再继续对话");
             cx.notify();
             return;
@@ -105,13 +120,25 @@ impl AppState {
         self.start_compare(&targets, cx);
     }
 
-    pub fn regenerate_message(&mut self, message_id: &str, provider_id: Option<String>, model_id: Option<String>, cx: &mut Context<Self>) {
+    pub fn regenerate_message(
+        &mut self,
+        message_id: &str,
+        provider_id: Option<String>,
+        model_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         if self.is_streaming {
             return;
         }
         let active_id = self.storage.active_session_id.clone();
-        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else { return };
-        let Some(index) = session.messages.iter().position(|message| message.id == message_id && message.role == "assistant") else {
+        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
+            return;
+        };
+        let Some(index) = session
+            .messages
+            .iter()
+            .position(|message| message.id == message_id && message.role == "assistant")
+        else {
             return;
         };
         if !session.messages[..index].iter().any(|message| message.role == "user") {
@@ -132,8 +159,12 @@ impl AppState {
             return;
         }
         let active_id = self.storage.active_session_id.clone();
-        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else { return };
-        let Some(message) = session.messages.last_mut() else { return };
+        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
+            return;
+        };
+        let Some(message) = session.messages.last_mut() else {
+            return;
+        };
         if message.role != "assistant" || message.content.is_empty() || !message.variants.is_empty() {
             self.toast(ToastLevel::Error, "只能在已完成的回答后继续生成");
             cx.notify();
@@ -172,14 +203,23 @@ impl AppState {
 
     pub fn quote_message(&mut self, message_id: &str, cx: &mut Context<Self>) {
         let quote = self.storage.get_active_session().and_then(|session| {
-            session.messages.iter().find(|message| message.id == message_id).map(|message| {
-                let text = if message.content.is_empty() {
-                    message.variants.iter().map(|variant| variant.content.as_str()).collect::<Vec<_>>().join("\n")
-                } else {
-                    message.content.clone()
-                };
-                text.chars().take(800).collect::<String>()
-            })
+            session
+                .messages
+                .iter()
+                .find(|message| message.id == message_id)
+                .map(|message| {
+                    let text = if message.content.is_empty() {
+                        message
+                            .variants
+                            .iter()
+                            .map(|variant| variant.content.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    } else {
+                        message.content.clone()
+                    };
+                    text.chars().take(800).collect::<String>()
+                })
         });
         self.pending_quote = quote.filter(|text| !text.trim().is_empty());
         cx.notify();
@@ -192,7 +232,11 @@ impl AppState {
 
     pub fn begin_edit_message(&mut self, message_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let content = self.storage.get_active_session().and_then(|session| {
-            session.messages.iter().find(|message| message.id == message_id && message.role == "user").map(|message| message.content.clone())
+            session
+                .messages
+                .iter()
+                .find(|message| message.id == message_id && message.role == "user")
+                .map(|message| message.content.clone())
         });
         let Some(content) = content else { return };
         self.edit_message_id = Some(message_id.to_string());
@@ -203,27 +247,45 @@ impl AppState {
     }
 
     pub fn confirm_edit_message(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(message_id) = self.edit_message_id.clone() else { return false };
+        let Some(message_id) = self.edit_message_id.clone() else {
+            return false;
+        };
         let text = self.edit_message_input.read(cx).value().trim().to_string();
         if text.is_empty() || self.is_streaming {
             return false;
         }
         let active_id = self.storage.active_session_id.clone();
-        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else { return false };
-        let Some(index) = session.messages.iter().position(|message| message.id == message_id) else { return false };
+        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
+            return false;
+        };
+        let Some(index) = session.messages.iter().position(|message| message.id == message_id) else {
+            return false;
+        };
         session.messages[index].content = text;
         session.messages.truncate(index + 1);
         self.edit_message_id = None;
-        self.edit_message_input.update(cx, |input, cx| input.set_value("", window, cx));
+        self.edit_message_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.start_reply(None, cx);
         true
     }
 
     pub fn adopt_variant(&mut self, message_id: &str, variant_id: &str, cx: &mut Context<Self>) {
         let active_id = self.storage.active_session_id.clone();
-        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else { return };
-        let Some(message) = session.messages.iter_mut().find(|message| message.id == message_id) else { return };
-        let Some(variant) = message.variants.iter().find(|variant| variant.id == variant_id).cloned() else { return };
+        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
+            return;
+        };
+        let Some(message) = session.messages.iter_mut().find(|message| message.id == message_id) else {
+            return;
+        };
+        let Some(variant) = message
+            .variants
+            .iter()
+            .find(|variant| variant.id == variant_id)
+            .cloned()
+        else {
+            return;
+        };
         message.content = variant.content;
         message.reasoning_content = variant.reasoning_content;
         message.error = variant.error;
@@ -242,8 +304,12 @@ impl AppState {
 
     pub fn switch_variant(&mut self, message_id: &str, target_variant_ix: usize, cx: &mut Context<Self>) {
         let active_id = self.storage.active_session_id.clone();
-        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else { return };
-        let Some(message) = session.messages.iter_mut().find(|message| message.id == message_id) else { return };
+        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
+            return;
+        };
+        let Some(message) = session.messages.iter_mut().find(|message| message.id == message_id) else {
+            return;
+        };
         if target_variant_ix >= message.variants.len() {
             return;
         }
@@ -285,64 +351,79 @@ impl AppState {
 
     pub fn set_session_folder(&mut self, id: &str, folder: &str, cx: &mut Context<Self>) {
         if let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == id) {
-            session.folder = if folder.trim().is_empty() { "默认".into() } else { folder.trim().to_string() };
+            session.folder = if folder.trim().is_empty() {
+                "默认".into()
+            } else {
+                folder.trim().to_string()
+            };
         }
         self.persist_storage(cx);
         cx.notify();
     }
 
-     pub fn begin_move_folder(&mut self, id: &str, current: &str, window: &mut Window, cx: &mut Context<Self>) {
-         self.folder_target_id = Some(id.to_string());
-         let value = if current == "默认" { "" } else { current };
-         self.folder_name_input.update(cx, |input, cx| {
-             input.set_value(value, window, cx);
-             input.focus(window, cx);
-         });
-     }
+    pub fn begin_move_folder(&mut self, id: &str, current: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.folder_target_id = Some(id.to_string());
+        let value = if current == "默认" { "" } else { current };
+        self.folder_name_input.update(cx, |input, cx| {
+            input.set_value(value, window, cx);
+            input.focus(window, cx);
+        });
+    }
 
-     pub fn confirm_move_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-         let Some(id) = self.folder_target_id.clone() else { return false };
-         let name = self.folder_name_input.read(cx).value().trim().to_string();
-         self.set_session_folder(&id, &name, cx);
-         self.folder_target_id = None;
-         self.folder_name_input.update(cx, |input, cx| input.set_value("", window, cx));
-         true
-     }
+    pub fn confirm_move_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(id) = self.folder_target_id.clone() else {
+            return false;
+        };
+        let name = self.folder_name_input.read(cx).value().trim().to_string();
+        self.set_session_folder(&id, &name, cx);
+        self.folder_target_id = None;
+        self.folder_name_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        true
+    }
 
-     pub fn insert_template(&mut self, template_id: &str, window: &mut Window, cx: &mut Context<Self>) {
-         let Some(body) = self.prompts.templates.iter().find(|template| template.id == template_id).map(|template| template.body.clone()) else {
-             return;
-         };
-         let expanded = expand_variables(&body, &clipboard_text(cx), &self.selection_text(cx));
-         self.chat_input.update(cx, |input, cx| {
-             input.set_value("", window, cx);
-             input.insert(&expanded, window, cx);
-             input.focus(window, cx);
-         });
-     }
+    pub fn insert_template(&mut self, template_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(body) = self
+            .prompts
+            .templates
+            .iter()
+            .find(|template| template.id == template_id)
+            .map(|template| template.body.clone())
+        else {
+            return;
+        };
+        let expanded = expand_variables(&body, &clipboard_text(cx), &self.selection_text(cx));
+        self.chat_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.insert(&expanded, window, cx);
+            input.focus(window, cx);
+        });
+    }
 
-     pub fn toggle_favorites_filter(&mut self, cx: &mut Context<Self>) {
-         self.favorites_only = !self.favorites_only;
-         if self.favorites_only {
-             self.folder_filter.clear();
-         }
-         cx.notify();
-     }
+    pub fn toggle_favorites_filter(&mut self, cx: &mut Context<Self>) {
+        self.favorites_only = !self.favorites_only;
+        if self.favorites_only {
+            self.folder_filter.clear();
+        }
+        cx.notify();
+    }
 
-     pub fn select_folder_filter(&mut self, folder: &str, cx: &mut Context<Self>) {
-         self.favorites_only = false;
-         self.set_folder_filter(folder, cx);
-     }
+    pub fn select_folder_filter(&mut self, folder: &str, cx: &mut Context<Self>) {
+        self.favorites_only = false;
+        self.set_folder_filter(folder, cx);
+    }
 
-     pub fn clear_session_filters(&mut self, cx: &mut Context<Self>) {
-         self.folder_filter.clear();
-         self.favorites_only = false;
-         cx.notify();
-     }
+    pub fn clear_session_filters(&mut self, cx: &mut Context<Self>) {
+        self.folder_filter.clear();
+        self.favorites_only = false;
+        cx.notify();
+    }
 
     pub fn patch_params(&mut self, cx: &mut Context<Self>, update: impl FnOnce(&mut ChatParams)) {
         {
-            let Some(session) = self.storage.get_active_session_mut() else { return };
+            let Some(session) = self.storage.get_active_session_mut() else {
+                return;
+            };
             let params = session.params.get_or_insert_with(ChatParams::default);
             update(params);
             if params.is_unset() {
@@ -357,7 +438,8 @@ impl AppState {
         if let Some(session) = self.storage.get_active_session_mut() {
             session.params = None;
         }
-        self.params_prompt_input.update(cx, |input, cx| input.set_value("", window, cx));
+        self.params_prompt_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.persist_storage(cx);
         cx.notify();
     }
@@ -365,7 +447,9 @@ impl AppState {
     pub fn set_session_system_prompt(&mut self, value: String, cx: &mut Context<Self>) {
         let normalized = if value.trim().is_empty() { None } else { Some(value) };
         {
-            let Some(session) = self.storage.get_active_session_mut() else { return };
+            let Some(session) = self.storage.get_active_session_mut() else {
+                return;
+            };
             let current = session.params.as_ref().and_then(|params| params.system_prompt.clone());
             if current == normalized {
                 return;
@@ -380,23 +464,34 @@ impl AppState {
     }
 
     pub fn sync_params_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let prompt = self.storage.get_active_session()
+        let prompt = self
+            .storage
+            .get_active_session()
             .and_then(|session| session.params.as_ref())
             .and_then(|params| params.system_prompt.clone())
             .unwrap_or_default();
         if self.params_prompt_input.read(cx).value().as_ref() != prompt {
-            self.params_prompt_input.update(cx, |input, cx| input.set_value(&prompt, window, cx));
+            self.params_prompt_input
+                .update(cx, |input, cx| input.set_value(&prompt, window, cx));
         }
     }
 
     pub fn apply_slash_template(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let value = self.chat_input.read(cx).value();
         let token = value.trim();
-        let Some(name) = token.strip_prefix('/') else { return false };
+        let Some(name) = token.strip_prefix('/') else {
+            return false;
+        };
         if name.is_empty() || name.contains(char::is_whitespace) {
             return false;
         }
-        let Some(body) = self.prompts.templates.iter().find(|template| template.name.eq_ignore_ascii_case(name)).map(|template| template.body.clone()) else {
+        let Some(body) = self
+            .prompts
+            .templates
+            .iter()
+            .find(|template| template.name.eq_ignore_ascii_case(name))
+            .map(|template| template.body.clone())
+        else {
             return false;
         };
         let expanded = expand_variables(&body, &clipboard_text(cx), &self.selection_text(cx));
@@ -409,14 +504,32 @@ impl AppState {
     }
 
     pub fn create_session_from_preset(&mut self, preset_id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(preset) = self.prompts.presets.iter().find(|preset| preset.id == preset_id).cloned() else { return };
+        let Some(preset) = self
+            .prompts
+            .presets
+            .iter()
+            .find(|preset| preset.id == preset_id)
+            .cloned()
+        else {
+            return;
+        };
         let (default_provider, default_model) = self.config.default_model_selection();
-        let provider_id = if preset.provider_id.is_empty() { default_provider } else { preset.provider_id.clone() };
-        let model = if preset.model.is_empty() { default_model } else { preset.model.clone() };
+        let provider_id = if preset.provider_id.is_empty() {
+            default_provider
+        } else {
+            preset.provider_id.clone()
+        };
+        let model = if preset.model.is_empty() {
+            default_model
+        } else {
+            preset.model.clone()
+        };
         let id = self.storage.create_session(&preset.name, "默认", &model, &provider_id);
         if let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == id) {
             let mut params = preset.params.clone();
-            if params.system_prompt.as_ref().is_none_or(|text| text.trim().is_empty()) && !preset.system_prompt.trim().is_empty() {
+            if params.system_prompt.as_ref().is_none_or(|text| text.trim().is_empty())
+                && !preset.system_prompt.trim().is_empty()
+            {
                 params.system_prompt = Some(preset.system_prompt.clone());
             }
             session.params = if params.is_unset() { None } else { Some(params) };
@@ -455,13 +568,20 @@ impl AppState {
             let path = receiver.await.ok().and_then(|result| result.ok()).flatten();
             let Some(path) = path else { return };
             let _ = this.update(cx, |state, cx| {
-                match backup::write_backup(&path, &state.storage.active_session_id, &state.storage.sessions, &state.prompts, &state.config) {
+                match backup::write_backup(
+                    &path,
+                    &state.storage.active_session_id,
+                    &state.storage.sessions,
+                    &state.prompts,
+                    &state.config,
+                ) {
                     Ok(()) => state.toast(ToastLevel::Success, format!("已导出备份 {}", path.display())),
                     Err(error) => state.toast(ToastLevel::Error, format!("导出失败: {error}")),
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
     }
 
     pub fn pick_import_backup(&mut self, cx: &mut Context<Self>) {
@@ -474,24 +594,28 @@ impl AppState {
             let _ = tx.send(file);
         });
 
-        let _ = cx.spawn(async move |this, cx| {
-            let Ok(Some(path)) = rx.await else { return };
-            let loaded = backup::read_backup(&path);
-            let _ = this.update(cx, |state, cx| {
-                match loaded {
-                    Ok(file) => {
-                        state.pending_import = Some(file);
-                        state.toast(ToastLevel::Info, "已读取备份，请确认是否恢复");
+        let _ = cx
+            .spawn(async move |this, cx| {
+                let Ok(Some(path)) = rx.await else { return };
+                let loaded = backup::read_backup(&path);
+                let _ = this.update(cx, |state, cx| {
+                    match loaded {
+                        Ok(file) => {
+                            state.pending_import = Some(file);
+                            state.toast(ToastLevel::Info, "已读取备份，请确认是否恢复");
+                        }
+                        Err(error) => state.toast(ToastLevel::Error, error),
                     }
-                    Err(error) => state.toast(ToastLevel::Error, error),
-                }
-                cx.notify();
-            });
-        }).detach();
+                    cx.notify();
+                });
+            })
+            .detach();
     }
 
     pub fn confirm_import(&mut self, cx: &mut Context<Self>) {
-        let Some(backup) = self.pending_import.take() else { return };
+        let Some(backup) = self.pending_import.take() else {
+            return;
+        };
         self.apply_backup(backup);
         self.persist_storage(cx);
         if let Err(error) = self.prompts.save() {
@@ -500,7 +624,10 @@ impl AppState {
         if let Err(error) = self.config.save() {
             self.toast(ToastLevel::Error, format!("配置保存失败: {error}"));
         } else {
-            self.toast(ToastLevel::Success, "备份已恢复。API Key 需在本机凭据中存在，否则请重新填写");
+            self.toast(
+                ToastLevel::Success,
+                "备份已恢复。API Key 需在本机凭据中存在，否则请重新填写",
+            );
         }
         cx.notify();
     }
@@ -527,7 +654,11 @@ impl AppState {
                     template.body = body;
                 }
             } else {
-                self.prompts.templates.push(PromptTemplate { id: uuid::Uuid::new_v4().to_string(), name, body });
+                self.prompts.templates.push(PromptTemplate {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name,
+                    body,
+                });
             }
         } else if let Some(id) = edit_id {
             if let Some(preset) = self.prompts.presets.iter_mut().find(|preset| preset.id == id) {
@@ -547,9 +678,12 @@ impl AppState {
             });
         }
         self.prompt_edit_id = None;
-        self.prompt_name_input.update(cx, |input, cx| input.set_value("", window, cx));
-        self.prompt_icon_input.update(cx, |input, cx| input.set_value("", window, cx));
-        self.prompt_body_input.update(cx, |input, cx| input.set_value("", window, cx));
+        self.prompt_name_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.prompt_icon_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.prompt_body_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         if let Err(error) = self.prompts.save() {
             self.toast(ToastLevel::Error, format!("保存失败: {error}"));
         } else {
@@ -571,21 +705,44 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn load_provider_network_inputs(&mut self, provider: &ProviderConfig, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn load_provider_network_inputs(
+        &mut self,
+        provider: &ProviderConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let proxy = provider.proxy.clone();
         let timeout = provider.timeout_secs.to_string();
         let retries = provider.retries.to_string();
         let headers = format_header_lines(&provider.extra_headers);
-        self.cfg_proxy_input.update(cx, |input, cx| input.set_value(&proxy, window, cx));
-        self.cfg_timeout_input.update(cx, |input, cx| input.set_value(&timeout, window, cx));
-        self.cfg_retries_input.update(cx, |input, cx| input.set_value(&retries, window, cx));
-        self.cfg_headers_input.update(cx, |input, cx| input.set_value(&headers, window, cx));
+        self.cfg_proxy_input
+            .update(cx, |input, cx| input.set_value(&proxy, window, cx));
+        self.cfg_timeout_input
+            .update(cx, |input, cx| input.set_value(&timeout, window, cx));
+        self.cfg_retries_input
+            .update(cx, |input, cx| input.set_value(&retries, window, cx));
+        self.cfg_headers_input
+            .update(cx, |input, cx| input.set_value(&headers, window, cx));
     }
 
     pub fn read_provider_network(&self, cx: &Context<Self>) -> (String, u64, u8, Vec<crate::config::HeaderPair>) {
         let proxy = self.cfg_proxy_input.read(cx).value().trim().to_string();
-        let timeout = self.cfg_timeout_input.read(cx).value().trim().parse::<u64>().unwrap_or(90).clamp(5, 600);
-        let retries = self.cfg_retries_input.read(cx).value().trim().parse::<u8>().unwrap_or(0).min(5);
+        let timeout = self
+            .cfg_timeout_input
+            .read(cx)
+            .value()
+            .trim()
+            .parse::<u64>()
+            .unwrap_or(90)
+            .clamp(5, 600);
+        let retries = self
+            .cfg_retries_input
+            .read(cx)
+            .value()
+            .trim()
+            .parse::<u8>()
+            .unwrap_or(0)
+            .min(5);
         let headers = parse_header_lines(&self.cfg_headers_input.read(cx).value());
         (proxy, timeout, retries, headers)
     }
@@ -595,12 +752,23 @@ impl AppState {
             return false;
         }
         let (tool, arg, needs_confirm) = if user_prompt.starts_with("/ls") || user_prompt.starts_with("/dir") {
-            ("list_dir", user_prompt.trim_start_matches("/ls").trim_start_matches("/dir").trim().to_string(), false)
+            (
+                "list_dir",
+                user_prompt
+                    .trim_start_matches("/ls")
+                    .trim_start_matches("/dir")
+                    .trim()
+                    .to_string(),
+                false,
+            )
         } else if let Some(path) = user_prompt.strip_prefix("/read ") {
             ("read_file", path.trim().to_string(), false)
         } else if user_prompt == "/git" || user_prompt.starts_with("/git ") {
             ("git_status", String::new(), false)
-        } else if let Some(cmd) = user_prompt.strip_prefix("/bash ").or_else(|| user_prompt.strip_prefix("/sh ")) {
+        } else if let Some(cmd) = user_prompt
+            .strip_prefix("/bash ")
+            .or_else(|| user_prompt.strip_prefix("/sh "))
+        {
             ("bash", cmd.trim().to_string(), true)
         } else {
             return false;
@@ -624,7 +792,9 @@ impl AppState {
     fn prepare_user_turn(&mut self, user_prompt: &str, quote: Option<String>) {
         let active_id = self.storage.active_session_id.clone();
         let attachments = std::mem::take(&mut self.pending_attachments);
-        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else { return };
+        let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
+            return;
+        };
         if session.messages.is_empty() && session.title_auto {
             let title_source = if user_prompt.trim().is_empty() {
                 if let Some(att) = attachments.first() {
@@ -654,15 +824,28 @@ impl AppState {
         let active_id = self.storage.active_session_id.clone();
         let (default_provider, default_model) = self.config.default_model_selection();
         let (provider_id, model) = override_model.unwrap_or_else(|| {
-            self.storage.get_active_session().map(|session| {
-                (
-                    if session.provider_id.is_empty() { default_provider.clone() } else { session.provider_id.clone() },
-                    if session.model.is_empty() || session.model == "default" { default_model.clone() } else { session.model.clone() },
-                )
-            }).unwrap_or((default_provider, default_model))
+            self.storage
+                .get_active_session()
+                .map(|session| {
+                    (
+                        if session.provider_id.is_empty() {
+                            default_provider.clone()
+                        } else {
+                            session.provider_id.clone()
+                        },
+                        if session.model.is_empty() || session.model == "default" {
+                            default_model.clone()
+                        } else {
+                            session.model.clone()
+                        },
+                    )
+                })
+                .unwrap_or((default_provider, default_model))
         });
         if self.config.providers.is_empty() {
-            self.push_local_assistant("尚未创建任何 AI 渠道。\n\n点击右上角的设置图标，进入「模型渠道」添加你的第一个渠道。");
+            self.push_local_assistant(
+                "尚未创建任何 AI 渠道。\n\n点击右上角的设置图标，进入「模型渠道」添加你的第一个渠道。",
+            );
             self.persist_storage(cx);
             cx.notify();
             return;
@@ -734,7 +917,9 @@ impl AppState {
     }
 
     fn history_messages(&self) -> Vec<ChatMessageReq> {
-        let Some(session) = self.storage.get_active_session() else { return Vec::new() };
+        let Some(session) = self.storage.get_active_session() else {
+            return Vec::new();
+        };
         let resolved = session.resolved_params(&self.config.system_prompt, self.config.temperature);
         let mut messages = vec![ChatMessageReq::new("system", resolved.system_prompt)];
         messages.extend(
@@ -748,18 +933,35 @@ impl AppState {
 
     /// 找到要调用的渠道和模型。模型被停用或删除时退回同渠道第一个可用模型。
     fn resolve_model(&self, provider_id: &str, model_id: &str) -> Option<(&ProviderConfig, &ModelConfig)> {
-        let provider = self.config.providers.iter().find(|provider| provider.id == provider_id)
+        let provider = self
+            .config
+            .providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
             .or_else(|| self.config.get_active_provider())?;
-        let model = provider.models.iter().find(|model| model.id == model_id && model.enabled)
+        let model = provider
+            .models
+            .iter()
+            .find(|model| model.id == model_id && model.enabled)
             .or_else(|| provider.models.iter().find(|model| model.enabled))?;
         Some((provider, model))
     }
 
-    fn make_job(&self, message_id: &str, variant_id: Option<&str>, provider_id: &str, model_id: &str, messages: Vec<ChatMessageReq>) -> Option<Job> {
+    fn make_job(
+        &self,
+        message_id: &str,
+        variant_id: Option<&str>,
+        provider_id: &str,
+        model_id: &str,
+        messages: Vec<ChatMessageReq>,
+    ) -> Option<Job> {
         let (provider, model) = self.resolve_model(provider_id, model_id)?;
         let session = self.storage.get_active_session()?;
         let resolved = session.resolved_params(&self.config.system_prompt, self.config.temperature);
-        let explicit_temperature = session.params.as_ref().is_some_and(|params| params.temperature.is_some());
+        let explicit_temperature = session
+            .params
+            .as_ref()
+            .is_some_and(|params| params.temperature.is_some());
         Some(Job {
             key: stream_key(message_id, variant_id),
             message_id: message_id.to_string(),
@@ -786,16 +988,28 @@ impl AppState {
                     stream_chat(request, tx, Some(cancel_rx)).await;
                 });
                 while let Some(event) = rx.recv().await {
-                    let _ = this.update(cx, |state, cx| state.apply_stream_event(&key, &message_id, variant_id.as_deref(), event, cx));
+                    let _ = this.update(cx, |state, cx| {
+                        state.apply_stream_event(&key, &message_id, variant_id.as_deref(), event, cx)
+                    });
                 }
-                let _ = this.update(cx, |state, cx| state.apply_stream_event(&key, &message_id, variant_id.as_deref(), StreamEvent::Done, cx));
-            }).detach();
+                let _ = this.update(cx, |state, cx| {
+                    state.apply_stream_event(&key, &message_id, variant_id.as_deref(), StreamEvent::Done, cx)
+                });
+            })
+            .detach();
         }
         self.persist_storage(cx);
         cx.notify();
     }
 
-    fn apply_stream_event(&mut self, key: &str, message_id: &str, variant_id: Option<&str>, event: StreamEvent, cx: &mut Context<Self>) {
+    fn apply_stream_event(
+        &mut self,
+        key: &str,
+        message_id: &str,
+        variant_id: Option<&str>,
+        event: StreamEvent,
+        cx: &mut Context<Self>,
+    ) {
         if !self.active_streams.contains_key(key) {
             return;
         }
@@ -822,24 +1036,52 @@ impl AppState {
     }
 
     fn maybe_autotitle(&mut self, cx: &mut Context<Self>) {
-        let Some(session) = self.storage.get_active_session() else { return };
+        let Some(session) = self.storage.get_active_session() else {
+            return;
+        };
         if !session.title_auto || session.messages.len() < 2 {
             return;
         }
         let session_id = session.id.clone();
-        let excerpt = session.messages.iter().find(|message| message.role == "user").map(|message| message.content.chars().take(400).collect::<String>()).unwrap_or_default();
+        let excerpt = session
+            .messages
+            .iter()
+            .find(|message| message.role == "user")
+            .map(|message| message.content.chars().take(400).collect::<String>())
+            .unwrap_or_default();
         if excerpt.is_empty() {
             return;
         }
-        if let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == session_id) {
+        if let Some(session) = self
+            .storage
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        {
             session.title_auto = false;
         }
-        let provider_id = self.storage.get_active_session().map(|s| s.provider_id.clone()).unwrap_or_default();
-        let model_id = self.storage.get_active_session().map(|s| s.model.clone()).unwrap_or_default();
-        let Some(job) = self.make_job("title", None, &provider_id, &model_id, vec![
-            ChatMessageReq::new("system", "用不超过16个字给对话起标题，只输出标题本身，不要标点包裹。"),
-            ChatMessageReq::new("user", excerpt),
-        ]) else { return };
+        let provider_id = self
+            .storage
+            .get_active_session()
+            .map(|s| s.provider_id.clone())
+            .unwrap_or_default();
+        let model_id = self
+            .storage
+            .get_active_session()
+            .map(|s| s.model.clone())
+            .unwrap_or_default();
+        let Some(job) = self.make_job(
+            "title",
+            None,
+            &provider_id,
+            &model_id,
+            vec![
+                ChatMessageReq::new("system", "用不超过16个字给对话起标题，只输出标题本身，不要标点包裹。"),
+                ChatMessageReq::new("user", excerpt),
+            ],
+        ) else {
+            return;
+        };
         let mut request = job.request;
         request.stream = false;
         // 起标题用最弱的思考强度；还要思考的模型不限制输出长度，否则思考就把额度用完了
@@ -855,35 +1097,63 @@ impl AppState {
         }
         cx.spawn(async move |this, cx| {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            runtime().spawn(async move { stream_chat(request, tx, None).await; });
+            runtime().spawn(async move {
+                stream_chat(request, tx, None).await;
+            });
             let mut title = String::new();
             while let Some(event) = rx.recv().await {
                 if let StreamEvent::Content(text) = event {
                     title.push_str(&text);
                 }
             }
-            let title = title.trim().trim_matches('"').trim().chars().take(24).collect::<String>();
+            let title = title
+                .trim()
+                .trim_matches('"')
+                .trim()
+                .chars()
+                .take(24)
+                .collect::<String>();
             if title.is_empty() {
                 return;
             }
             let _ = this.update(cx, |state, cx| {
-                if let Some(session) = state.storage.sessions.iter_mut().find(|session| session.id == session_id) {
+                if let Some(session) = state
+                    .storage
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                {
                     session.title = title;
                     session.title_auto = false;
                     state.persist_storage(cx);
                     cx.notify();
                 }
             });
-        }).detach();
+        })
+        .detach();
     }
 
     fn apply_backup(&mut self, backup: BackupFile) {
-        let old_keys: HashMap<String, String> = self.config.providers.iter().map(|provider| (provider.id.clone(), provider.api_key.clone())).collect();
+        let old_keys: HashMap<String, String> = self
+            .config
+            .providers
+            .iter()
+            .map(|provider| (provider.id.clone(), provider.api_key.clone()))
+            .collect();
         self.storage.sessions = backup.sessions;
-        self.storage.active_session_id = if self.storage.sessions.iter().any(|session| session.id == backup.active_session_id) {
+        self.storage.active_session_id = if self
+            .storage
+            .sessions
+            .iter()
+            .any(|session| session.id == backup.active_session_id)
+        {
             backup.active_session_id
         } else {
-            self.storage.sessions.first().map(|session| session.id.clone()).unwrap_or_default()
+            self.storage
+                .sessions
+                .first()
+                .map(|session| session.id.clone())
+                .unwrap_or_default()
         };
         self.prompts = backup.prompts;
         self.config.providers = backup.config.providers;
@@ -936,7 +1206,9 @@ fn truncate_title(text: &str) -> String {
 }
 
 fn clipboard_text(cx: &App) -> String {
-    cx.read_from_clipboard().and_then(|item| item.text()).unwrap_or_default()
+    cx.read_from_clipboard()
+        .and_then(|item| item.text())
+        .unwrap_or_default()
 }
 
 fn chat_request(
@@ -948,10 +1220,16 @@ fn chat_request(
 ) -> ChatRequest {
     let levels = model.effective_reasoning_levels();
     // 对话没指定时用模型的默认强度；模型不支持的档位不发送
-    let reasoning = params.reasoning.or(model.default_reasoning).filter(|level| levels.contains(level));
+    let reasoning = params
+        .reasoning
+        .or(model.default_reasoning)
+        .filter(|level| levels.contains(level));
     let max_output = model.effective_max_output();
     // OpenAI 的推理模型只接受默认温度：没有在对话参数里专门设置过就不发送
-    let openai = matches!(provider.channel_type, ChannelType::OpenAiChat | ChannelType::OpenAiResponses);
+    let openai = matches!(
+        provider.channel_type,
+        ChannelType::OpenAiChat | ChannelType::OpenAiResponses
+    );
     let omit_sampling = openai && model.thinks() && !explicit_temperature;
     ChatRequest {
         channel_type: provider.channel_type,
@@ -961,14 +1239,24 @@ fn chat_request(
         messages,
         temperature: (!omit_sampling).then_some(params.temperature),
         top_p: if omit_sampling { None } else { params.top_p },
-        max_tokens: params.max_tokens.map(|value| max_output.map_or(value, |cap| value.min(cap))),
+        max_tokens: params
+            .max_tokens
+            .map(|value| max_output.map_or(value, |cap| value.min(cap))),
         stream: params.stream,
         reasoning,
         max_output,
         model_thinks: model.thinks(),
-        extra_headers: provider.extra_headers.iter().map(|header| (header.name.clone(), header.value.clone())).collect(),
+        extra_headers: provider
+            .extra_headers
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect(),
         proxy: provider.proxy.clone(),
-        timeout_secs: if provider.timeout_secs == 0 { 90 } else { provider.timeout_secs },
+        timeout_secs: if provider.timeout_secs == 0 {
+            90
+        } else {
+            provider.timeout_secs
+        },
         retries: provider.retries,
     }
 }
@@ -977,7 +1265,12 @@ fn apply_to_message(message: &mut ChatMessage, event: &StreamEvent) {
     match event {
         StreamEvent::Thinking(text) => message.reasoning_content.get_or_insert_with(String::new).push_str(text),
         StreamEvent::Content(text) => message.content.push_str(text),
-        StreamEvent::Metrics { tokens_prompt, tokens_completion, speed_tps, latency_ms } => {
+        StreamEvent::Metrics {
+            tokens_prompt,
+            tokens_completion,
+            speed_tps,
+            latency_ms,
+        } => {
             message.prompt_tokens = *tokens_prompt;
             message.completion_tokens = *tokens_completion;
             message.speed_tps = *speed_tps;
@@ -995,7 +1288,12 @@ fn apply_to_variant(variant: &mut MessageVariant, event: &StreamEvent) {
     match event {
         StreamEvent::Thinking(text) => variant.reasoning_content.get_or_insert_with(String::new).push_str(text),
         StreamEvent::Content(text) => variant.content.push_str(text),
-        StreamEvent::Metrics { tokens_prompt, tokens_completion, speed_tps, latency_ms } => {
+        StreamEvent::Metrics {
+            tokens_prompt,
+            tokens_completion,
+            speed_tps,
+            latency_ms,
+        } => {
             variant.prompt_tokens = *tokens_prompt;
             variant.completion_tokens = *tokens_completion;
             variant.speed_tps = *speed_tps;
@@ -1028,7 +1326,10 @@ mod tests {
             timeout_secs: 0,
             retries: 0,
             proxy: String::new(),
-            extra_headers: vec![HeaderPair { name: "X-A".into(), value: "1".into() }],
+            extra_headers: vec![HeaderPair {
+                name: "X-A".into(),
+                value: "1".into(),
+            }],
         }
     }
 
@@ -1047,19 +1348,47 @@ mod tests {
     #[std::prelude::v1::test]
     fn reasoning_models_skip_default_temperature_on_openai() {
         let o3 = ModelConfig::new("o3-mini", "o3-mini");
-        let request = chat_request(&provider(ChannelType::OpenAiChat), &o3, Vec::new(), &params(None, None), false);
+        let request = chat_request(
+            &provider(ChannelType::OpenAiChat),
+            &o3,
+            Vec::new(),
+            &params(None, None),
+            false,
+        );
         assert_eq!(request.temperature, None);
         assert_eq!(request.top_p, None);
-        let request = chat_request(&provider(ChannelType::OpenAiChat), &o3, Vec::new(), &params(None, None), true);
+        let request = chat_request(
+            &provider(ChannelType::OpenAiChat),
+            &o3,
+            Vec::new(),
+            &params(None, None),
+            true,
+        );
         assert_eq!(request.temperature, Some(0.7), "explicit temperature is kept");
 
         let gpt = ModelConfig::new("gpt-4o", "GPT-4o");
-        let request = chat_request(&provider(ChannelType::OpenAiChat), &gpt, Vec::new(), &params(None, None), false);
+        let request = chat_request(
+            &provider(ChannelType::OpenAiChat),
+            &gpt,
+            Vec::new(),
+            &params(None, None),
+            false,
+        );
         assert_eq!(request.temperature, Some(0.7));
 
         let claude = ModelConfig::new("claude-sonnet-4-5", "Claude");
-        let request = chat_request(&provider(ChannelType::Claude), &claude, Vec::new(), &params(None, None), false);
-        assert_eq!(request.temperature, Some(0.7), "Claude still honours the global temperature");
+        let request = chat_request(
+            &provider(ChannelType::Claude),
+            &claude,
+            Vec::new(),
+            &params(None, None),
+            false,
+        );
+        assert_eq!(
+            request.temperature,
+            Some(0.7),
+            "Claude still honours the global temperature"
+        );
         assert_eq!(request.max_output, Some(64_000));
     }
 
@@ -1067,18 +1396,38 @@ mod tests {
     fn model_default_reasoning_and_output_limit_apply() {
         let mut model = ModelConfig::new("claude-opus-4-1", "Opus");
         model.default_reasoning = Some(ReasoningLevel::High);
-        let request = chat_request(&provider(ChannelType::Claude), &model, Vec::new(), &params(None, Some(100_000)), false);
+        let request = chat_request(
+            &provider(ChannelType::Claude),
+            &model,
+            Vec::new(),
+            &params(None, Some(100_000)),
+            false,
+        );
         assert_eq!(request.reasoning, Some(ReasoningLevel::High));
         assert_eq!(request.max_tokens, Some(32_000), "clamped to the model's output limit");
 
-        let request =
-            chat_request(&provider(ChannelType::Claude), &model, Vec::new(), &params(Some(ReasoningLevel::Off), None), false);
-        assert_eq!(request.reasoning, Some(ReasoningLevel::Off), "the conversation's choice wins");
+        let request = chat_request(
+            &provider(ChannelType::Claude),
+            &model,
+            Vec::new(),
+            &params(Some(ReasoningLevel::Off), None),
+            false,
+        );
+        assert_eq!(
+            request.reasoning,
+            Some(ReasoningLevel::Off),
+            "the conversation's choice wins"
+        );
 
         // 模型不支持的档位不发送
         let plain = ModelConfig::new("gpt-4o", "GPT-4o");
-        let request =
-            chat_request(&provider(ChannelType::OpenAiChat), &plain, Vec::new(), &params(Some(ReasoningLevel::High), None), false);
+        let request = chat_request(
+            &provider(ChannelType::OpenAiChat),
+            &plain,
+            Vec::new(),
+            &params(Some(ReasoningLevel::High), None),
+            false,
+        );
         assert_eq!(request.reasoning, None);
     }
 }

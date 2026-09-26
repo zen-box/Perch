@@ -91,7 +91,15 @@ brands![
     ("openai-gpt5", "GPT-5", "openai", 0xF86AA4, 0xFFFFFF, false, 0.75),
     ("openai-o", "OpenAI o 系列", "openai", 0xF9C322, 0xFFFFFF, false, 0.75),
     ("openai-oss", "gpt-oss", "openai", 0x0099FF, 0xFFFFFF, false, 0.75),
-    ("openai-platform", "OpenAI 平台", "openai", 0x0000FE, 0xFFFFFF, false, 0.75),
+    (
+        "openai-platform",
+        "OpenAI 平台",
+        "openai",
+        0x0000FE,
+        0xFFFFFF,
+        false,
+        0.75
+    ),
     ("sora", "Sora", "sora", 0x0968DA, 0xFFFFFF, false, 0.7),
     ("dalle", "DALL·E", "dalle", 0x000000, 0xFFFFFF, true, 0.6),
     ("claude", "Claude", "claude", 0xD97757, 0xFFFFFF, false, 0.75),
@@ -101,7 +109,15 @@ brands![
     ("vertexai", "Vertex AI", "vertexai", 0x4285F4, 0xFFFFFF, false, 0.6),
     ("deepmind", "DeepMind", "deepmind", 0x1A73E8, 0xFFFFFF, false, 0.7),
     ("gemma", "Gemma", "gemma", 0x2E96FF, 0xFFFFFF, false, 0.9),
-    ("nanobanana", "Nano Banana", "nanobanana", 0xFCD53F, 0xFFFFFF, false, 0.8),
+    (
+        "nanobanana",
+        "Nano Banana",
+        "nanobanana",
+        0xFCD53F,
+        0xFFFFFF,
+        false,
+        0.8
+    ),
     ("deepseek", "DeepSeek", "deepseek", 0x4D6BFE, 0xFFFFFF, false, 0.75),
     ("qwen", "通义千问", "qwen", 0x615CED, 0xFFFFFF, false, 0.75),
     ("chatglm", "ChatGLM", "chatglm", 0x4268FA, 0xFFFFFF, false, 0.75),
@@ -135,13 +151,29 @@ brands![
     ("mistral", "Mistral", "mistral", 0xFA520F, 0xFFFFFF, false, 0.75),
     ("cohere", "Cohere", "cohere", 0x39594D, 0xFFFFFF, false, 0.6),
     ("aya", "Aya", "aya", 0x416FDC, 0xFFFFFF, false, 0.6),
-    ("perplexity", "Perplexity", "perplexity", 0x22B8CD, 0x000000, false, 0.75),
+    (
+        "perplexity",
+        "Perplexity",
+        "perplexity",
+        0x22B8CD,
+        0x000000,
+        false,
+        0.75
+    ),
     ("microsoft", "Microsoft", "microsoft", 0x00A4EF, 0xFFFFFF, false, 0.6),
     ("nvidia", "NVIDIA", "nvidia", 0x76B900, 0xFFFFFF, false, 0.7),
     ("ibm", "IBM", "ibm", 0x0F62FE, 0xFFFFFF, false, 0.75),
     ("ai21", "AI21", "ai21", 0xE91E63, 0xFFFFFF, false, 0.7),
     ("upstage", "Upstage", "upstage", 0x908AF9, 0xFFFFFF, false, 0.6),
-    ("nousresearch", "Nous Research", "nousresearch", 0x000000, 0xFFFFFF, false, 0.7),
+    (
+        "nousresearch",
+        "Nous Research",
+        "nousresearch",
+        0x000000,
+        0xFFFFFF,
+        false,
+        0.7
+    ),
     ("llava", "LLaVA", "llava", 0xCB2D30, 0xFFFFFF, false, 0.6),
     ("rwkv", "RWKV", "rwkv", 0x000000, 0xFFFFFF, false, 0.7),
     ("dbrx", "DBRX", "dbrx", 0xEE3D2C, 0xFFFFFF, false, 0.6),
@@ -151,18 +183,66 @@ brands![
     ("baai", "BAAI", "baai", 0x000000, 0xFFFFFF, false, 0.6),
     ("flux", "FLUX", "flux", 0x000000, 0xFFFFFF, false, 0.7),
     ("stability", "Stability AI", "stability", 0x330066, 0xFFFFFF, false, 0.7),
-    ("midjourney", "Midjourney", "midjourney", 0xFFFFFF, 0x000000, false, 0.75),
+    (
+        "midjourney",
+        "Midjourney",
+        "midjourney",
+        0xFFFFFF,
+        0x000000,
+        false,
+        0.75
+    ),
     ("suno", "Suno", "suno", 0x000000, 0xFFFFFF, false, 0.6),
     ("cursor", "Cursor", "cursor", 0x000000, 0xFFFFFF, false, 0.6),
     // 云平台与中转服务
-    ("openrouter", "OpenRouter", "openrouter", 0x000000, 0xC8FF00, false, 0.75),
-    ("siliconcloud", "硅基流动", "siliconcloud", 0x6E29F6, 0xFFFFFF, false, 0.7),
+    (
+        "openrouter",
+        "OpenRouter",
+        "openrouter",
+        0x000000,
+        0xC8FF00,
+        false,
+        0.75
+    ),
+    (
+        "siliconcloud",
+        "硅基流动",
+        "siliconcloud",
+        0x6E29F6,
+        0xFFFFFF,
+        false,
+        0.7
+    ),
     ("bailian", "阿里云百炼", "bailian", 0xFFFFFF, 0xFFFFFF, true, 0.75),
     ("alibabacloud", "阿里云", "alibabacloud", 0xFF6A00, 0xFFFFFF, false, 0.7),
     ("volcengine", "火山引擎", "volcengine", 0xFFFFFF, 0xFFFFFF, true, 0.75),
-    ("tencentcloud", "腾讯云", "tencentcloud", 0x2151D1, 0xFFFFFF, false, 0.75),
-    ("baiducloud", "百度智能云", "baiducloud", 0x2468F2, 0xFFFFFF, false, 0.75),
-    ("iflytekcloud", "讯飞开放平台", "iflytekcloud", 0x2A80E2, 0xFFFFFF, false, 0.75),
+    (
+        "tencentcloud",
+        "腾讯云",
+        "tencentcloud",
+        0x2151D1,
+        0xFFFFFF,
+        false,
+        0.75
+    ),
+    (
+        "baiducloud",
+        "百度智能云",
+        "baiducloud",
+        0x2468F2,
+        0xFFFFFF,
+        false,
+        0.75
+    ),
+    (
+        "iflytekcloud",
+        "讯飞开放平台",
+        "iflytekcloud",
+        0x2A80E2,
+        0xFFFFFF,
+        false,
+        0.75
+    ),
     ("zeroone", "零一万物", "zeroone", 0x003425, 0xFFFFFF, true, 0.6),
     ("modelscope", "魔搭", "modelscope", 0x624AFF, 0xFFFFFF, false, 0.75),
     ("qiniu", "七牛云", "qiniu", 0x06AEEF, 0xFFFFFF, false, 0.75),
@@ -176,11 +256,27 @@ brands![
     ("aws", "AWS", "aws", 0x222F3E, 0xFFFFFF, true, 0.75),
     ("bedrock", "Bedrock", "bedrock", 0x222F3E, 0xFFFFFF, false, 0.75),
     ("github", "GitHub", "github", 0x000000, 0xFFFFFF, false, 0.75),
-    ("huggingface", "Hugging Face", "huggingface", 0xFFFFFF, 0xFFFFFF, true, 0.75),
+    (
+        "huggingface",
+        "Hugging Face",
+        "huggingface",
+        0xFFFFFF,
+        0xFFFFFF,
+        true,
+        0.75
+    ),
     ("groq", "Groq", "groq", 0xF55036, 0xFFFFFF, false, 0.75),
     ("together", "Together AI", "together", 0xFFFFFF, 0x000000, true, 0.75),
     ("fireworks", "Fireworks", "fireworks", 0x5019C5, 0xFFFFFF, false, 0.75),
-    ("cloudflare", "Cloudflare", "cloudflare", 0xF38020, 0xFFFFFF, false, 0.75),
+    (
+        "cloudflare",
+        "Cloudflare",
+        "cloudflare",
+        0xF38020,
+        0xFFFFFF,
+        false,
+        0.75
+    ),
     ("novita", "Novita", "novita", 0x23D57C, 0x000000, false, 0.75),
     ("deepinfra", "DeepInfra", "deepinfra", 0xFFFFFF, 0xFFFFFF, true, 0.75),
     ("cerebras", "Cerebras", "cerebras", 0xF15A29, 0xFFFFFF, false, 0.8),
@@ -202,25 +298,43 @@ const MODEL_RULES: &[(&str, &[&str])] = &[
     ("openai-gpt5", &["gpt-5"]),
     ("sora", &["sora"]),
     ("openai-oss", &["gpt-oss"]),
-    ("openai-o", &["o1-", "^o1", "/o1", "o3-", "^o3", "/o3", "o4-", "^o4", "/o4"]),
+    (
+        "openai-o",
+        &["o1-", "^o1", "/o1", "o3-", "^o3", "/o3", "o4-", "^o4", "/o4"],
+    ),
     ("dalle", &["dalle", "dall-e"]),
     (
         "openai-platform",
         &[
-            "text-embedding-", "tts-", "whisper-", "codex", "davinci", "babbage", "omni-moderation", "text-moderation",
+            "text-embedding-",
+            "tts-",
+            "whisper-",
+            "codex",
+            "davinci",
+            "babbage",
+            "omni-moderation",
+            "text-moderation",
             "computer-use",
         ],
     ),
     ("openai", &["^gpt-", "/gpt-", "openai"]),
     ("glmv", &["^glm-(.*)v", "/glm-(.*)v", "-glm-(.*)v"]),
-    ("zai", &["^glm-5", "/glm-5", "/glm5", "-glm-4", "^glm-4", "/glm-4", "/glm4", "-glm-5"]),
+    (
+        "zai",
+        &[
+            "^glm-5", "/glm-5", "/glm5", "-glm-4", "^glm-4", "/glm-4", "/glm4", "-glm-5",
+        ],
+    ),
     ("chatglm", &["^glm-", "/glm-", "chatglm", "-glm-"]),
     ("codegeex", &["^codegeex", "/codegeex"]),
     ("claude", &["claude"]),
     ("anthropic", &["anthropic"]),
     ("internlm", &["internlm", "internvl"]),
     ("nousresearch", &["deephermes", "hermes", "genstruct", "minos"]),
-    ("nvidia", &["nemotron", "openreasoning", "nemoretriever", "neva-", "nv-"]),
+    (
+        "nvidia",
+        &["nemotron", "openreasoning", "nemoretriever", "neva-", "nv-"],
+    ),
     ("meta", &["llama", "/l3"]),
     ("llava", &["llava"]),
     (
@@ -236,12 +350,32 @@ const MODEL_RULES: &[(&str, &[&str])] = &[
     ("gemma", &["gemma"]),
     ("moonshot", &["kimi", "moonshot"]),
     ("qiniu", &["qiniu"]),
-    ("qwen", &["qwen", "qwq", "qvq", "wanx", r"wan\d/", r"wan\d\.\d-", "tongyi", "gte-rerank"]),
+    (
+        "qwen",
+        &[
+            "qwen",
+            "qwq",
+            "qvq",
+            "wanx",
+            r"wan\d/",
+            r"wan\d\.\d-",
+            "tongyi",
+            "gte-rerank",
+        ],
+    ),
     ("minimax", &["minimax", "abab", "^image-"]),
     (
         "mistral",
         &[
-            "mistral", "mixtral", "codestral", "mathstral", "/mn-", "pixtral", "ministral", "magistral", "devstral",
+            "mistral",
+            "mixtral",
+            "codestral",
+            "mathstral",
+            "/mn-",
+            "pixtral",
+            "ministral",
+            "magistral",
+            "devstral",
             "voxtral",
         ],
     ),
@@ -263,11 +397,24 @@ const MODEL_RULES: &[(&str, &[&str])] = &[
     ("bytedance", &["skylark", "seed-", "bytedance"]),
     (
         "stability",
-        &["stable-diffusion", "stable-video", "stable-cascade", "sdxl", "stablelm", "^stable-", "^sd3", "^sd2", "^sd1"],
+        &[
+            "stable-diffusion",
+            "stable-video",
+            "stable-cascade",
+            "sdxl",
+            "stablelm",
+            "^stable-",
+            "^sd3",
+            "^sd2",
+            "^sd1",
+        ],
     ),
     ("flux", &["flux"]),
     ("suno", &["suno"]),
-    ("microsoft", &["wizardlm", "/phi-", "^phi-", "-phi-", "mai-", "microsoft"]),
+    (
+        "microsoft",
+        &["wizardlm", "/phi-", "^phi-", "-phi-", "mai-", "microsoft"],
+    ),
     ("ai21", &["jamba", "^j2-", "ai21"]),
     ("upstage", &["^solar-", "/solar"]),
     ("sensenova", &["sensechat", "sensenova"]),
@@ -275,7 +422,17 @@ const MODEL_RULES: &[(&str, &[&str])] = &[
     ("meta", &["(^|/)muse-spark($|-)"]),
     (
         "spark",
-        &["spark", "general$", "generalv3$", r"generalv3\.5$", r"4\.0ultra$", "pro-128k$", "^max-32k$", "^lite$", "^x1$"],
+        &[
+            "spark",
+            "general$",
+            "generalv3$",
+            r"generalv3\.5$",
+            r"4\.0ultra$",
+            "pro-128k$",
+            "^max-32k$",
+            "^lite$",
+            "^x1$",
+        ],
     ),
     ("deepseek", &["deepseek"]),
     ("voyage", &["voyage"]),
@@ -396,7 +553,10 @@ pub fn brand_for_provider(provider: &ProviderConfig) -> Option<&'static Brand> {
 }
 
 pub fn embedded_icon(file: &str) -> Option<&'static [u8]> {
-    BRAND_ICONS.iter().find(|(name, _)| *name == file).map(|(_, bytes)| *bytes)
+    BRAND_ICONS
+        .iter()
+        .find(|(name, _)| *name == file)
+        .map(|(_, bytes)| *bytes)
 }
 
 /// 应用的资源：Lucide 图标之外再加上品牌图标

@@ -33,7 +33,12 @@ pub fn brand_avatar(brand: Option<&'static Brand>, label: &str, size: Pixels, p:
         });
     match brand.glyph() {
         BrandGlyph::Mono(path) => tile
-            .child(svg().path(path).size(size * brand.scale).text_color(rgb(brand.foreground)))
+            .child(
+                svg()
+                    .path(path)
+                    .size(size * brand.scale)
+                    .text_color(rgb(brand.foreground)),
+            )
             .into_any_element(),
         BrandGlyph::Color(path) => tile.child(img(path).size(size * brand.scale)).into_any_element(),
         BrandGlyph::Letter(letter) => tile
@@ -52,7 +57,9 @@ fn letter_avatar(label: &str, size: Pixels) -> AnyElement {
         .find(|ch| ch.is_alphanumeric())
         .map(|ch| ch.to_uppercase().next().unwrap_or(ch))
         .unwrap_or('?');
-    let hash = label.bytes().fold(0u32, |hash, byte| hash.wrapping_mul(31).wrapping_add(byte as u32));
+    let hash = label
+        .bytes()
+        .fold(0u32, |hash, byte| hash.wrapping_mul(31).wrapping_add(byte as u32));
     div()
         .flex_none()
         .size(size)
@@ -127,10 +134,9 @@ pub fn model_badges(model: &ModelConfig, p: &Palette) -> impl IntoElement {
         .when(model.thinks(), |this| {
             this.child(Icon::new(IconName::Brain).size(px(13.)).text_color(thinking_color()))
         })
-        .children(
-            model
-                .effective_capabilities()
-                .into_iter()
-                .map(|capability| Icon::new(capability_icon(capability)).size(px(13.)).text_color(capability_color(capability))),
-        )
+        .children(model.effective_capabilities().into_iter().map(|capability| {
+            Icon::new(capability_icon(capability))
+                .size(px(13.))
+                .text_color(capability_color(capability))
+        }))
 }

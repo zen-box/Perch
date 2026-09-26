@@ -26,11 +26,7 @@ impl ChatMessageReq {
         }
     }
 
-    pub fn with_attachments(
-        role: impl Into<String>,
-        content: impl Into<String>,
-        attachments: Vec<Attachment>,
-    ) -> Self {
+    pub fn with_attachments(role: impl Into<String>, content: impl Into<String>, attachments: Vec<Attachment>) -> Self {
         Self {
             role: role.into(),
             content: content.into(),
@@ -103,7 +99,7 @@ pub struct ChatRequest {
     pub retries: u8,
 }
 
- pub(crate) struct BuiltRequest {
+pub(crate) struct BuiltRequest {
     url: String,
     body: Value,
     headers: Vec<(String, String)>,
@@ -111,7 +107,9 @@ pub struct ChatRequest {
 
 pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>, mut cancel_rx: Option<Receiver<()>>) {
     if request.base_url.trim().is_empty() {
-        let _ = tx.send(StreamEvent::Error("未配置接口基础地址 (Base URL)，请在设置中配置渠道。".into()));
+        let _ = tx.send(StreamEvent::Error(
+            "未配置接口基础地址 (Base URL)，请在设置中配置渠道。".into(),
+        ));
         let _ = tx.send(StreamEvent::Done);
         return;
     }
@@ -137,7 +135,11 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
 
     // 超时按「多久没有收到数据」计算，而不是整个请求的总时长：
     // 总时长会把正常输出中的长回答截断。
-    let idle_timeout = Duration::from_secs(if request.timeout_secs == 0 { 90 } else { request.timeout_secs });
+    let idle_timeout = Duration::from_secs(if request.timeout_secs == 0 {
+        90
+    } else {
+        request.timeout_secs
+    });
     let mut client_builder = Client::builder()
         .connect_timeout(idle_timeout.min(Duration::from_secs(15)))
         .read_timeout(idle_timeout);
@@ -166,24 +168,24 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
             http = http.header(name, value);
         }
         match http.send().await {
-             Ok(response) if response.status().is_success() => {
-                 if request.stream {
-                     if let Err(error) = read_sse(response, &mut cancel_rx, &request, &tx, &mut completion_chars).await {
-                         let _ = tx.send(StreamEvent::Error(error));
-                     }
-                 } else if let Err(error) = read_json(response, &request, &tx, &mut completion_chars).await {
-                     let _ = tx.send(StreamEvent::Error(error));
-                 }
-                 finish(&request, &tx, start_time, completion_chars);
-                 return;
-             }
-             Ok(response) => {
-                 let status = response.status();
-                 let body = response.text().await.unwrap_or_default();
-                 let label = built_label(&request);
-                 let message = redact(&format!("{label}返回 HTTP {status}\n响应: {body}"), &request.api_key);
-                 let retryable = status.is_server_error() || status.as_u16() == 408 || status.as_u16() == 429;
-                 if attempt < attempts && retryable {
+            Ok(response) if response.status().is_success() => {
+                if request.stream {
+                    if let Err(error) = read_sse(response, &mut cancel_rx, &request, &tx, &mut completion_chars).await {
+                        let _ = tx.send(StreamEvent::Error(error));
+                    }
+                } else if let Err(error) = read_json(response, &request, &tx, &mut completion_chars).await {
+                    let _ = tx.send(StreamEvent::Error(error));
+                }
+                finish(&request, &tx, start_time, completion_chars);
+                return;
+            }
+            Ok(response) => {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                let label = built_label(&request);
+                let message = redact(&format!("{label}返回 HTTP {status}\n响应: {body}"), &request.api_key);
+                let retryable = status.is_server_error() || status.as_u16() == 408 || status.as_u16() == 429;
+                if attempt < attempts && retryable {
                     if !sleep_or_cancel(&mut cancel_rx, attempt).await {
                         let _ = tx.send(StreamEvent::Done);
                         return;
@@ -222,7 +224,12 @@ fn finish(request: &ChatRequest, tx: &UnboundedSender<StreamEvent>, start_time: 
     let elapsed = start_time.elapsed();
     let total_secs = elapsed.as_secs_f32().max(0.1);
     let _ = tx.send(StreamEvent::Metrics {
-        tokens_prompt: request.messages.iter().map(|message| message.content.chars().count()).sum::<usize>() / 2,
+        tokens_prompt: request
+            .messages
+            .iter()
+            .map(|message| message.content.chars().count())
+            .sum::<usize>()
+            / 2,
         tokens_completion: completion_chars,
         speed_tps: (completion_chars as f32 / total_secs).max(0.0),
         latency_ms: elapsed.as_millis() as u64,
@@ -257,7 +264,10 @@ async fn read_json(
     tx: &UnboundedSender<StreamEvent>,
     completion_chars: &mut usize,
 ) -> Result<(), String> {
-    let value: Value = response.json().await.map_err(|error| format!("响应不是有效 JSON: {error}"))?;
+    let value: Value = response
+        .json()
+        .await
+        .map_err(|error| format!("响应不是有效 JSON: {error}"))?;
     emit_complete(request.channel_type, &value, tx, completion_chars);
     Ok(())
 }
@@ -307,7 +317,9 @@ fn handle_sse_line(
     tx: &UnboundedSender<StreamEvent>,
     completion_chars: &mut usize,
 ) -> bool {
-    let Some(payload) = line.trim().strip_prefix("data:") else { return false };
+    let Some(payload) = line.trim().strip_prefix("data:") else {
+        return false;
+    };
     let payload = payload.trim();
     if payload == "[DONE]" {
         return true;
@@ -322,14 +334,24 @@ fn handle_sse_line(
 }
 
 fn timeout_message(request: &ChatRequest) -> String {
-    let secs = if request.timeout_secs == 0 { 90 } else { request.timeout_secs };
-    format!("{}超过 {secs} 秒没有返回数据，连接已超时。可以在渠道设置里调大「超时」。", built_label(request))
+    let secs = if request.timeout_secs == 0 {
+        90
+    } else {
+        request.timeout_secs
+    };
+    format!(
+        "{}超过 {secs} 秒没有返回数据，连接已超时。可以在渠道设置里调大「超时」。",
+        built_label(request)
+    )
 }
 
 fn emit_complete(channel: ChannelType, value: &Value, tx: &UnboundedSender<StreamEvent>, completion_chars: &mut usize) {
     match channel {
         ChannelType::OpenAiChat | ChannelType::OpenAiResponses => {
-            if let Some(text) = value.pointer("/choices/0/message/reasoning_content").and_then(Value::as_str) {
+            if let Some(text) = value
+                .pointer("/choices/0/message/reasoning_content")
+                .and_then(Value::as_str)
+            {
                 if !text.is_empty() {
                     let _ = tx.send(StreamEvent::Thinking(text.to_string()));
                 }
@@ -343,7 +365,10 @@ fn emit_complete(channel: ChannelType, value: &Value, tx: &UnboundedSender<Strea
             if let Some(blocks) = value.get("content").and_then(Value::as_array) {
                 for block in blocks {
                     let kind = block.get("type").and_then(Value::as_str).unwrap_or("");
-                    let text = block.get(if kind == "thinking" { "thinking" } else { "text" }).and_then(Value::as_str).unwrap_or("");
+                    let text = block
+                        .get(if kind == "thinking" { "thinking" } else { "text" })
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
                     if text.is_empty() {
                         continue;
                     }
@@ -359,7 +384,9 @@ fn emit_complete(channel: ChannelType, value: &Value, tx: &UnboundedSender<Strea
         ChannelType::Gemini => {
             if let Some(parts) = value.pointer("/candidates/0/content/parts").and_then(Value::as_array) {
                 for part in parts {
-                    let Some(text) = part.get("text").and_then(Value::as_str) else { continue };
+                    let Some(text) = part.get("text").and_then(Value::as_str) else {
+                        continue;
+                    };
                     if text.is_empty() {
                         continue;
                     }
@@ -379,7 +406,10 @@ fn emit_delta(channel: ChannelType, value: &Value, tx: &UnboundedSender<StreamEv
     match channel {
         ChannelType::OpenAiChat | ChannelType::OpenAiResponses => {
             let mut count = 0;
-            if let Some(text) = value.pointer("/choices/0/delta/reasoning_content").and_then(Value::as_str) {
+            if let Some(text) = value
+                .pointer("/choices/0/delta/reasoning_content")
+                .and_then(Value::as_str)
+            {
                 if !text.is_empty() {
                     let _ = tx.send(StreamEvent::Thinking(text.to_string()));
                 }
@@ -393,7 +423,9 @@ fn emit_delta(channel: ChannelType, value: &Value, tx: &UnboundedSender<StreamEv
             count
         }
         ChannelType::Claude => {
-            let text = value.pointer("/delta/text").and_then(Value::as_str)
+            let text = value
+                .pointer("/delta/text")
+                .and_then(Value::as_str)
                 .or_else(|| value.pointer("/delta/thinking").and_then(Value::as_str))
                 .unwrap_or("");
             if text.is_empty() {
@@ -411,7 +443,9 @@ fn emit_delta(channel: ChannelType, value: &Value, tx: &UnboundedSender<StreamEv
             let mut count = 0;
             if let Some(parts) = value.pointer("/candidates/0/content/parts").and_then(Value::as_array) {
                 for part in parts {
-                    let Some(text) = part.get("text").and_then(Value::as_str) else { continue };
+                    let Some(text) = part.get("text").and_then(Value::as_str) else {
+                        continue;
+                    };
                     if text.is_empty() {
                         continue;
                     }
@@ -435,7 +469,10 @@ pub(crate) fn build_request(request: &ChatRequest) -> Result<BuiltRequest, Strin
             if !request.api_key.trim().is_empty() {
                 headers.push(("Authorization".into(), format!("Bearer {}", request.api_key.trim())));
             }
-            (openai_url(&request.base_url, request.channel_type), openai_body(request))
+            (
+                openai_url(&request.base_url, request.channel_type),
+                openai_body(request),
+            )
         }
         ChannelType::Claude => {
             headers.push(("anthropic-version".into(), "2023-06-01".into()));
@@ -647,9 +684,14 @@ fn claude_body(request: &ChatRequest) -> Value {
 
 fn gemini_url(request: &ChatRequest) -> Result<String, String> {
     let base = request.base_url.trim().trim_end_matches('/');
-    let method = if request.stream { "streamGenerateContent" } else { "generateContent" };
+    let method = if request.stream {
+        "streamGenerateContent"
+    } else {
+        "generateContent"
+    };
     let mut url = if base.contains(":streamGenerateContent") || base.contains(":generateContent") {
-        base.replace(":streamGenerateContent", &format!(":{method}")).replace(":generateContent", &format!(":{method}"))
+        base.replace(":streamGenerateContent", &format!(":{method}"))
+            .replace(":generateContent", &format!(":{method}"))
     } else {
         format!("{base}/models/{}:{method}", request.model)
     };
@@ -685,7 +727,11 @@ fn gemini_body(request: &ChatRequest) -> Value {
             if !text_content.is_empty() {
                 parts.push(json!({"text": text_content}));
             }
-            for att in message.attachments.iter().filter(|a| a.kind == AttachmentKind::Image || a.is_pdf()) {
+            for att in message
+                .attachments
+                .iter()
+                .filter(|a| a.kind == AttachmentKind::Image || a.is_pdf())
+            {
                 if let Some(b64) = read_attachment_base64(&att.path) {
                     let mime = if att.mime.is_empty() { "image/jpeg" } else { &att.mime };
                     parts.push(json!({
@@ -791,7 +837,10 @@ mod tests {
         assert_eq!(built.body["reasoning_effort"], "low");
         assert_eq!(built.body["max_completion_tokens"], 128);
         assert!(built.body.get("max_tokens").is_none());
-        assert!(built.body.get("temperature").is_none(), "reasoning models reject custom temperature");
+        assert!(
+            built.body.get("temperature").is_none(),
+            "reasoning models reject custom temperature"
+        );
         assert!(built.body.get("top_p").is_none());
         assert!(built.headers.iter().any(|(name, _)| name == "X-Test"));
     }
@@ -849,7 +898,10 @@ mod tests {
         assert_eq!(built.body["systemInstruction"]["parts"][0]["text"], "be brief");
         assert_eq!(built.body["contents"][0]["role"], "user");
         assert_eq!(built.body["generationConfig"]["thinkingConfig"]["thinkingBudget"], 1024);
-        assert_eq!(built.body["generationConfig"]["thinkingConfig"]["includeThoughts"], true);
+        assert_eq!(
+            built.body["generationConfig"]["thinkingConfig"]["includeThoughts"],
+            true
+        );
 
         let mut off = request(ChannelType::Gemini);
         off.reasoning = Some(ReasoningLevel::Off);
@@ -858,7 +910,11 @@ mod tests {
         off.reasoning = None;
         let body = build_request(&off).unwrap().body;
         assert_eq!(body["generationConfig"]["thinkingConfig"]["includeThoughts"], true);
-        assert!(body["generationConfig"]["thinkingConfig"].get("thinkingBudget").is_none());
+        assert!(
+            body["generationConfig"]["thinkingConfig"]
+                .get("thinkingBudget")
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -875,7 +931,9 @@ mod tests {
         let response = reqwest::Response::from(gpui_kit::http_client::http::Response::new(body));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut chars = 0;
-        read_sse(response, &mut None, &request(ChannelType::OpenAiChat), &tx, &mut chars).await.unwrap();
+        read_sse(response, &mut None, &request(ChannelType::OpenAiChat), &tx, &mut chars)
+            .await
+            .unwrap();
         let mut received = String::new();
         while let Ok(event) = rx.try_recv() {
             if let StreamEvent::Content(content) = event {
@@ -916,7 +974,12 @@ mod tests {
         assert_eq!(parts[0]["type"], "text");
         assert_eq!(parts[0]["text"], "describe this");
         assert_eq!(parts[1]["type"], "image_url");
-        assert!(parts[1]["image_url"]["url"].as_str().unwrap().starts_with("data:image/png;base64,"));
+        assert!(
+            parts[1]["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
 
         // Claude
         let mut req_claude = request(ChannelType::Claude);
@@ -954,7 +1017,11 @@ mod tests {
         };
 
         let mut req_pdf = request(ChannelType::Claude);
-        req_pdf.messages = vec![ChatMessageReq::with_attachments("user", "read pdf", vec![pdf_att.clone()])];
+        req_pdf.messages = vec![ChatMessageReq::with_attachments(
+            "user",
+            "read pdf",
+            vec![pdf_att.clone()],
+        )];
         let built_claude_pdf = build_request(&req_pdf).unwrap();
         let claude_pdf_parts = built_claude_pdf.body["messages"][0]["content"].as_array().unwrap();
         assert_eq!(claude_pdf_parts[1]["type"], "document");

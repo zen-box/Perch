@@ -279,66 +279,156 @@ pub fn lookup_cost(model_id: &str) -> Option<ModelCost> {
 
     // OpenAI 系列
     if name.starts_with("gpt-4o-mini") {
-        return Some(ModelCost { input: 0.15, output: 0.60, cache_read: 0.075, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 0.15,
+            output: 0.60,
+            cache_read: 0.075,
+            cache_write: 0.0,
+        });
     }
     if name.starts_with("gpt-4o") || name.starts_with("chatgpt-4o") {
-        return Some(ModelCost { input: 2.50, output: 10.00, cache_read: 1.25, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 2.50,
+            output: 10.00,
+            cache_read: 1.25,
+            cache_write: 0.0,
+        });
     }
     if name.starts_with("o1-mini") || name.starts_with("o3-mini") {
-        return Some(ModelCost { input: 1.10, output: 4.40, cache_read: 0.55, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 1.10,
+            output: 4.40,
+            cache_read: 0.55,
+            cache_write: 0.0,
+        });
     }
     if name.starts_with("o1") || name.starts_with("o3") {
-        return Some(ModelCost { input: 15.00, output: 60.00, cache_read: 7.50, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 15.00,
+            output: 60.00,
+            cache_read: 7.50,
+            cache_write: 0.0,
+        });
     }
     if name.starts_with("gpt-4-turbo") {
-        return Some(ModelCost { input: 10.00, output: 30.00, cache_read: 5.00, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 10.00,
+            output: 30.00,
+            cache_read: 5.00,
+            cache_write: 0.0,
+        });
     }
 
     // Anthropic Claude 系列
     if name.contains("claude-3-5-sonnet") || name.contains("claude-3.5-sonnet") || name.contains("claude-3-7-sonnet") {
-        return Some(ModelCost { input: 3.00, output: 15.00, cache_read: 0.30, cache_write: 3.75 });
+        return Some(ModelCost {
+            input: 3.00,
+            output: 15.00,
+            cache_read: 0.30,
+            cache_write: 3.75,
+        });
     }
     if name.contains("claude-3-5-haiku") || name.contains("claude-3-haiku") {
-        return Some(ModelCost { input: 0.80, output: 4.00, cache_read: 0.08, cache_write: 1.00 });
+        return Some(ModelCost {
+            input: 0.80,
+            output: 4.00,
+            cache_read: 0.08,
+            cache_write: 1.00,
+        });
     }
     if name.contains("opus") {
-        return Some(ModelCost { input: 15.00, output: 75.00, cache_read: 1.50, cache_write: 18.75 });
+        return Some(ModelCost {
+            input: 15.00,
+            output: 75.00,
+            cache_read: 1.50,
+            cache_write: 18.75,
+        });
     }
 
     // DeepSeek 系列
     if name.contains("deepseek-r1") || name.contains("reasoner") {
-        return Some(ModelCost { input: 0.55, output: 2.19, cache_read: 0.14, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 0.55,
+            output: 2.19,
+            cache_read: 0.14,
+            cache_write: 0.0,
+        });
     }
     if name.contains("deepseek-chat") || name.contains("deepseek-v3") || name.contains("deepseek") {
-        return Some(ModelCost { input: 0.14, output: 0.28, cache_read: 0.014, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 0.14,
+            output: 0.28,
+            cache_read: 0.014,
+            cache_write: 0.0,
+        });
     }
 
     // Google Gemini 系列
     if name.contains("gemini-1.5-flash") || name.contains("gemini-2.0-flash") {
-        return Some(ModelCost { input: 0.075, output: 0.30, cache_read: 0.018, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 0.075,
+            output: 0.30,
+            cache_read: 0.018,
+            cache_write: 0.0,
+        });
     }
     if name.contains("gemini-1.5-pro") || name.contains("gemini-pro") {
-        return Some(ModelCost { input: 1.25, output: 5.00, cache_read: 0.3125, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 1.25,
+            output: 5.00,
+            cache_read: 0.3125,
+            cache_write: 0.0,
+        });
     }
 
     // 国产主流 (SenseNova, Qwen, GLM, Kimi)
     if name.contains("sensenova") || name.contains("sensechat") {
-        return Some(ModelCost { input: 0.20, output: 0.60, cache_read: 0.05, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 0.20,
+            output: 0.60,
+            cache_read: 0.05,
+            cache_write: 0.0,
+        });
     }
     if name.contains("qwen-turbo") {
-        return Some(ModelCost { input: 0.05, output: 0.20, cache_read: 0.01, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 0.05,
+            output: 0.20,
+            cache_read: 0.01,
+            cache_write: 0.0,
+        });
     }
     if name.contains("qwen-plus") || name.contains("qwen2.5-72b") {
-        return Some(ModelCost { input: 0.40, output: 1.20, cache_read: 0.10, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 0.40,
+            output: 1.20,
+            cache_read: 0.10,
+            cache_write: 0.0,
+        });
     }
     if name.contains("qwen-max") {
-        return Some(ModelCost { input: 2.40, output: 9.60, cache_read: 0.60, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 2.40,
+            output: 9.60,
+            cache_read: 0.60,
+            cache_write: 0.0,
+        });
     }
     if name.contains("glm-4") || name.contains("glm-5") {
-        return Some(ModelCost { input: 0.70, output: 0.70, cache_read: 0.15, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 0.70,
+            output: 0.70,
+            cache_read: 0.15,
+            cache_write: 0.0,
+        });
     }
     if name.contains("moonshot") || name.contains("kimi") {
-        return Some(ModelCost { input: 1.20, output: 1.20, cache_read: 0.30, cache_write: 0.0 });
+        return Some(ModelCost {
+            input: 1.20,
+            output: 1.20,
+            cache_read: 0.30,
+            cache_write: 0.0,
+        });
     }
 
     None

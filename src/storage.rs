@@ -74,9 +74,9 @@ impl Database {
         }
         drop(stmt);
 
-        let mut messages_stmt = self.connection.prepare(
-            "SELECT payload FROM messages WHERE session_id = ?1 ORDER BY position, rowid",
-        )?;
+        let mut messages_stmt = self
+            .connection
+            .prepare("SELECT payload FROM messages WHERE session_id = ?1 ORDER BY position, rowid")?;
         for session in &mut sessions {
             let rows = messages_stmt.query_map([&session.id], |row| row.get::<_, String>(0))?;
             for row in rows {
@@ -88,7 +88,8 @@ impl Database {
         self.saved_sessions.clear();
         self.saved_messages.clear();
         for (position, session) in sessions.iter().enumerate() {
-            self.saved_sessions.insert(session.id.clone(), session_signature(session, position)?);
+            self.saved_sessions
+                .insert(session.id.clone(), session_signature(session, position)?);
             for (message_position, message) in session.messages.iter().enumerate() {
                 self.saved_messages.insert(
                     message.id.clone(),
@@ -251,7 +252,10 @@ fn migrate(connection: &Connection) -> StorageResult<()> {
         return Ok(());
     }
     if version == 1 {
-        connection.execute("ALTER TABLE sessions ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''", [])?;
+        connection.execute(
+            "ALTER TABLE sessions ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
     }
     if version < 3 {
         connection.execute_batch(
@@ -368,6 +372,6 @@ mod tests {
         assert_eq!(active_id, session.id);
         assert!(sessions[0].pinned && sessions[0].favorite);
         assert!(!sessions[0].title_auto);
-         assert_eq!(sessions[0].params.as_ref().unwrap().temperature, Some(0.2));
+        assert_eq!(sessions[0].params.as_ref().unwrap().temperature, Some(0.2));
     }
 }

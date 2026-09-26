@@ -1,4 +1,4 @@
- use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
@@ -6,15 +6,15 @@ use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::*;
 use tokio::sync::oneshot;
 
- use crate::agent::{execute_local_tool, export_session_to_markdown};
- use crate::backup::BackupFile;
- use crate::config::{AppConfig, ChannelType, ModelConfig, ProviderConfig};
- use crate::i18n::{AppLanguage, apply_locale, tr};
- use crate::model::{Attachment, ChatMessage, StorageData};
- use crate::model_ops::{ModelEditor, TokenField};
- use crate::prompts::PromptLibrary;
- use crate::provider_api;
- use crate::theme::apply_theme;
+use crate::agent::{execute_local_tool, export_session_to_markdown};
+use crate::backup::BackupFile;
+use crate::config::{AppConfig, ChannelType, ModelConfig, ProviderConfig};
+use crate::i18n::{AppLanguage, apply_locale, tr};
+use crate::model::{Attachment, ChatMessage, StorageData};
+use crate::model_ops::{ModelEditor, TokenField};
+use crate::prompts::PromptLibrary;
+use crate::provider_api;
+use crate::theme::apply_theme;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ViewMode {
@@ -22,14 +22,14 @@ pub enum ViewMode {
     Settings,
 }
 
- #[derive(Clone, Copy, PartialEq, Eq, Debug)]
- pub enum SettingsTab {
-     General,
-     Providers,
-     Prompts,
-     McpServers,
-     About,
- }
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SettingsTab {
+    General,
+    Providers,
+    Prompts,
+    McpServers,
+    About,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToastLevel {
@@ -72,23 +72,23 @@ pub struct AppState {
     pub pending_tool_name: Option<String>,
     pub pending_tool_cmd: Option<String>,
 
-     pub is_streaming: bool,
-     pub(crate) active_streams: HashMap<String, oneshot::Sender<()>>,
-     pending_toasts: Vec<(ToastLevel, String)>,
-     pub prompts: PromptLibrary,
-     pub folder_filter: String,
-     pub favorites_only: bool,
-     pub pending_quote: Option<String>,
-     pub pending_attachments: Vec<Attachment>,
-     pub pending_import: Option<BackupFile>,
-     pub compare_selection: Vec<(String, String)>,
-     pub edit_message_id: Option<String>,
-     pub folder_target_id: Option<String>,
-     pub prompt_edit_id: Option<String>,
-     pub pending_models: Vec<(String, String)>,
-     pub pending_model_selection: HashSet<String>,
-     pub model_fetch_query: String,
-     pub(crate) open_model_picker: bool,
+    pub is_streaming: bool,
+    pub(crate) active_streams: HashMap<String, oneshot::Sender<()>>,
+    pending_toasts: Vec<(ToastLevel, String)>,
+    pub prompts: PromptLibrary,
+    pub folder_filter: String,
+    pub favorites_only: bool,
+    pub pending_quote: Option<String>,
+    pub pending_attachments: Vec<Attachment>,
+    pub pending_import: Option<BackupFile>,
+    pub compare_selection: Vec<(String, String)>,
+    pub edit_message_id: Option<String>,
+    pub folder_target_id: Option<String>,
+    pub prompt_edit_id: Option<String>,
+    pub pending_models: Vec<(String, String)>,
+    pub pending_model_selection: HashSet<String>,
+    pub model_fetch_query: String,
+    pub(crate) open_model_picker: bool,
 
     /// 展开了“思考过程”的消息 id
     pub expanded_reasoning: HashSet<String>,
@@ -119,22 +119,22 @@ pub struct AppState {
     pub model_edit_name_input: Entity<InputState>,
     pub model_edit_context_input: Entity<InputState>,
     pub model_edit_output_input: Entity<InputState>,
-     pub edit_message_input: Entity<TextareaState>,
-     pub params_prompt_input: Entity<TextareaState>,
-     pub cfg_proxy_input: Entity<InputState>,
-     pub cfg_timeout_input: Entity<InputState>,
-     pub cfg_retries_input: Entity<InputState>,
-     pub cfg_headers_input: Entity<TextareaState>,
-     pub prompt_name_input: Entity<InputState>,
-     pub prompt_icon_input: Entity<InputState>,
-     pub prompt_body_input: Entity<TextareaState>,
-     pub folder_name_input: Entity<InputState>,
-     pub model_fetch_search: Entity<InputState>,
+    pub edit_message_input: Entity<TextareaState>,
+    pub params_prompt_input: Entity<TextareaState>,
+    pub cfg_proxy_input: Entity<InputState>,
+    pub cfg_timeout_input: Entity<InputState>,
+    pub cfg_retries_input: Entity<InputState>,
+    pub cfg_headers_input: Entity<TextareaState>,
+    pub prompt_name_input: Entity<InputState>,
+    pub prompt_icon_input: Entity<InputState>,
+    pub prompt_body_input: Entity<TextareaState>,
+    pub folder_name_input: Entity<InputState>,
+    pub model_fetch_search: Entity<InputState>,
 
     // 消息列表（虚拟滚动 + 自动跟随到底部）
     pub message_list: Entity<MessageScrollerState>,
     message_list_session: String,
-     pub(crate) scroll_to_end_pending: bool,
+    pub(crate) scroll_to_end_pending: bool,
 
     pub focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -148,9 +148,11 @@ impl AppState {
         let mut session_selection_changed = false;
         for session in &mut storage.sessions {
             if session.provider_id.is_empty() {
-                if let Some(provider) = config.providers.iter().find(|provider| {
-                    provider.models.iter().any(|model| model.id == session.model)
-                }) {
+                if let Some(provider) = config
+                    .providers
+                    .iter()
+                    .find(|provider| provider.models.iter().any(|model| model.id == session.model))
+                {
                     session.provider_id = provider.id.clone();
                     session_selection_changed = true;
                 } else if !default_provider_id.is_empty() {
@@ -161,7 +163,9 @@ impl AppState {
             }
         }
         if session_selection_changed {
-            storage.save().unwrap_or_else(|error| panic!("Unable to update chat model selection: {error}"));
+            storage
+                .save()
+                .unwrap_or_else(|error| panic!("Unable to update chat model selection: {error}"));
         }
         let is_dark = config.is_dark;
         apply_theme(is_dark, Some(window), cx);
@@ -179,8 +183,7 @@ impl AppState {
                 .placeholder(tr(lang, "input_placeholder"))
         });
 
-        let search_session_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, "search_chat")));
+        let search_session_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, "search_chat")));
         let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入新的对话名称"));
 
         let cfg_api_key_input = cx.new(|cx| {
@@ -215,8 +218,7 @@ impl AppState {
             inp.set_value(ChannelType::OpenAiChat.default_base_url(), window, cx);
             inp
         });
-        let new_provider_api_key_input =
-            cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("sk-..."));
+        let new_provider_api_key_input = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("sk-..."));
 
         let model_edit_id_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("调用接口时使用的名字，例如 claude-sonnet-4-5"));
@@ -230,146 +232,164 @@ impl AppState {
             .unwrap_or_default();
         let message_list = cx.new(|cx| MessageScrollerState::new(message_count, cx));
 
-         let initial_prompt = storage
-             .get_active_session()
-             .and_then(|session| session.params.as_ref())
-             .and_then(|params| params.system_prompt.clone())
-             .unwrap_or_default();
-         let params_prompt_input = cx.new(|cx| {
-             let mut input = TextareaState::new(window, cx).auto_grow(2, 6).placeholder("留空则使用全局系统提示词");
-             input.set_value(&initial_prompt, window, cx);
-             input
-         });
-         let edit_message_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
-         let cfg_proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://127.0.0.1:7890"));
-         let cfg_timeout_input = cx.new(|cx| {
-             let mut input = InputState::new(window, cx).placeholder("90");
-             input.set_value("90", window, cx);
-             input
-         });
-         let cfg_retries_input = cx.new(|cx| {
-             let mut input = InputState::new(window, cx).placeholder("0");
-             input.set_value("0", window, cx);
-             input
-         });
-         let cfg_headers_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6).placeholder("X-Title: Perch"));
-         let prompt_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("名称"));
-         let prompt_icon_input = cx.new(|cx| InputState::new(window, cx).placeholder("例如：✨"));
-         let prompt_body_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8).placeholder("支持 {{date}} {{clipboard}} {{selection}}"));
-         let folder_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("文件夹名称"));
-         let model_fetch_search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索模型 ID 或名称"));
-         let prompts = PromptLibrary::load();
- 
-         let subscriptions = vec![
-             cx.subscribe_in(&chat_input, window, |this, _, event: &InputEvent, window, cx| {
-                 if let InputEvent::PressEnter { shift: false, .. } = event {
-                     if !this.apply_slash_template(window, cx) {
-                         this.send_message(window, cx);
-                     }
+        let initial_prompt = storage
+            .get_active_session()
+            .and_then(|session| session.params.as_ref())
+            .and_then(|params| params.system_prompt.clone())
+            .unwrap_or_default();
+        let params_prompt_input = cx.new(|cx| {
+            let mut input = TextareaState::new(window, cx)
+                .auto_grow(2, 6)
+                .placeholder("留空则使用全局系统提示词");
+            input.set_value(&initial_prompt, window, cx);
+            input
+        });
+        let edit_message_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
+        let cfg_proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://127.0.0.1:7890"));
+        let cfg_timeout_input = cx.new(|cx| {
+            let mut input = InputState::new(window, cx).placeholder("90");
+            input.set_value("90", window, cx);
+            input
+        });
+        let cfg_retries_input = cx.new(|cx| {
+            let mut input = InputState::new(window, cx).placeholder("0");
+            input.set_value("0", window, cx);
+            input
+        });
+        let cfg_headers_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(2, 6)
+                .placeholder("X-Title: Perch")
+        });
+        let prompt_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("名称"));
+        let prompt_icon_input = cx.new(|cx| InputState::new(window, cx).placeholder("例如：✨"));
+        let prompt_body_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(3, 8)
+                .placeholder("支持 {{date}} {{clipboard}} {{selection}}")
+        });
+        let folder_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("文件夹名称"));
+        let model_fetch_search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索模型 ID 或名称"));
+        let prompts = PromptLibrary::load();
+
+        let subscriptions = vec![
+            cx.subscribe_in(&chat_input, window, |this, _, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { shift: false, .. } = event {
+                    if !this.apply_slash_template(window, cx) {
+                        this.send_message(window, cx);
+                    }
                 } else if let InputEvent::Change = event {
                     // 粘贴已由输入框的 on_paste 钩子接管（见 ui/chat.rs），这里只需要重绘
                     cx.notify();
                 }
-             }),
-             cx.subscribe_in(&model_fetch_search, window, |this, input, event: &InputEvent, _, cx| {
-                 if let InputEvent::Change = event {
-                     this.model_fetch_query = input.read(cx).value().to_string();
-                     cx.notify();
-                 }
-             }),
-             cx.subscribe_in(&params_prompt_input, window, |this, _, event: &InputEvent, _, cx| {
-                 if let InputEvent::Change = event {
-                     let value = this.params_prompt_input.read(cx).value().to_string();
-                     this.set_session_system_prompt(value, cx);
-                 }
-             }),
-             cx.subscribe_in(&model_edit_id_input, window, |this, _, event: &InputEvent, _, cx| {
-                 if let InputEvent::Change = event {
-                     this.sync_model_draft_id(cx);
-                 }
-             }),
-             cx.subscribe_in(&model_edit_context_input, window, |this, _, event: &InputEvent, _, cx| {
-                 if let InputEvent::Change = event {
-                     this.sync_model_draft_tokens(TokenField::Context, cx);
-                 }
-             }),
-             cx.subscribe_in(&model_edit_output_input, window, |this, _, event: &InputEvent, _, cx| {
-                 if let InputEvent::Change = event {
-                     this.sync_model_draft_tokens(TokenField::Output, cx);
-                 }
-             }),
-         ];
- 
-         chat_input.update(cx, |input, cx| input.focus(window, cx));
- 
-         Self {
-             storage,
-             config,
+            }),
+            cx.subscribe_in(&model_fetch_search, window, |this, input, event: &InputEvent, _, cx| {
+                if let InputEvent::Change = event {
+                    this.model_fetch_query = input.read(cx).value().to_string();
+                    cx.notify();
+                }
+            }),
+            cx.subscribe_in(&params_prompt_input, window, |this, _, event: &InputEvent, _, cx| {
+                if let InputEvent::Change = event {
+                    let value = this.params_prompt_input.read(cx).value().to_string();
+                    this.set_session_system_prompt(value, cx);
+                }
+            }),
+            cx.subscribe_in(&model_edit_id_input, window, |this, _, event: &InputEvent, _, cx| {
+                if let InputEvent::Change = event {
+                    this.sync_model_draft_id(cx);
+                }
+            }),
+            cx.subscribe_in(
+                &model_edit_context_input,
+                window,
+                |this, _, event: &InputEvent, _, cx| {
+                    if let InputEvent::Change = event {
+                        this.sync_model_draft_tokens(TokenField::Context, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &model_edit_output_input,
+                window,
+                |this, _, event: &InputEvent, _, cx| {
+                    if let InputEvent::Change = event {
+                        this.sync_model_draft_tokens(TokenField::Output, cx);
+                    }
+                },
+            ),
+        ];
+
+        chat_input.update(cx, |input, cx| input.focus(window, cx));
+
+        Self {
+            storage,
+            config,
             view_mode: ViewMode::Chat,
             settings_tab: SettingsTab::General,
-             selected_settings_provider_id: selected_provider_id,
-             is_dark,
-             sidebar_collapsed: false,
-             analytics_range: crate::ui::analytics::TimeRange::Days30,
-             analytics_tab: crate::ui::analytics::AnalyticsTab::Overview,
-             add_channel_type: ChannelType::OpenAiChat,
-             rename_target_session_id: None,
-             pending_tool_name: None,
-             pending_tool_cmd: None,
-             is_streaming: false,
-             active_streams: HashMap::new(),
-             pending_toasts: Vec::new(),
-             prompts,
-             folder_filter: String::new(),
-             favorites_only: false,
-             pending_quote: None,
-             pending_attachments: Vec::new(),
-             pending_import: None,
-             compare_selection: Vec::new(),
-             edit_message_id: None,
-             folder_target_id: None,
-             prompt_edit_id: None,
-             pending_models: Vec::new(),
-             pending_model_selection: HashSet::new(),
-             model_fetch_query: String::new(),
-             open_model_picker: false,
-             expanded_reasoning: HashSet::new(),
-             chat_input,
-             search_session_input,
-             sidebar_search_query: String::new(),
-             sidebar_search_revision: 0,
-             sidebar_search_ids: HashSet::new(),
-             rename_input,
-             cfg_api_key_input,
-             model_fetch_search,
-             cfg_base_url_input,
-             cfg_search_provider_input,
-             model_picker_search_input,
-             cfg_system_prompt_input,
-             new_provider_name_input,
-             new_provider_base_url_input,
-             new_provider_api_key_input,
-             model_editor: None,
-             model_edit_id_input,
-             model_edit_name_input,
-             model_edit_context_input,
-             model_edit_output_input,
-             edit_message_input,
-             params_prompt_input,
-             cfg_proxy_input,
-             cfg_timeout_input,
-             cfg_retries_input,
-             cfg_headers_input,
-             prompt_name_input,
-             prompt_icon_input,
-             prompt_body_input,
-             folder_name_input,
-             message_list,
-             message_list_session,
-             scroll_to_end_pending: false,
-             focus_handle: cx.focus_handle(),
-             _subscriptions: subscriptions,
-         }
+            selected_settings_provider_id: selected_provider_id,
+            is_dark,
+            sidebar_collapsed: false,
+            analytics_range: crate::ui::analytics::TimeRange::Days30,
+            analytics_tab: crate::ui::analytics::AnalyticsTab::Overview,
+            add_channel_type: ChannelType::OpenAiChat,
+            rename_target_session_id: None,
+            pending_tool_name: None,
+            pending_tool_cmd: None,
+            is_streaming: false,
+            active_streams: HashMap::new(),
+            pending_toasts: Vec::new(),
+            prompts,
+            folder_filter: String::new(),
+            favorites_only: false,
+            pending_quote: None,
+            pending_attachments: Vec::new(),
+            pending_import: None,
+            compare_selection: Vec::new(),
+            edit_message_id: None,
+            folder_target_id: None,
+            prompt_edit_id: None,
+            pending_models: Vec::new(),
+            pending_model_selection: HashSet::new(),
+            model_fetch_query: String::new(),
+            open_model_picker: false,
+            expanded_reasoning: HashSet::new(),
+            chat_input,
+            search_session_input,
+            sidebar_search_query: String::new(),
+            sidebar_search_revision: 0,
+            sidebar_search_ids: HashSet::new(),
+            rename_input,
+            cfg_api_key_input,
+            model_fetch_search,
+            cfg_base_url_input,
+            cfg_search_provider_input,
+            model_picker_search_input,
+            cfg_system_prompt_input,
+            new_provider_name_input,
+            new_provider_base_url_input,
+            new_provider_api_key_input,
+            model_editor: None,
+            model_edit_id_input,
+            model_edit_name_input,
+            model_edit_context_input,
+            model_edit_output_input,
+            edit_message_input,
+            params_prompt_input,
+            cfg_proxy_input,
+            cfg_timeout_input,
+            cfg_retries_input,
+            cfg_headers_input,
+            prompt_name_input,
+            prompt_icon_input,
+            prompt_body_input,
+            folder_name_input,
+            message_list,
+            message_list_session,
+            scroll_to_end_pending: false,
+            focus_handle: cx.focus_handle(),
+            _subscriptions: subscriptions,
+        }
     }
 
     pub fn language(&self) -> AppLanguage {
@@ -382,7 +402,7 @@ impl AppState {
         self.pending_toasts.push((level, msg.into()));
     }
 
-     pub(crate) fn persist_storage(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn persist_storage(&mut self, cx: &mut Context<Self>) {
         if let Err(error) = self.storage.save() {
             self.toast(ToastLevel::Error, format!("对话保存失败: {error}"));
             cx.notify();
@@ -438,9 +458,17 @@ impl AppState {
                     self.sidebar_search_revision = self.storage.revision();
                 }
                 Err(_) => {
-                    return self.storage.sessions.iter()
-                        .filter(|session| session.title.to_lowercase().contains(query)
-                            || session.messages.iter().any(|message| message.content.to_lowercase().contains(query)))
+                    return self
+                        .storage
+                        .sessions
+                        .iter()
+                        .filter(|session| {
+                            session.title.to_lowercase().contains(query)
+                                || session
+                                    .messages
+                                    .iter()
+                                    .any(|message| message.content.to_lowercase().contains(query))
+                        })
                         .map(|session| session.id.clone())
                         .collect();
                 }
@@ -478,29 +506,29 @@ impl AppState {
 
     // ================= 会话 =================
 
-     pub fn create_new_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-         let (provider_id, model) = self.config.default_model_selection();
-         let id = self.storage.create_session("新对话", "默认", &model, &provider_id);
-         self.storage.active_session_id = id;
-         self.view_mode = ViewMode::Chat;
-         self.pending_quote = None;
-         self.chat_input.update(cx, |i, cx| {
-             i.set_value("", window, cx);
-             i.focus(window, cx);
-         });
-         self.sync_params_editor(window, cx);
-         self.persist_storage(cx);
-         cx.notify();
-     }
+    pub fn create_new_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (provider_id, model) = self.config.default_model_selection();
+        let id = self.storage.create_session("新对话", "默认", &model, &provider_id);
+        self.storage.active_session_id = id;
+        self.view_mode = ViewMode::Chat;
+        self.pending_quote = None;
+        self.chat_input.update(cx, |i, cx| {
+            i.set_value("", window, cx);
+            i.focus(window, cx);
+        });
+        self.sync_params_editor(window, cx);
+        self.persist_storage(cx);
+        cx.notify();
+    }
 
-     pub fn switch_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-         self.storage.active_session_id = id;
-         self.pending_quote = None;
-         self.persist_storage(cx);
-         self.sync_params_editor(window, cx);
-         self.chat_input.update(cx, |input, cx| input.focus(window, cx));
-         cx.notify();
-     }
+    pub fn switch_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.storage.active_session_id = id;
+        self.pending_quote = None;
+        self.persist_storage(cx);
+        self.sync_params_editor(window, cx);
+        self.chat_input.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
 
     pub fn delete_session(&mut self, id: String, cx: &mut Context<Self>) {
         self.storage.delete_session(&id);
@@ -509,7 +537,13 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn start_rename_session(&mut self, id: String, current_title: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_rename_session(
+        &mut self,
+        id: String,
+        current_title: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.rename_target_session_id = Some(id);
         self.rename_input.update(cx, |i, cx| {
             i.set_value(current_title, window, cx);
@@ -523,9 +557,9 @@ impl AppState {
         if !new_title.is_empty() {
             if let Some(target_id) = &self.rename_target_session_id {
                 if let Some(session) = self.storage.sessions.iter_mut().find(|s| &s.id == target_id) {
-                     session.title = new_title;
-                     session.title_auto = false;
-                     self.persist_storage(cx);
+                    session.title = new_title;
+                    session.title_auto = false;
+                    self.persist_storage(cx);
                 }
             }
         }
@@ -562,8 +596,7 @@ impl AppState {
 
     // ================= 对话 =================
 
-
-     pub(crate) fn find_message_mut(&mut self, id: &str) -> Option<&mut ChatMessage> {
+    pub(crate) fn find_message_mut(&mut self, id: &str) -> Option<&mut ChatMessage> {
         self.storage
             .sessions
             .iter_mut()
@@ -618,7 +651,6 @@ impl AppState {
         });
     }
 
-
     pub fn copy_to_clipboard(&mut self, text: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
         self.toast(ToastLevel::Success, "已复制到剪贴板");
@@ -637,7 +669,11 @@ impl AppState {
     // ================= 渠道设置 =================
 
     fn ensure_settings_provider_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let exists = self.config.providers.iter().any(|p| p.id == self.selected_settings_provider_id);
+        let exists = self
+            .config
+            .providers
+            .iter()
+            .any(|p| p.id == self.selected_settings_provider_id);
         if !exists {
             if let Some(first) = self.config.providers.first().map(|p| p.id.clone()) {
                 self.select_settings_provider(&first, window, cx);
@@ -647,17 +683,17 @@ impl AppState {
 
     pub fn select_settings_provider(&mut self, provider_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_settings_provider_id = provider_id.to_string();
-         if let Some(provider) = self.config.providers.iter().find(|p| p.id == provider_id).cloned() {
-             let api_key = provider.api_key.clone();
-             let base_url = provider.base_url.clone();
-             self.cfg_api_key_input.update(cx, |i, cx| {
-                 i.set_value(&api_key, window, cx);
-             });
-             self.cfg_base_url_input.update(cx, |i, cx| {
-                 i.set_value(&base_url, window, cx);
-             });
-             self.load_provider_network_inputs(&provider, window, cx);
-         }
+        if let Some(provider) = self.config.providers.iter().find(|p| p.id == provider_id).cloned() {
+            let api_key = provider.api_key.clone();
+            let base_url = provider.base_url.clone();
+            self.cfg_api_key_input.update(cx, |i, cx| {
+                i.set_value(&api_key, window, cx);
+            });
+            self.cfg_base_url_input.update(cx, |i, cx| {
+                i.set_value(&base_url, window, cx);
+            });
+            self.load_provider_network_inputs(&provider, window, cx);
+        }
         cx.notify();
     }
 
@@ -679,26 +715,26 @@ impl AppState {
         }
     }
 
-     pub fn save_current_provider_settings(&mut self, cx: &mut Context<Self>) {
-         let provider_id = self.selected_settings_provider_id.clone();
-         let api_key = self.cfg_api_key_input.read(cx).value().trim().to_string();
-         let base_url = self.cfg_base_url_input.read(cx).value().trim().to_string();
-         let (proxy, timeout, retries, headers) = self.read_provider_network(cx);
- 
-         if let Some(provider) = self.config.providers.iter_mut().find(|p| p.id == provider_id) {
-             if let Err(error) = AppConfig::store_provider_key(&provider.api_key_ref, &api_key) {
-                 self.toast(ToastLevel::Error, format!("API Key 保存失败: {error}"));
-                 cx.notify();
-                 return;
-             }
-             provider.api_key = api_key;
-             if !base_url.is_empty() {
-                 provider.base_url = base_url;
-             }
-             provider.proxy = proxy;
-             provider.timeout_secs = timeout;
-             provider.retries = retries;
-             provider.extra_headers = headers;
+    pub fn save_current_provider_settings(&mut self, cx: &mut Context<Self>) {
+        let provider_id = self.selected_settings_provider_id.clone();
+        let api_key = self.cfg_api_key_input.read(cx).value().trim().to_string();
+        let base_url = self.cfg_base_url_input.read(cx).value().trim().to_string();
+        let (proxy, timeout, retries, headers) = self.read_provider_network(cx);
+
+        if let Some(provider) = self.config.providers.iter_mut().find(|p| p.id == provider_id) {
+            if let Err(error) = AppConfig::store_provider_key(&provider.api_key_ref, &api_key) {
+                self.toast(ToastLevel::Error, format!("API Key 保存失败: {error}"));
+                cx.notify();
+                return;
+            }
+            provider.api_key = api_key;
+            if !base_url.is_empty() {
+                provider.base_url = base_url;
+            }
+            provider.proxy = proxy;
+            provider.timeout_secs = timeout;
+            provider.retries = retries;
+            provider.extra_headers = headers;
             match self.config.save() {
                 Ok(()) => {
                     cx.set_http_client(crate::image_http::client_for_config(&self.config));
@@ -707,16 +743,18 @@ impl AppState {
                 Err(error) => self.toast(ToastLevel::Error, format!("渠道配置保存失败: {error}")),
             }
             cx.notify();
-         }
-     }
+        }
+    }
 
     pub fn select_add_channel_type(&mut self, ct: ChannelType, window: &mut Window, cx: &mut Context<Self>) {
         self.add_channel_type = ct;
         let def_base = ct.default_base_url();
         let def_name = ct.label();
 
-        self.new_provider_base_url_input.update(cx, |i, cx| i.set_value(def_base, window, cx));
-        self.new_provider_name_input.update(cx, |i, cx| i.set_value(def_name, window, cx));
+        self.new_provider_base_url_input
+            .update(cx, |i, cx| i.set_value(def_base, window, cx));
+        self.new_provider_name_input
+            .update(cx, |i, cx| i.set_value(def_name, window, cx));
         cx.notify();
     }
 
@@ -744,11 +782,11 @@ impl AppState {
             api_key,
             api_key_ref: format!("provider/{provider_id}"),
             enabled: true,
-             models: Vec::new(),
-             timeout_secs: 90,
-             retries: 0,
-             proxy: String::new(),
-             extra_headers: Vec::new(),
+            models: Vec::new(),
+            timeout_secs: 90,
+            retries: 0,
+            proxy: String::new(),
+            extra_headers: Vec::new(),
         };
 
         if let Err(error) = AppConfig::store_provider_key(&new_provider.api_key_ref, &new_provider.api_key) {
@@ -762,7 +800,8 @@ impl AppState {
             cx.notify();
             return false;
         }
-        self.new_provider_api_key_input.update(cx, |i, cx| i.set_value("", window, cx));
+        self.new_provider_api_key_input
+            .update(cx, |i, cx| i.set_value("", window, cx));
         self.select_settings_provider(&provider_id, window, cx);
 
         self.toast(ToastLevel::Success, "渠道已添加，可以从接口拉取模型或手动添加模型");
@@ -774,7 +813,8 @@ impl AppState {
         self.config.language = lang.as_str().to_string();
         let _ = self.config.save();
         apply_locale(lang);
-        self.chat_input.update(cx, |i, cx| i.set_placeholder(tr(lang, "input_placeholder"), window, cx));
+        self.chat_input
+            .update(cx, |i, cx| i.set_placeholder(tr(lang, "input_placeholder"), window, cx));
         self.search_session_input
             .update(cx, |i, cx| i.set_placeholder(tr(lang, "search_chat"), window, cx));
         self.toast(ToastLevel::Success, tr(lang, "lang_switched"));
@@ -797,7 +837,11 @@ impl AppState {
 
     pub fn delete_selected_provider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let provider_id = self.selected_settings_provider_id.clone();
-        let key_ref = self.config.providers.iter().find(|p| p.id == provider_id)
+        let key_ref = self
+            .config
+            .providers
+            .iter()
+            .find(|p| p.id == provider_id)
             .map(|provider| provider.api_key_ref.clone());
         if let Err(error) = self.config.delete_provider(&provider_id) {
             self.toast(ToastLevel::Error, format!("渠道删除失败: {error}"));
@@ -849,82 +893,92 @@ impl AppState {
                 .await
                 .unwrap_or_else(|e| Err(format!("拉取失败: {}", e)));
 
-             let _ = this.update(cx, |state, cx| {
-                 match result {
-                     Ok(models) if models.is_empty() => state.toast(ToastLevel::Error, "接口没有返回模型"),
-                     Ok(models) => {
-                         let count = models.len();
-                         state.pending_models = models;
-                         state.pending_model_selection.clear();
-                         state.model_fetch_query.clear();
-                         state.open_model_picker = true;
-                         state.toast(ToastLevel::Info, format!("拉取到 {count} 个模型，请选择要添加的"));
-                     }
-                     Err(err) => state.toast(ToastLevel::Error, err),
-                 }
-                 cx.notify();
-             });
+            let _ = this.update(cx, |state, cx| {
+                match result {
+                    Ok(models) if models.is_empty() => state.toast(ToastLevel::Error, "接口没有返回模型"),
+                    Ok(models) => {
+                        let count = models.len();
+                        state.pending_models = models;
+                        state.pending_model_selection.clear();
+                        state.model_fetch_query.clear();
+                        state.open_model_picker = true;
+                        state.toast(ToastLevel::Info, format!("拉取到 {count} 个模型，请选择要添加的"));
+                    }
+                    Err(err) => state.toast(ToastLevel::Error, err),
+                }
+                cx.notify();
+            });
         })
         .detach();
     }
 
-     pub fn set_pending_model(&mut self, id: &str, selected: bool, cx: &mut Context<Self>) {
-         if selected {
-             self.pending_model_selection.insert(id.to_string());
-         } else {
-             self.pending_model_selection.remove(id);
-         }
-         cx.notify();
-     }
+    pub fn set_pending_model(&mut self, id: &str, selected: bool, cx: &mut Context<Self>) {
+        if selected {
+            self.pending_model_selection.insert(id.to_string());
+        } else {
+            self.pending_model_selection.remove(id);
+        }
+        cx.notify();
+    }
 
-     pub fn select_pending_models(&mut self, ids: &[String], selected: bool, cx: &mut Context<Self>) {
-         for id in ids {
-             if selected {
-                 self.pending_model_selection.insert(id.clone());
-             } else {
-                 self.pending_model_selection.remove(id);
-             }
-         }
-         cx.notify();
-     }
+    pub fn select_pending_models(&mut self, ids: &[String], selected: bool, cx: &mut Context<Self>) {
+        for id in ids {
+            if selected {
+                self.pending_model_selection.insert(id.clone());
+            } else {
+                self.pending_model_selection.remove(id);
+            }
+        }
+        cx.notify();
+    }
 
-     pub fn confirm_pending_models(&mut self, cx: &mut Context<Self>) -> bool {
-         if self.pending_model_selection.is_empty() {
-             self.toast(ToastLevel::Error, "请至少选择一个模型");
-             cx.notify();
-             return false;
-         }
-         let provider_id = self.selected_settings_provider_id.clone();
-         let selected = std::mem::take(&mut self.pending_model_selection);
-         let models = std::mem::take(&mut self.pending_models);
-         let Some(provider) = self.config.providers.iter_mut().find(|provider| provider.id == provider_id) else {
-             return false;
-         };
-         let mut added = 0usize;
-         for (id, name) in models {
-             if !selected.contains(&id) || provider.models.iter().any(|model| model.id == id) {
-                 continue;
-             }
-             provider.models.push(ModelConfig::new(id, name));
-             added += 1;
-         }
-         match self.config.save() {
-             Ok(()) if added == 0 => self.toast(ToastLevel::Info, "所选模型都已经添加过了"),
-             Ok(()) => self.toast(ToastLevel::Success, format!("已添加 {added} 个模型")),
-             Err(error) => self.toast(ToastLevel::Error, format!("模型列表保存失败: {error}")),
-         }
-         cx.notify();
-         true
-     }
+    pub fn confirm_pending_models(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.pending_model_selection.is_empty() {
+            self.toast(ToastLevel::Error, "请至少选择一个模型");
+            cx.notify();
+            return false;
+        }
+        let provider_id = self.selected_settings_provider_id.clone();
+        let selected = std::mem::take(&mut self.pending_model_selection);
+        let models = std::mem::take(&mut self.pending_models);
+        let Some(provider) = self
+            .config
+            .providers
+            .iter_mut()
+            .find(|provider| provider.id == provider_id)
+        else {
+            return false;
+        };
+        let mut added = 0usize;
+        for (id, name) in models {
+            if !selected.contains(&id) || provider.models.iter().any(|model| model.id == id) {
+                continue;
+            }
+            provider.models.push(ModelConfig::new(id, name));
+            added += 1;
+        }
+        match self.config.save() {
+            Ok(()) if added == 0 => self.toast(ToastLevel::Info, "所选模型都已经添加过了"),
+            Ok(()) => self.toast(ToastLevel::Success, format!("已添加 {added} 个模型")),
+            Err(error) => self.toast(ToastLevel::Error, format!("模型列表保存失败: {error}")),
+        }
+        cx.notify();
+        true
+    }
 
-     pub fn cancel_pending_models(&mut self, cx: &mut Context<Self>) {
-         self.pending_models.clear();
-         self.pending_model_selection.clear();
-         cx.notify();
-     }
+    pub fn cancel_pending_models(&mut self, cx: &mut Context<Self>) {
+        self.pending_models.clear();
+        self.pending_model_selection.clear();
+        cx.notify();
+    }
 
     pub fn test_provider_connection(&mut self, cx: &mut Context<Self>) {
-        let mut provider = match self.config.providers.iter().find(|p| p.id == self.selected_settings_provider_id) {
+        let mut provider = match self
+            .config
+            .providers
+            .iter()
+            .find(|p| p.id == self.selected_settings_provider_id)
+        {
             Some(provider) => provider.clone(),
             None => return,
         };
@@ -947,7 +1001,8 @@ impl AppState {
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
     }
 
     pub fn export_current_session(&mut self, cx: &mut Context<Self>) {

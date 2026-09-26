@@ -14,10 +14,10 @@ const LEGACY_CONFIG_FILE: &str = "personal-control-config.json";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ChannelType {
-    OpenAiChat,       // 1. OpenAI (Chat Completions 规范)
-    OpenAiResponses,  // 2. OpenAI (Responses 规范)
-    Gemini,           // 3. Google Gemini 规范
-    Claude,           // 4. Anthropic Claude 规范
+    OpenAiChat,      // 1. OpenAI (Chat Completions 规范)
+    OpenAiResponses, // 2. OpenAI (Responses 规范)
+    Gemini,          // 3. Google Gemini 规范
+    Claude,          // 4. Anthropic Claude 规范
 }
 
 impl ChannelType {
@@ -68,44 +68,44 @@ impl ChannelType {
     }
 }
 
- #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
- pub struct HeaderPair {
-     pub name: String,
-     pub value: String,
- }
- 
- fn default_timeout_secs() -> u64 {
-     90
- }
- 
- pub fn parse_header_lines(text: &str) -> Vec<HeaderPair> {
-     text.lines()
-         .filter_map(|line| {
-             let line = line.trim();
-             if line.is_empty() || line.starts_with('#') {
-                 return None;
-             }
-             let (name, value) = line.split_once(':')?;
-             let name = name.trim();
-             if name.is_empty() {
-                 return None;
-             }
-             Some(HeaderPair {
-                 name: name.to_string(),
-                 value: value.trim().to_string(),
-             })
-         })
-         .collect()
- }
- 
- pub fn format_header_lines(headers: &[HeaderPair]) -> String {
-     headers
-         .iter()
-         .map(|header| format!("{}: {}", header.name, header.value))
-         .collect::<Vec<_>>()
-         .join("\n")
- }
- 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HeaderPair {
+    pub name: String,
+    pub value: String,
+}
+
+fn default_timeout_secs() -> u64 {
+    90
+}
+
+pub fn parse_header_lines(text: &str) -> Vec<HeaderPair> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (name, value) = line.split_once(':')?;
+            let name = name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some(HeaderPair {
+                name: name.to_string(),
+                value: value.trim().to_string(),
+            })
+        })
+        .collect()
+}
+
+pub fn format_header_lines(headers: &[HeaderPair]) -> String {
+    headers
+        .iter()
+        .map(|header| format!("{}: {}", header.name, header.value))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn default_true() -> bool {
     true
 }
@@ -217,28 +217,28 @@ impl ModelConfig {
     }
 }
 
- #[derive(Clone, Debug, Serialize, Deserialize)]
- pub struct ProviderConfig {
-     pub id: String,
-     pub name: String,
-     pub channel_type: ChannelType,
-     pub base_url: String,
-     pub api_path: String,
-     #[serde(default, skip_serializing)]
-     pub api_key: String,
-     #[serde(default)]
-     pub api_key_ref: String,
-     pub enabled: bool,
-     pub models: Vec<ModelConfig>,
-     #[serde(default = "default_timeout_secs")]
-     pub timeout_secs: u64,
-     #[serde(default)]
-     pub retries: u8,
-     #[serde(default)]
-     pub proxy: String,
-     #[serde(default)]
-     pub extra_headers: Vec<HeaderPair>,
- }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    pub id: String,
+    pub name: String,
+    pub channel_type: ChannelType,
+    pub base_url: String,
+    pub api_path: String,
+    #[serde(default, skip_serializing)]
+    pub api_key: String,
+    #[serde(default)]
+    pub api_key_ref: String,
+    pub enabled: bool,
+    pub models: Vec<ModelConfig>,
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+    #[serde(default)]
+    pub retries: u8,
+    #[serde(default)]
+    pub proxy: String,
+    #[serde(default)]
+    pub extra_headers: Vec<HeaderPair>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -260,7 +260,9 @@ impl Default for AppConfig {
             active_provider_id: String::new(),
             model: "default".to_string(),
             temperature: 0.7,
-            system_prompt: "你是强大的个人 AI 工作台 Perch，专精代码开发、架构设计与智能问答。请使用 Markdown 规范输出。".to_string(),
+            system_prompt:
+                "你是强大的个人 AI 工作台 Perch，专精代码开发、架构设计与智能问答。请使用 Markdown 规范输出。"
+                    .to_string(),
             is_dark: false, // 默认清爽浅色
             language: "zh-CN".to_string(),
             local_tools_enabled: false,
@@ -393,7 +395,9 @@ impl AppConfig {
     }
 
     pub fn get_active_provider(&self) -> Option<&ProviderConfig> {
-        self.providers.iter().find(|p| p.id == self.active_provider_id)
+        self.providers
+            .iter()
+            .find(|p| p.id == self.active_provider_id)
             .or_else(|| self.providers.iter().find(|p| p.enabled))
             .or_else(|| self.providers.first())
     }
@@ -420,7 +424,9 @@ impl AppConfig {
         let Some(provider) = self.get_active_provider() else {
             return (String::new(), self.model.clone());
         };
-        let model = provider.models.iter()
+        let model = provider
+            .models
+            .iter()
             .find(|model| model.id == self.model && model.enabled)
             .or_else(|| provider.models.iter().find(|model| model.enabled))
             .map(|model| model.id.clone())
@@ -437,7 +443,11 @@ impl AppConfig {
     pub fn add_provider(&mut self, provider: ProviderConfig) -> Result<(), std::io::Error> {
         let previous = self.clone();
         let id = provider.id.clone();
-        let first_model = provider.models.first().map(|m| m.id.clone()).unwrap_or_else(|| "default".to_string());
+        let first_model = provider
+            .models
+            .first()
+            .map(|m| m.id.clone())
+            .unwrap_or_else(|| "default".to_string());
         self.providers.push(provider);
         if self.active_provider_id.is_empty() {
             self.active_provider_id = id;
@@ -513,11 +523,11 @@ mod tests {
             api_key: "secret-value".into(),
             api_key_ref: "provider/provider-1".into(),
             enabled: true,
-             models: Vec::new(),
-             timeout_secs: 90,
-             retries: 0,
-             proxy: String::new(),
-             extra_headers: Vec::new(),
+            models: Vec::new(),
+            timeout_secs: 90,
+            retries: 0,
+            proxy: String::new(),
+            extra_headers: Vec::new(),
         });
         let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("secret-value"));
@@ -535,9 +545,10 @@ mod tests {
         assert_eq!(model.context_window, None);
         assert_eq!(model.effective_context_window(), Some(8_192));
 
-        let mut sized: ModelConfig =
-            serde_json::from_str(r#"{"id": "relay-x", "name": "X", "tags": "64K", "is_pinned": false, "enabled": true}"#)
-                .unwrap();
+        let mut sized: ModelConfig = serde_json::from_str(
+            r#"{"id": "relay-x", "name": "X", "tags": "64K", "is_pinned": false, "enabled": true}"#,
+        )
+        .unwrap();
         assert!(sized.migrate_legacy_tags());
         assert_eq!(sized.context_window, Some(64_000));
 
@@ -553,7 +564,10 @@ mod tests {
         model.capabilities = Some(vec![Capability::Tools]);
         assert!(!model.effective_capabilities().contains(&Capability::Vision));
         model.reasoning_levels = Some(vec![ReasoningLevel::High, ReasoningLevel::Low]);
-        assert_eq!(model.effective_reasoning_levels(), vec![ReasoningLevel::Low, ReasoningLevel::High]);
+        assert_eq!(
+            model.effective_reasoning_levels(),
+            vec![ReasoningLevel::Low, ReasoningLevel::High]
+        );
         let json = serde_json::to_string(&ModelConfig::new("a", "b")).unwrap();
         assert!(!json.contains("context_window"), "unset fields are not written: {json}");
     }

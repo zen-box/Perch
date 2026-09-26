@@ -27,7 +27,10 @@ mod ui;
 use app::AppState;
 use ui::Workspace;
 
-actions!(personal_control, [NewChat, ToggleSettings, ToggleSidebar, CloseSettings, PasteIntoChat]);
+actions!(
+    personal_control,
+    [NewChat, ToggleSettings, ToggleSidebar, CloseSettings, PasteIntoChat]
+);
 
 fn main() {
     models_dev::sync_cache_background(false);

@@ -37,7 +37,10 @@ pub fn normalize_image_url(raw: &str) -> Option<String> {
 #[allow(dead_code)]
 pub fn approve_image(url: &str) {
     if let Some(url) = normalize_image_url(url) {
-        approved_urls().lock().unwrap_or_else(|error| error.into_inner()).insert(url);
+        approved_urls()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(url);
     }
 }
 
@@ -183,10 +186,17 @@ fn proxy_url(explicit: &str) -> Option<String> {
     if !explicit.is_empty() {
         return Some(explicit.to_string());
     }
-    ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"]
-        .into_iter()
-        .find_map(|name| std::env::var(name).ok())
-        .filter(|value| !value.trim().is_empty())
+    [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ]
+    .into_iter()
+    .find_map(|name| std::env::var(name).ok())
+    .filter(|value| !value.trim().is_empty())
 }
 
 fn reqwest_proxy(value: &str) -> Option<reqwest::Proxy> {
@@ -205,7 +215,11 @@ fn reqwest_proxy(value: &str) -> Option<reqwest::Proxy> {
 
 fn proxy_host(value: &str) -> Option<String> {
     let value = value.trim();
-    let with_scheme = if value.contains("://") { value.to_string() } else { format!("http://{value}") };
+    let with_scheme = if value.contains("://") {
+        value.to_string()
+    } else {
+        format!("http://{value}")
+    };
     Url::parse(&with_scheme).ok()?.host_str().map(str::to_string)
 }
 
@@ -298,7 +312,10 @@ async fn fetch(client: &Client, method: &str, uri: &str) -> http_client::Result<
     let method_obj = reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET);
     let response = client
         .request(method_obj, uri)
-        .header(reqwest::header::ACCEPT, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+        .header(
+            reqwest::header::ACCEPT,
+            "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        )
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
         .send()
         .await
@@ -363,7 +380,10 @@ mod tests {
             normalize_image_url("https://picsum.photos/200/100#top").as_deref(),
             Some("https://picsum.photos/200/100")
         );
-        assert_eq!(normalize_image_url("HTTP://Example.com").as_deref(), Some("http://example.com/"));
+        assert_eq!(
+            normalize_image_url("HTTP://Example.com").as_deref(),
+            Some("http://example.com/")
+        );
         assert!(normalize_image_url("file:///C:/a.png").is_none());
         assert!(normalize_image_url("data:image/png;base64,aaaa").is_none());
         assert!(normalize_image_url("images/a.png").is_none());
