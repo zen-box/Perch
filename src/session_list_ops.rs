@@ -6,6 +6,7 @@ use gpui_kit::*;
 
 use crate::agent::export_session_to_markdown;
 use crate::app::{AppState, ToastLevel, ViewMode};
+use crate::i18n::{Key, tr, tr_args};
 use crate::model::{DEFAULT_SESSION_FOLDER, DEFAULT_SESSION_TITLE};
 
 impl AppState {
@@ -67,9 +68,10 @@ impl AppState {
     }
 
     pub fn delete_session(&mut self, id: String, cx: &mut Context<Self>) {
+        let lang = self.language();
         self.storage.delete_session(&id);
         self.persist_storage(cx);
-        self.toast(ToastLevel::Info, "对话已删除");
+        self.toast(ToastLevel::Info, tr(lang, Key::SessionDeleted));
         cx.notify();
     }
 
@@ -106,20 +108,25 @@ impl AppState {
     }
 
     pub fn export_current_session(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         if let Some(session) = self.storage.get_active_session() {
             match export_session_to_markdown(&session.title, &session.messages) {
-                Ok(filename) => self.toast(ToastLevel::Success, format!("已导出至 {}", filename)),
-                Err(e) => self.toast(ToastLevel::Error, format!("导出失败: {}", e)),
+                Ok(filename) => self.toast(
+                    ToastLevel::Success,
+                    tr_args(lang, Key::ExportedTo, &[filename.as_str()]),
+                ),
+                Err(e) => self.toast(ToastLevel::Error, tr_args(lang, Key::ExportFailed, &[&e.to_string()])),
             }
             cx.notify();
         }
     }
 
     pub fn clear_current_session(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         if let Some(session) = self.storage.get_active_session_mut() {
             session.messages.clear();
             self.persist_storage(cx);
-            self.toast(ToastLevel::Info, "当前对话已清空");
+            self.toast(ToastLevel::Info, tr(lang, Key::ChatCleared));
             cx.notify();
         }
     }

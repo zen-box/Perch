@@ -37,7 +37,7 @@ fn render_pending_attachments(
             } else {
                 format!("{:.0} KB", size_kb)
             };
-            let (icon, badge_color, type_label) = attachment_badge(att, p);
+            let (icon, badge_color, type_label) = attachment_badge(att, p, lang);
 
             h_flex()
                 .gap_2()

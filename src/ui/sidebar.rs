@@ -61,7 +61,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
     let mut rows: Vec<AnyElement> = Vec::new();
     let mut row_ix = 0usize;
     if !pinned.is_empty() {
-        rows.push(sidebar_group(tr(lang, Key::SidebarPinned), true, p));
+        rows.push(sidebar_group(tr(lang, Key::Pin), true, p));
         for session in pinned {
             rows.push(session_row(&app, row_ix, session, session.id == active_id, &folders, p, cx).into_any_element());
             row_ix += 1;
@@ -125,7 +125,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
                             .gap_1()
                             .child(filter_chip(
                                 "folder-all",
-                                tr(lang, Key::SidebarAll),
+                                tr(lang, Key::All),
                                 folder_filter.is_empty() && !favorites_only,
                                 cx.listener(|this, _, _, cx| {
                                     this.clear_session_filters(cx);
@@ -133,7 +133,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
                             ))
                             .child(filter_chip(
                                 "folder-fav",
-                                tr(lang, Key::SidebarFavorite),
+                                tr(lang, Key::Favorite),
                                 favorites_only,
                                 cx.listener(|this, _, _, cx| {
                                     this.toggle_favorites_filter(cx);
@@ -272,9 +272,9 @@ fn session_row(
                     ("pin-session", ix),
                     if pinned { IconName::PinOff } else { IconName::Pin },
                     if pinned {
-                        tr(lang, Key::SidebarUnpin)
+                        tr(lang, Key::Unpin)
                     } else {
-                        tr(lang, Key::SidebarPinned)
+                        tr(lang, Key::Pin)
                     },
                     {
                         let id = session_id.clone();
@@ -285,9 +285,9 @@ fn session_row(
                     ("fav-session", ix),
                     if favorite { IconName::StarOff } else { IconName::Star },
                     if favorite {
-                        tr(lang, Key::SidebarUnfavorite)
+                        tr(lang, Key::Unfavorite)
                     } else {
-                        tr(lang, Key::SidebarFavorite)
+                        tr(lang, Key::Favorite)
                     },
                     {
                         let id = session_id.clone();
@@ -337,9 +337,9 @@ fn session_row(
             let mut menu = menu
                 .item(
                     PopupMenuItem::new(if pinned {
-                        tr(lang, Key::SidebarUnpin)
+                        tr(lang, Key::Unpin)
                     } else {
-                        tr(lang, Key::SidebarPinned)
+                        tr(lang, Key::Pin)
                     })
                     .icon(IconName::Pin)
                     .on_click(move |_, _, cx| {
@@ -348,9 +348,9 @@ fn session_row(
                 )
                 .item(
                     PopupMenuItem::new(if favorite {
-                        tr(lang, Key::SidebarUnfavorite)
+                        tr(lang, Key::Unfavorite)
                     } else {
-                        tr(lang, Key::SidebarFavorite)
+                        tr(lang, Key::Favorite)
                     })
                     .icon(IconName::Star)
                     .on_click(move |_, _, cx| {

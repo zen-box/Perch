@@ -12,9 +12,11 @@ use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
 use crate::app::AppState;
+use crate::i18n::{Key, tr, tr_args};
 
 pub fn render_params_button(cx: &mut Context<AppState>) -> impl IntoElement {
     let app = cx.entity();
+    let lang = app.read(cx).language();
     Popover::new("chat-params")
         .anchor(Anchor::BottomLeft)
         .w(px(360.))
@@ -23,7 +25,7 @@ pub fn render_params_button(cx: &mut Context<AppState>) -> impl IntoElement {
                 .ghost()
                 .xsmall()
                 .icon(IconName::SlidersHorizontal)
-                .label("参数"),
+                .label(tr(lang, Key::Params)),
         )
         .content(move |_, _, cx| render_params(&app, cx))
 }
@@ -61,25 +63,30 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
         .gap_3()
         .max_h(px(480.))
         .overflow_y_scrollbar()
-        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("对话参数"))
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(tr(lang, Key::ChatParams)),
+        )
         .child(
             div()
                 .text_xs()
                 .text_color(p.muted_foreground)
-                .child("留空或选择“默认”时使用全局设置"),
+                .child(tr(lang, Key::ParamsDefaultHint)),
         )
         .child(Textarea::new(&prompt))
         .child(choice_row(
             app,
             ChoiceRow {
                 id_prefix: "temp",
-                title: "温度",
+                title: tr(lang, Key::TemperatureLabel),
                 current: temperature
                     .map(|value| format!("{value:.1}"))
-                    .unwrap_or_else(|| "默认".into()),
+                    .unwrap_or_else(|| tr(lang, Key::DefaultValue).into()),
                 selected: temperature,
                 options: vec![
-                    (None, "默认"),
+                    (None, tr(lang, Key::DefaultValue)),
                     (Some(0.2), "0.2"),
                     (Some(0.7), "0.7"),
                     (Some(1.0), "1.0"),
@@ -95,10 +102,10 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
                 title: "top_p",
                 current: top_p
                     .map(|value| format!("{value:.2}"))
-                    .unwrap_or_else(|| "默认".into()),
+                    .unwrap_or_else(|| tr(lang, Key::DefaultValue).into()),
                 selected: top_p,
                 options: vec![
-                    (None, "默认"),
+                    (None, tr(lang, Key::DefaultValue)),
                     (Some(0.8), "0.8"),
                     (Some(0.95), "0.95"),
                     (Some(1.0), "1.0"),
@@ -111,13 +118,13 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
             app,
             ChoiceRow {
                 id_prefix: "max-tokens",
-                title: "最大 tokens",
+                title: tr(lang, Key::MaxTokens),
                 current: max_tokens
                     .map(|value| value.to_string())
-                    .unwrap_or_else(|| "默认".into()),
+                    .unwrap_or_else(|| tr(lang, Key::DefaultValue).into()),
                 selected: max_tokens,
                 options: vec![
-                    (None, "默认"),
+                    (None, tr(lang, Key::DefaultValue)),
                     (Some(1024u32), "1024"),
                     (Some(4096), "4096"),
                     (Some(8192), "8192"),
@@ -130,13 +137,13 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
             app,
             ChoiceRow {
                 id_prefix: "context",
-                title: "上下文条数",
+                title: tr(lang, Key::ContextMessages),
                 current: context_limit
                     .map(|value| value.to_string())
-                    .unwrap_or_else(|| "全部".into()),
+                    .unwrap_or_else(|| tr(lang, Key::All).into()),
                 selected: context_limit,
                 options: vec![
-                    (None, "全部"),
+                    (None, tr(lang, Key::All)),
                     (Some(10usize), "10"),
                     (Some(20), "20"),
                     (Some(40), "40"),
@@ -150,14 +157,14 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
             let app = app.clone();
             let current = reasoning.filter(|level| levels.contains(level));
             let default_label = match model_default {
-                Some(level) => format!("默认（{}）", level.label(lang)),
-                None => "默认".to_string(),
+                Some(level) => tr_args(lang, Key::DefaultWithArg, &[level.label(lang)]),
+                None => tr(lang, Key::DefaultValue).to_string(),
             };
             let value_label = current
                 .map(|level| level.label(lang).to_string())
                 .unwrap_or_else(|| default_label.clone());
             this.child(labeled(
-                "思考强度".to_string(),
+                tr(lang, Key::ReasoningEffort).to_string(),
                 value_label,
                 &p,
                 h_flex().flex_wrap().gap_1().children(
@@ -175,7 +182,11 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
                                         button.ghost()
                                     }
                                 })
-                                .label(level.map(|level| level.label(lang)).unwrap_or("默认"))
+                                .label(
+                                    level
+                                        .map(|level| level.label(lang))
+                                        .unwrap_or(tr(lang, Key::DefaultValue)),
+                                )
                                 .on_click(move |_, _, cx| {
                                     app.update(cx, |this, cx| this.patch_params(cx, |params| params.reasoning = level));
                                 })
@@ -186,7 +197,7 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
         .child(
             h_flex()
                 .justify_between()
-                .child(div().text_sm().child("流式输出"))
+                .child(div().text_sm().child(tr(lang, Key::StreamingOutput)))
                 .child(Switch::new("stream-toggle").checked(stream).on_click({
                     let app = app.clone();
                     move |checked, _, cx| {
@@ -199,7 +210,7 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
             Button::new("reset-params")
                 .outline()
                 .small()
-                .label("恢复默认")
+                .label(tr(lang, Key::RestoreDefaults))
                 .on_click({
                     let app = app.clone();
                     move |_, window, cx| app.update(cx, |this, cx| this.reset_params(window, cx))
@@ -266,6 +277,7 @@ fn choice_row<T: Copy + PartialEq + 'static>(
 
 pub fn render_compare_button(state: &AppState, cx: &mut Context<AppState>) -> impl IntoElement {
     let app = cx.entity();
+    let lang = state.language();
     let compare_count = if state.compare_selection.is_empty() {
         0
     } else {
@@ -281,9 +293,9 @@ pub fn render_compare_button(state: &AppState, cx: &mut Context<AppState>) -> im
                 .icon(IconName::Columns2)
                 .when(compare_count >= 2, |this| this.primary())
                 .label(if compare_count == 0 {
-                    "对比".into()
+                    tr(lang, Key::Compare).into()
                 } else {
-                    format!("对比 {compare_count}")
+                    tr_args(lang, Key::CompareCount, &[&compare_count.to_string()])
                 }),
         )
         .content(move |_, _, cx| render_compare(&app, cx))
@@ -291,6 +303,7 @@ pub fn render_compare_button(state: &AppState, cx: &mut Context<AppState>) -> im
 
 fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl IntoElement + use<> {
     let p = Palette::new(cx);
+    let lang = app.read(cx).language();
     let (providers, selected, current_target) = {
         let state = app.read(cx);
         (
@@ -374,13 +387,18 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
             h_flex()
                 .justify_between()
                 .items_center()
-                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("模型对比"))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(tr(lang, Key::ModelCompare)),
+                )
                 .when(has_selection, |this| {
                     this.child(
                         Button::new("clear-cmp")
                             .ghost()
                             .xsmall()
-                            .label("清空")
+                            .label(tr(lang, Key::Clear))
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 clear_app.update(cx, |this, cx| this.clear_compare_selection(cx));
                             })),
@@ -390,7 +408,12 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
         .child(
             v_flex()
                 .gap_1()
-                .child(div().text_xs().text_color(p.muted_foreground).child("当前模型（基准）"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child(tr(lang, Key::CurrentModelBaseline)),
+                )
                 .child(
                     h_flex()
                         .items_center()
@@ -437,7 +460,7 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
                                 .bg(p.primary.opacity(0.12))
                                 .text_xs()
                                 .text_color(p.primary)
-                                .child("当前"),
+                                .child(tr(lang, Key::Current)),
                         ),
                 ),
         )
@@ -448,13 +471,13 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
                     div()
                         .text_xs()
                         .text_color(p.muted_foreground)
-                        .child("选择 1 到 2 个模型与当前模型对比："),
+                        .child(tr(lang, Key::ComparePickModels)),
                 )
                 .child(if rows.is_empty() {
                     div()
                         .text_sm()
                         .text_color(p.muted_foreground)
-                        .child("没有其他已启用的模型")
+                        .child(tr(lang, Key::NoOtherEnabledModel))
                         .into_any_element()
                 } else {
                     div()
@@ -468,9 +491,9 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
                 .primary()
                 .small()
                 .label(if can_run {
-                    format!("开始对比 ({total_count} 个模型)")
+                    tr_args(lang, Key::StartCompareWithCount, &[&total_count.to_string()])
                 } else {
-                    "请选择对比模型".into()
+                    tr(lang, Key::PleasePickCompareModel).into()
                 })
                 .disabled(!can_run)
                 .on_click(cx.listener(move |popover, _, window, cx| {

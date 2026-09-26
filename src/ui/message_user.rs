@@ -13,7 +13,12 @@ use crate::app::AppState;
 use crate::i18n::{AppLanguage, Key, tr};
 use crate::model::{Attachment, ChatMessage};
 
-fn render_message_attachments(app: &Entity<AppState>, attachments: &[Attachment], p: &Palette) -> impl IntoElement {
+fn render_message_attachments(
+    app: &Entity<AppState>,
+    attachments: &[Attachment],
+    p: &Palette,
+    lang: AppLanguage,
+) -> impl IntoElement {
     h_flex()
         .gap_2()
         .flex_wrap()
@@ -25,7 +30,7 @@ fn render_message_attachments(app: &Entity<AppState>, attachments: &[Attachment]
             let view_path = abs_path.clone();
             let view_title = name.clone();
             let open_app = app.clone();
-            let (icon, badge_color, type_label) = attachment_badge(att, p);
+            let (icon, badge_color, type_label) = attachment_badge(att, p, lang);
 
             let size_kb = (att.size as f32 / 1024.0).max(0.1);
             let size_label = if size_kb > 1024.0 {
@@ -156,7 +161,7 @@ pub(super) fn render_user_message(
             )
         })
         .when(has_attachments, |this| {
-            this.child(render_message_attachments(app, &attachments, p))
+            this.child(render_message_attachments(app, &attachments, p, lang))
         })
         .when(has_content, |this| {
             this.child(

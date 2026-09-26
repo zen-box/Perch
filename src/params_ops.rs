@@ -4,6 +4,7 @@ use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel};
 use crate::config::{ProviderConfig, format_header_lines, parse_header_lines};
+use crate::i18n::{Key, tr};
 use crate::model::{ChatParams, DEFAULT_SESSION_FOLDER};
 
 impl AppState {
@@ -105,6 +106,7 @@ impl AppState {
     }
 
     pub fn toggle_compare_model(&mut self, provider_id: &str, model_id: &str, cx: &mut Context<Self>) {
+        let lang = self.language();
         let current = self.active_target();
         let key = (provider_id.to_string(), model_id.to_string());
         if key == current {
@@ -115,7 +117,7 @@ impl AppState {
         } else if self.compare_selection.len() < 2 {
             self.compare_selection.push(key);
         } else {
-            self.toast(ToastLevel::Error, "最多选择 2 个对比模型（共 3 个模型 PK）");
+            self.toast(ToastLevel::Error, tr(lang, Key::CompareMaxTwo));
         }
         cx.notify();
     }

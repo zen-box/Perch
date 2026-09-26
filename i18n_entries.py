@@ -61,12 +61,12 @@ ENTRIES = [
     ("DefaultValue", "默认", "Default", "デフォルト", "預設"),
 
     # ---- ui/sidebar.rs ----
-    ("SidebarPinned", "置顶", "Pinned", "ピン留め", "置頂"),
-    ("SidebarUnpin", "取消置顶", "Unpin", "ピン留めを解除", "取消置頂"),
-    ("SidebarFavorite", "收藏", "Favorite", "お気に入り", "收藏"),
-    ("SidebarUnfavorite", "取消收藏", "Remove from favorites", "お気に入りを解除", "取消收藏"),
+    ("Pin", "置顶", "Pinned", "ピン留め", "置頂"),
+    ("Unpin", "取消置顶", "Unpin", "ピン留めを解除", "取消置頂"),
+    ("Favorite", "收藏", "Favorite", "お気に入り", "收藏"),
+    ("Unfavorite", "取消收藏", "Remove from favorites", "お気に入りを解除", "取消收藏"),
     ("SidebarNoMatch", "没有匹配的对话", "No matching chats", "一致するチャットがありません", "沒有符合的對話"),
-    ("SidebarAll", "全部", "All", "すべて", "全部"),
+    ("All", "全部", "All", "すべて", "全部"),
     ("Rename", "重命名", "Rename", "名前を変更", "重新命名"),
     ("RemoveFromFolder", "移出文件夹", "Remove from folder", "フォルダから外す", "移出資料夾"),
     ("NewFolder", "新建文件夹…", "New folder…", "新しいフォルダ…", "新增資料夾…"),
@@ -94,6 +94,60 @@ ENTRIES = [
     ("ImageInlineBase64", "Base64 内联图片", "Inline Base64 image", "インライン Base64 画像", "Base64 內嵌圖片"),
     ("CopyBase64", "复制 Base64", "Copy Base64", "Base64 をコピー", "複製 Base64"),
     ("Base64Copied", "Base64 数据已复制", "Base64 data copied", "Base64 データをコピーしました", "Base64 資料已複製"),
+
+    # ---- 4.3-c：参数面板 / 会话视图 / 会话操作 ----
+    # 参数面板
+    ("Params", "参数", "Parameters", "パラメータ", "參數"),
+    ("ChatParams", "对话参数", "Chat parameters", "会話パラメータ", "對話參數"),
+    ("ParamsDefaultHint", "留空或选择“默认”时使用全局设置", "Leave empty or choose “Default” to use the global setting", "空欄または「デフォルト」を選ぶと全体設定が使われます", "留空或選擇「預設」時使用全域設定"),
+    ("TemperatureLabel", "温度", "Temperature", "温度", "溫度"),
+    ("MaxTokens", "最大 tokens", "Max tokens", "最大 tokens", "最大 tokens"),
+    ("ContextMessages", "上下文条数", "Context messages", "コンテキスト件数", "上下文則數"),
+    ("DefaultWithArg", "默认（{}）", "Default ({})", "デフォルト（{}）", "預設（{}）"),
+    ("ReasoningEffort", "思考强度", "Reasoning effort", "思考の強度", "思考強度"),
+    ("StreamingOutput", "流式输出", "Streaming", "ストリーミング出力", "串流輸出"),
+    ("RestoreDefaults", "恢复默认", "Restore defaults", "デフォルトに戻す", "恢復預設"),
+    ("Compare", "对比", "Compare", "比較", "對比"),
+    ("CompareCount", "对比 {}", "Compare {}", "比較 {}", "對比 {}"),
+    ("ModelCompare", "模型对比", "Model comparison", "モデル比較", "模型對比"),
+    ("Clear", "清空", "Clear", "クリア", "清除"),
+    ("CurrentModelBaseline", "当前模型（基准）", "Current model (baseline)", "現在のモデル（基準）", "目前模型（基準）"),
+    ("Current", "当前", "Current", "現在", "目前"),
+    ("ComparePickModels", "选择 1 到 2 个模型与当前模型对比：", "Pick 1–2 models to compare against the current one:", "現在のモデルと比較するモデルを 1〜2 個選んでください：", "選擇 1 到 2 個模型與目前模型對比："),
+    ("NoOtherEnabledModel", "没有其他已启用的模型", "No other enabled models", "他に有効なモデルがありません", "沒有其他已啟用的模型"),
+    ("StartCompareWithCount", "开始对比 ({} 个模型)", "Start comparison ({} models)", "比較を開始（{} モデル）", "開始對比（{} 個模型）"),
+    ("PleasePickCompareModel", "请选择对比模型", "Select models to compare", "比較するモデルを選んでください", "請選擇對比模型"),
+    # 会话视图
+    ("JumpToLatest", "回到最新", "Jump to latest", "最新へ戻る", "回到最新"),
+    ("MessageCount", "{} 条消息", "{} messages", "{} 件のメッセージ", "{} 則訊息"),
+    ("NewChatShortcut", "新建对话 (Ctrl+N)", "New chat (Ctrl+N)", "新規チャット (Ctrl+N)", "新增對話 (Ctrl+N)"),
+    ("ExportMarkdown", "导出为 Markdown", "Export as Markdown", "Markdown として書き出す", "匯出為 Markdown"),
+    ("ExportJson", "导出 JSON 备份", "Export JSON backup", "JSON バックアップを書き出す", "匯出 JSON 備份"),
+    ("ImportJson", "从 JSON 备份恢复", "Restore from JSON backup", "JSON バックアップから復元", "從 JSON 備份還原"),
+    ("ClearCurrentChat", "清空当前对话", "Clear current chat", "現在の会話をクリア", "清空目前對話"),
+    ("ImportConfirmHint", "已读取 JSON 备份。恢复会覆盖本机会话、提示词和渠道配置，不会写入 API Key。", "The JSON backup has been read. Restoring overwrites local chats, prompts and provider settings; API keys are not included.", "JSON バックアップを読み込みました。復元すると本機のチャット・プロンプト・プロバイダー設定が上書きされます（API キーは含まれません）。", "已讀取 JSON 備份。還原會覆蓋本機會話、提示詞和渠道設定，不會寫入 API Key。"),
+    ("Restore", "恢复", "Restore", "復元", "還原"),
+    ("AdoptCompareFirst", "请先采用一条对比回答，再继续对话", "Adopt one of the comparison replies before continuing", "先に比較回答を 1 つ採用してから続けてください", "請先採用一則對比回答，再繼續對話"),
+    ("FileTypeText", "文本/代码", "Text / code", "テキスト・コード", "文字／程式碼"),
+    ("FileTypeSheet", "表格", "Spreadsheet", "表計算", "試算表"),
+    ("FileTypeFile", "文件", "File", "ファイル", "檔案"),
+    ("ToolAuthRequired", "需要你的授权", "Permission required", "許可が必要です", "需要你的授權"),
+    ("ToolAuthHint", "即将在本机执行下面的命令，请确认内容安全：", "The command below is about to run on this machine. Make sure it is safe:", "次のコマンドを本機で実行します。内容が安全か確認してください：", "即將在本機執行下面的指令，請確認內容安全："),
+    ("Deny", "拒绝", "Deny", "拒否", "拒絕"),
+    ("AllowOnce", "允许执行一次", "Allow once", "一度だけ許可", "允許執行一次"),
+    # 会话操作（toast 与继续生成指令）
+    ("CompareNeedInput", "请在输入框输入问题或添加图片后再开始对比", "Type a question or add an image before starting a comparison", "比較を始める前に、質問を入力するか画像を追加してください", "請在輸入框輸入問題或新增圖片後再開始對比"),
+    ("CompareNeedModels", "请至少勾选 1 个要对比的模型", "Select at least 1 model to compare", "比較するモデルを 1 つ以上選んでください", "請至少勾選 1 個要對比的模型"),
+    ("CompareMaxTwo", "最多选择 2 个对比模型（共 3 个模型 PK）", "At most 2 comparison models (3 models in total)", "比較モデルは最大 2 つ（合計 3 モデル）", "最多選擇 2 個對比模型（共 3 個模型 PK）"),
+    ("NoUserMessageToRegenerate", "没有可重答的用户消息", "No user message to answer again", "再回答できるユーザーメッセージがありません", "沒有可重答的使用者訊息"),
+    ("CanOnlyContinueAfterDone", "只能在已完成的回答后继续生成", "You can only continue after a finished reply", "完了した回答の後でのみ続きを生成できます", "只能在已完成的回答後繼續生成"),
+    ("ContinuePrompt", "请从上次中断的地方继续，不要重复已有内容。", "Continue from where you left off, and do not repeat what you already wrote.", "前回中断したところから続けてください。既に書いた内容は繰り返さないでください。", "請從上次中斷的地方繼續，不要重複已有內容。"),
+    ("CurrentModelUnavailable", "当前模型不可用", "The current model is unavailable", "現在のモデルは利用できません", "目前模型無法使用"),
+    ("CannotDeleteWhileGenerating", "生成过程中不能删除消息", "Cannot delete a message while generating", "生成中はメッセージを削除できません", "生成過程中不能刪除訊息"),
+    ("SessionDeleted", "对话已删除", "Chat deleted", "チャットを削除しました", "對話已刪除"),
+    ("ExportedTo", "已导出至 {}", "Exported to {}", "{} に書き出しました", "已匯出至 {}"),
+    ("ExportFailed", "导出失败: {}", "Export failed: {}", "書き出しに失敗しました: {}", "匯出失敗: {}"),
+    ("ChatCleared", "当前对话已清空", "Current chat cleared", "現在の会話をクリアしました", "目前對話已清空"),
 ]
 
 # 存进数据的值（新建会话的默认标题、默认文件夹名）不是界面文案：
@@ -112,8 +166,6 @@ CONST_FILES = {
     "src/session_list_ops.rs",
     "src/session_ops.rs",
     "src/params_ops.rs",
-    "src/ui/chat.rs",
-    "src/ui/sidebar.rs",
 }
 
 SKIP = set()
@@ -126,7 +178,10 @@ FILE_KEY_OVERRIDE = {
     ("src/ui/markdown_image.rs", "关闭"): "Close",
     ("src/ui/sidebar.rs", "移到「{folder_name}」"): "MoveToFolder",
     ("src/ui/markdown_image.rs", "服务器返回 HTTP {status}"): "ImageHttpStatus",
+    # 源码里是命名参数（`{compare_count}` / `{total_count}`），与表里的 `{}` 对不上
+    ("src/ui/params.rs", "对比 {compare_count}"): "CompareCount",
+    ("src/ui/params.rs", "开始对比 ({total_count} 个模型)"): "StartCompareWithCount",
 }
 
 # 写进 src/i18n.rs 的分节注释，一眼看出这批 key 覆盖了哪些界面
-BATCH_TITLE = "4.3-b：侧边栏 / 图片渲染 / 参数面板"
+BATCH_TITLE = "4.3-c：参数面板 / 会话视图 / 会话操作"

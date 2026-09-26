@@ -3,6 +3,7 @@
 use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel};
+use crate::i18n::{Key, tr};
 use crate::llm::ChatMessageReq;
 use crate::model::{ChatMessage, DEFAULT_SESSION_TITLE};
 
@@ -58,6 +59,7 @@ impl AppState {
     }
 
     pub fn send_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let lang = self.language();
         let user_prompt = self.chat_input.read(cx).value().trim().to_string();
         if (user_prompt.is_empty() && self.pending_attachments.is_empty()) || self.is_streaming {
             return;
@@ -67,7 +69,7 @@ impl AppState {
             .get_active_session()
             .is_some_and(|session| session.has_unresolved_compare())
         {
-            self.toast(ToastLevel::Error, "请先采用一条对比回答，再继续对话");
+            self.toast(ToastLevel::Error, tr(lang, Key::AdoptCompareFirst));
             cx.notify();
             return;
         }
@@ -86,18 +88,19 @@ impl AppState {
     }
 
     pub fn send_compare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let lang = self.language();
         let user_prompt = self.chat_input.read(cx).value().trim().to_string();
         if self.is_streaming {
             return;
         }
         if user_prompt.is_empty() && self.pending_attachments.is_empty() {
-            self.toast(ToastLevel::Info, "请在输入框输入问题或添加图片后再开始对比");
+            self.toast(ToastLevel::Info, tr(lang, Key::CompareNeedInput));
             cx.notify();
             return;
         }
         let targets = self.compare_targets();
         if targets.len() < 2 {
-            self.toast(ToastLevel::Error, "请至少勾选 1 个要对比的模型");
+            self.toast(ToastLevel::Error, tr(lang, Key::CompareNeedModels));
             cx.notify();
             return;
         }
@@ -115,6 +118,7 @@ impl AppState {
         model_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        let lang = self.language();
         if self.is_streaming {
             return;
         }
@@ -130,7 +134,7 @@ impl AppState {
             return;
         };
         if !session.messages[..index].iter().any(|message| message.role == "user") {
-            self.toast(ToastLevel::Error, "没有可重答的用户消息");
+            self.toast(ToastLevel::Error, tr(lang, Key::NoUserMessageToRegenerate));
             cx.notify();
             return;
         }
@@ -143,6 +147,7 @@ impl AppState {
     }
 
     pub fn continue_message(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
         if self.is_streaming {
             return;
         }
@@ -154,7 +159,7 @@ impl AppState {
             return;
         };
         if message.role != "assistant" || message.content.is_empty() || !message.variants.is_empty() {
-            self.toast(ToastLevel::Error, "只能在已完成的回答后继续生成");
+            self.toast(ToastLevel::Error, tr(lang, Key::CanOnlyContinueAfterDone));
             cx.notify();
             return;
         }
@@ -163,12 +168,9 @@ impl AppState {
         let model = message.model.clone();
         let provider_id = session.provider_id.clone();
         let mut history = self.history_messages();
-        history.push(ChatMessageReq::new(
-            "user",
-            "请从上次中断的地方继续，不要重复已有内容。",
-        ));
+        history.push(ChatMessageReq::new("user", tr(lang, Key::ContinuePrompt)));
         let Some(job) = self.make_job(&message_id, None, &provider_id, &model, history) else {
-            self.toast(ToastLevel::Error, "当前模型不可用");
+            self.toast(ToastLevel::Error, tr(lang, Key::CurrentModelUnavailable));
             cx.notify();
             return;
         };
@@ -176,8 +178,9 @@ impl AppState {
     }
 
     pub fn delete_message(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let lang = self.language();
         if self.is_streaming {
-            self.toast(ToastLevel::Error, "生成过程中不能删除消息");
+            self.toast(ToastLevel::Error, tr(lang, Key::CannotDeleteWhileGenerating));
             cx.notify();
             return;
         }

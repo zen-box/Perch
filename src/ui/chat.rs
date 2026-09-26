@@ -13,6 +13,7 @@ use super::brand_icon::{
 use super::{CONTENT_MAX_WIDTH, Palette, dialogs, icon_tile};
 use super::{composer, empty_state, message_assistant, message_user};
 use crate::app::AppState;
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 use crate::model::Attachment;
 
 // ================= 对话主区域 =================
@@ -20,6 +21,7 @@ use crate::model::Attachment;
 pub fn render_chat_panel(state: &mut AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
     state.sync_message_list(cx);
 
+    let lang = state.language();
     let app = cx.entity();
     let has_messages = state
         .storage
@@ -39,7 +41,7 @@ pub fn render_chat_panel(state: &mut AppState, p: &Palette, cx: &mut Context<App
                         move |ix, window, cx| render_message_row(&app, ix, window, cx)
                     })
                     .with_list_style(StyleRefinement::default().pt_6().pb_4())
-                    .with_jump_button_label("回到最新")
+                    .with_jump_button_label(tr(lang, Key::JumpToLatest))
                     .with_bottom_fade(p.background),
                 )
             } else {
@@ -62,7 +64,7 @@ pub fn render_chat_panel(state: &mut AppState, p: &Palette, cx: &mut Context<App
                         .storage
                         .get_active_session()
                         .is_some_and(|session| session.has_unresolved_compare()),
-                    |this| this.child(render_compare_notice(p)),
+                    |this| this.child(render_compare_notice(p, lang)),
                 )
                 .when(state.pending_tool_name.is_some(), |this| {
                     this.child(render_tool_permission(state, p, cx))
@@ -72,6 +74,7 @@ pub fn render_chat_panel(state: &mut AppState, p: &Palette, cx: &mut Context<App
 }
 
 fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+    let lang = state.language();
     let (title, message_count, session_id, pinned, favorite) = state
         .storage
         .get_active_session()
@@ -84,7 +87,7 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                 session.favorite,
             )
         })
-        .unwrap_or_else(|| ("新对话".into(), 0, String::new(), false, false));
+        .unwrap_or_else(|| (tr(lang, Key::NewChat).into(), 0, String::new(), false, false));
 
     h_flex()
         .h(px(48.))
@@ -113,7 +116,7 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                             .flex_none()
                             .text_xs()
                             .text_color(p.muted_foreground)
-                            .child(format!("{} 条消息", message_count)),
+                            .child(tr_args(lang, Key::MessageCount, &[&message_count.to_string()])),
                     )
                 }),
         )
@@ -127,7 +130,7 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                             .ghost()
                             .small()
                             .icon(IconName::SquarePen)
-                            .tooltip("新建对话 (Ctrl+N)")
+                            .tooltip(tr(lang, Key::NewChatShortcut))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.create_new_session(window, cx);
                             })),
@@ -142,7 +145,11 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                             .small()
                             .icon(if pinned { IconName::PinOff } else { IconName::Pin })
                             .selected(pinned)
-                            .tooltip(if pinned { "取消置顶" } else { "置顶" })
+                            .tooltip(if pinned {
+                                tr(lang, Key::Unpin)
+                            } else {
+                                tr(lang, Key::Pin)
+                            })
                             .on_click(cx.listener(move |this, _, _, cx| this.toggle_session_pin(&pin_id, cx))),
                     )
                     .child(
@@ -151,7 +158,11 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                             .small()
                             .icon(if favorite { IconName::StarOff } else { IconName::Star })
                             .selected(favorite)
-                            .tooltip(if favorite { "取消收藏" } else { "收藏" })
+                            .tooltip(if favorite {
+                                tr(lang, Key::Unfavorite)
+                            } else {
+                                tr(lang, Key::Favorite)
+                            })
                             .on_click(cx.listener(move |this, _, _, cx| this.toggle_session_favorite(&fav_id, cx))),
                     )
                 })
@@ -160,7 +171,7 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                         .ghost()
                         .small()
                         .icon(IconName::Download)
-                        .tooltip("导出为 Markdown")
+                        .tooltip(tr(lang, Key::ExportMarkdown))
                         .disabled(message_count == 0)
                         .on_click(cx.listener(|this, _, _, cx| this.export_current_session(cx))),
                 )
@@ -169,7 +180,7 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                         .ghost()
                         .small()
                         .icon(IconName::FileDown)
-                        .tooltip("导出 JSON 备份")
+                        .tooltip(tr(lang, Key::ExportJson))
                         .on_click(cx.listener(|this, _, _, cx| this.export_json_backup(cx))),
                 )
                 .child(
@@ -177,7 +188,7 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                         .ghost()
                         .small()
                         .icon(IconName::FileUp)
-                        .tooltip("从 JSON 备份恢复")
+                        .tooltip(tr(lang, Key::ImportJson))
                         .on_click(cx.listener(|this, _, _, cx| this.pick_import_backup(cx))),
                 )
                 .child(
@@ -185,7 +196,7 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
                         .ghost()
                         .small()
                         .icon(IconName::Eraser)
-                        .tooltip("清空当前对话")
+                        .tooltip(tr(lang, Key::ClearCurrentChat))
                         .disabled(message_count == 0)
                         .on_click(cx.listener(|_, _, window, cx| {
                             dialogs::confirm_clear_session(cx.entity(), window, cx);
@@ -243,6 +254,7 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
 }
 
 fn render_import_banner(p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+    let lang = cx.entity().read(cx).language();
     h_flex()
         .w_full()
         .max_w(CONTENT_MAX_WIDTH)
@@ -259,25 +271,25 @@ fn render_import_banner(p: &Palette, cx: &mut Context<AppState>) -> impl IntoEle
                 .flex_1()
                 .min_w_0()
                 .text_sm()
-                .child("已读取 JSON 备份。恢复会覆盖本机会话、提示词和渠道配置，不会写入 API Key。"),
+                .child(tr(lang, Key::ImportConfirmHint)),
         )
         .child(
             Button::new("cancel-import")
                 .ghost()
                 .small()
-                .label("取消")
+                .label(tr(lang, Key::Cancel))
                 .on_click(cx.listener(|this, _, _, cx| this.cancel_import(cx))),
         )
         .child(
             Button::new("confirm-import")
                 .primary()
                 .small()
-                .label("恢复")
+                .label(tr(lang, Key::Restore))
                 .on_click(cx.listener(|this, _, _, cx| this.confirm_import(cx))),
         )
 }
 
-fn render_compare_notice(p: &Palette) -> impl IntoElement {
+fn render_compare_notice(p: &Palette, lang: AppLanguage) -> impl IntoElement {
     div()
         .w_full()
         .max_w(CONTENT_MAX_WIDTH)
@@ -287,16 +299,16 @@ fn render_compare_notice(p: &Palette) -> impl IntoElement {
         .bg(p.muted)
         .text_sm()
         .text_color(p.muted_foreground)
-        .child("请先采用一条对比回答，再继续对话")
+        .child(tr(lang, Key::AdoptCompareFirst))
 }
 
-pub(super) fn attachment_badge(att: &Attachment, p: &Palette) -> (IconName, Hsla, &'static str) {
+pub(super) fn attachment_badge(att: &Attachment, p: &Palette, lang: AppLanguage) -> (IconName, Hsla, &'static str) {
     if att.is_image() {
-        (IconName::Image, p.primary, "图片")
+        (IconName::Image, p.primary, tr(lang, Key::Image))
     } else if att.is_pdf() {
         (IconName::FileText, FILE_TYPE_PDF, "PDF")
     } else if att.is_text() {
-        (IconName::FileCode, FILE_TYPE_CODE, "文本/代码")
+        (IconName::FileCode, FILE_TYPE_CODE, tr(lang, Key::FileTypeText))
     } else {
         let ext = std::path::Path::new(&att.name)
             .extension()
@@ -304,10 +316,10 @@ pub(super) fn attachment_badge(att: &Attachment, p: &Palette) -> (IconName, Hsla
             .unwrap_or("")
             .to_ascii_lowercase();
         match ext.as_str() {
-            "xlsx" | "xls" | "csv" => (IconName::FileSpreadsheet, FILE_TYPE_SHEET, "表格"),
+            "xlsx" | "xls" | "csv" => (IconName::FileSpreadsheet, FILE_TYPE_SHEET, tr(lang, Key::FileTypeSheet)),
             "docx" | "doc" => (IconName::FileText, FILE_TYPE_DOC, "Word"),
             "pptx" | "ppt" => (IconName::FileText, FILE_TYPE_SLIDES, "PPT"),
-            _ => (IconName::File, p.muted_foreground, "文件"),
+            _ => (IconName::File, p.muted_foreground, tr(lang, Key::FileTypeFile)),
         }
     }
 }
@@ -315,6 +327,7 @@ pub(super) fn attachment_badge(att: &Attachment, p: &Palette) -> (IconName, Hsla
 // ================= 工具授权卡片 =================
 
 fn render_tool_permission(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+    let lang = state.language();
     let tool_name = state.pending_tool_name.clone().unwrap_or_default();
     let tool_cmd = state.pending_tool_cmd.clone().unwrap_or_default();
     let exec_tool = tool_name.clone();
@@ -334,14 +347,19 @@ fn render_tool_permission(state: &AppState, p: &Palette, cx: &mut Context<AppSta
             h_flex()
                 .gap_2()
                 .child(Icon::new(IconName::ShieldAlert).size(px(16.)).text_color(p.warning))
-                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("需要你的授权"))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(tr(lang, Key::ToolAuthRequired)),
+                )
                 .child(Tag::warning().small().child(tool_name)),
         )
         .child(
             div()
                 .text_xs()
                 .text_color(p.muted_foreground)
-                .child("即将在本机执行下面的命令，请确认内容安全："),
+                .child(tr(lang, Key::ToolAuthHint)),
         )
         .child(
             div()
@@ -364,7 +382,7 @@ fn render_tool_permission(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                     Button::new("deny-tool")
                         .ghost()
                         .small()
-                        .label("拒绝")
+                        .label(tr(lang, Key::Deny))
                         .on_click(cx.listener(|this, _, _, cx| this.deny_pending_tool(cx))),
                 )
                 .child(
@@ -372,7 +390,7 @@ fn render_tool_permission(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                         .primary()
                         .small()
                         .icon(IconName::Check)
-                        .label("允许执行一次")
+                        .label(tr(lang, Key::AllowOnce))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.execute_agent_tool(&exec_tool, &exec_arg, cx);
                         })),
