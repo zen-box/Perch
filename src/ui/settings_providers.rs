@@ -14,11 +14,12 @@ use super::brand_icon::{model_avatar, model_badges, provider_avatar};
 use super::settings::{PAGE_MAX_WIDTH, section};
 use super::{Palette, dialogs, icon_tile, model_editor_dialog};
 use crate::app::AppState;
-use crate::i18n::{Key, tr};
+use crate::i18n::{Key, tr, tr_args};
 
 // ================= 模型渠道 =================
 
 pub(super) fn render_providers(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+    let lang = state.language();
     let query = state.cfg_search_provider_input.read(cx).value().to_lowercase();
 
     let list = v_flex()
@@ -37,7 +38,12 @@ pub(super) fn render_providers(state: &AppState, p: &Palette, cx: &mut Context<A
                         .child(
                             h_flex()
                                 .gap_2()
-                                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("模型渠道"))
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(tr(lang, Key::ProviderSettings)),
+                                )
                                 .child(
                                     div()
                                         .text_xs()
@@ -50,7 +56,7 @@ pub(super) fn render_providers(state: &AppState, p: &Palette, cx: &mut Context<A
                                 .ghost()
                                 .xsmall()
                                 .icon(IconName::Plus)
-                                .tooltip("添加渠道")
+                                .tooltip(tr(lang, Key::AddChannel))
                                 .on_click(cx.listener(|_, _, window, cx| {
                                     dialogs::open_add_provider_dialog(cx.entity(), window, cx);
                                 })),
@@ -107,13 +113,9 @@ pub(super) fn render_providers(state: &AppState, p: &Palette, cx: &mut Context<A
                                                 .font_weight(FontWeight::MEDIUM)
                                                 .child(provider.name.clone()),
                                         )
-                                        .child(
-                                            div()
-                                                .truncate()
-                                                .text_xs()
-                                                .text_color(p.muted_foreground)
-                                                .child(format!("{} 个模型", provider.models.len())),
-                                        ),
+                                        .child(div().truncate().text_xs().text_color(p.muted_foreground).child(
+                                            tr_args(lang, Key::ModelCount, &[&provider.models.len().to_string()]),
+                                        )),
                                 )
                                 .child(div().flex_none().size(px(8.)).rounded_full().bg(if provider.enabled {
                                     p.success
@@ -157,22 +159,22 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                     .text_base()
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(if state.config.providers.is_empty() {
-                        "还没有模型渠道"
+                        tr(lang, Key::NoProviderYet)
                     } else {
-                        "选择一个渠道查看配置"
+                        tr(lang, Key::PickProviderHint)
                     }),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(p.muted_foreground)
-                    .child("支持 OpenAI、Gemini、Claude 等接口规范，也可以接入兼容 OpenAI 的中转服务"),
+                    .child(tr(lang, Key::ProviderIntro)),
             )
             .child(
                 Button::new("empty-add-provider")
                     .primary()
                     .icon(IconName::Plus)
-                    .label("添加渠道")
+                    .label(tr(lang, Key::AddChannel))
                     .on_click(cx.listener(|_, _, window, cx| {
                         dialogs::open_add_provider_dialog(cx.entity(), window, cx);
                     })),
@@ -208,7 +210,11 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                 .child(
                     Switch::new("provider-enabled")
                         .checked(provider.enabled)
-                        .label(if provider.enabled { "已启用" } else { "已停用" })
+                        .label(if provider.enabled {
+                            tr(lang, Key::Enabled)
+                        } else {
+                            tr(lang, Key::Disabled)
+                        })
                         .on_click(cx.listener(move |this, _, _, cx| this.toggle_provider_enabled(&toggle_pid, cx))),
                 )
                 .child(
@@ -216,7 +222,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                         .ghost()
                         .small()
                         .icon(IconName::Trash)
-                        .tooltip("删除渠道")
+                        .tooltip(tr(lang, Key::DeleteProvider))
                         .on_click(cx.listener(move |_, _, window, cx| {
                             dialogs::confirm_delete_provider(cx.entity(), delete_name.clone(), window, cx);
                         })),
@@ -224,7 +230,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
         );
 
     let connection = section(
-        "连接配置",
+        tr(lang, Key::ConnectionConfig),
         p,
         vec![
             v_flex()
@@ -260,13 +266,18 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                             div()
                                 .text_xs()
                                 .text_color(p.muted_foreground)
-                                .child("一般以 /v1 结尾，例如 https://api.openai.com/v1"),
+                                .child(tr(lang, Key::BaseUrlHint)),
                         ),
                 )
                 .child(
                     v_flex()
                         .gap_1p5()
-                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("代理"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(tr(lang, Key::Proxy)),
+                        )
                         .child(div().py(px(4.)).child(Input::new(&state.cfg_proxy_input))),
                 )
                 .child(
@@ -276,27 +287,32 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                             v_flex()
                                 .flex_1()
                                 .gap_1p5()
-                                .child(div().text_sm().child("超时（秒）"))
+                                .child(div().text_sm().child(tr(lang, Key::TimeoutSeconds)))
                                 .child(div().py(px(4.)).child(Input::new(&state.cfg_timeout_input))),
                         )
                         .child(
                             v_flex()
                                 .flex_1()
                                 .gap_1p5()
-                                .child(div().text_sm().child("失败重试"))
+                                .child(div().text_sm().child(tr(lang, Key::Retries)))
                                 .child(div().py(px(4.)).child(Input::new(&state.cfg_retries_input))),
                         ),
                 )
                 .child(
                     v_flex()
                         .gap_1p5()
-                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("自定义请求头"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(tr(lang, Key::CustomHeaders)),
+                        )
                         .child(Textarea::new(&state.cfg_headers_input))
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(p.muted_foreground)
-                                .child("每行一个 Name: Value"),
+                                .child(tr(lang, Key::CustomHeadersHint)),
                         ),
                 )
                 .child(
@@ -308,14 +324,14 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                                 .outline()
                                 .small()
                                 .icon(IconName::Plug)
-                                .label("测试连接")
+                                .label(tr(lang, Key::TestConnection))
                                 .on_click(cx.listener(|this, _, _, cx| this.test_provider_connection(cx))),
                         )
                         .child(
                             Button::new("save-provider")
                                 .primary()
                                 .small()
-                                .label("保存配置")
+                                .label(tr(lang, Key::SaveConfig))
                                 .on_click(cx.listener(|this, _, _, cx| this.save_current_provider_settings(cx))),
                         ),
                 )
@@ -404,7 +420,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                                     .ghost()
                                     .xsmall()
                                     .icon(IconName::Pencil)
-                                    .tooltip("编辑模型")
+                                    .tooltip(tr(lang, Key::EditModel))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         model_editor_dialog::open_model_editor(cx.entity(), window, cx);
                                         this.begin_edit_model(&edit_ids.0, &edit_ids.1, window, cx);
@@ -421,9 +437,9 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                                     })
                                     .selected(model.is_pinned)
                                     .tooltip(if model.is_pinned {
-                                        "取消置顶"
+                                        tr(lang, Key::Unpin)
                                     } else {
-                                        "置顶到模型列表顶部"
+                                        tr(lang, Key::PinToTop)
                                     })
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.toggle_model_pin(&pin_ids.0, &pin_ids.1, cx);
@@ -434,7 +450,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                                     .ghost()
                                     .xsmall()
                                     .icon(IconName::Trash)
-                                    .tooltip("删除模型")
+                                    .tooltip(tr(lang, Key::DeleteModel))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.delete_model_from_provider(&delete_ids.0, &delete_ids.1, cx);
                                     })),
@@ -442,7 +458,11 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                             .child(
                                 Switch::new(("model-enabled", ix))
                                     .checked(model.enabled)
-                                    .tooltip(if model.enabled { "已启用" } else { "已停用" })
+                                    .tooltip(if model.enabled {
+                                        tr(lang, Key::Enabled)
+                                    } else {
+                                        tr(lang, Key::Disabled)
+                                    })
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.toggle_model_enabled(&toggle_ids.0, &toggle_ids.1, cx);
                                     })),
@@ -461,7 +481,12 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                 .child(
                     h_flex()
                         .gap_2()
-                        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("模型"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(tr(lang, Key::ModelList)),
+                        )
                         .child(
                             div()
                                 .text_xs()

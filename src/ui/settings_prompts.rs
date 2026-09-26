@@ -9,8 +9,10 @@ use gpui_kit_assets::IconName;
 use super::Palette;
 use super::settings::{page, section};
 use crate::app::AppState;
+use crate::i18n::{Key, tr};
 
 pub(super) fn render_prompts(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+    let lang = state.language();
     let presets = state.prompts.presets.clone();
     let templates = state.prompts.templates.clone();
     let preset_rows = presets
@@ -27,11 +29,15 @@ pub(super) fn render_prompts(state: &AppState, p: &Palette, cx: &mut Context<App
                 .child(
                     h_flex()
                         .gap_1()
-                        .child(Button::new(("use-preset", ix)).ghost().xsmall().label("使用").on_click(
-                            cx.listener(move |this, _, window, cx| {
-                                this.create_session_from_preset(&use_id, window, cx)
-                            }),
-                        ))
+                        .child(
+                            Button::new(("use-preset", ix))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(lang, Key::Use))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.create_session_from_preset(&use_id, window, cx)
+                                })),
+                        )
                         .child(
                             Button::new(("delete-preset", ix))
                                 .ghost()
@@ -65,25 +71,39 @@ pub(super) fn render_prompts(state: &AppState, p: &Palette, cx: &mut Context<App
         .collect::<Vec<_>>();
     page(
         "settings-prompts",
-        "提示词",
-        "助手预设用于新建对话，模板可在输入框输入 /名称 后回车插入",
+        tr(lang, Key::PromptTemplates),
+        tr(lang, Key::PromptsIntro),
         p,
         v_flex()
             .gap_8()
             .child(section(
-                "助手预设",
+                tr(lang, Key::AssistantPresets),
                 p,
                 if preset_rows.is_empty() {
-                    vec![div().px_4().py_3().text_sm().child("还没有预设").into_any_element()]
+                    vec![
+                        div()
+                            .px_4()
+                            .py_3()
+                            .text_sm()
+                            .child(tr(lang, Key::NoPresetYet))
+                            .into_any_element(),
+                    ]
                 } else {
                     preset_rows
                 },
             ))
             .child(section(
-                "提示词模板",
+                tr(lang, Key::PromptTemplateList),
                 p,
                 if template_rows.is_empty() {
-                    vec![div().px_4().py_3().text_sm().child("还没有模板").into_any_element()]
+                    vec![
+                        div()
+                            .px_4()
+                            .py_3()
+                            .text_sm()
+                            .child(tr(lang, Key::NoTemplateYet))
+                            .into_any_element(),
+                    ]
                 } else {
                     template_rows
                 },
@@ -91,7 +111,12 @@ pub(super) fn render_prompts(state: &AppState, p: &Palette, cx: &mut Context<App
             .child(
                 v_flex()
                     .gap_3()
-                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("新建"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(tr(lang, Key::NewItem)),
+                    )
                     .child(Input::new(&state.prompt_name_input))
                     .child(Input::new(&state.prompt_icon_input))
                     .child(Textarea::new(&state.prompt_body_input))
@@ -102,7 +127,7 @@ pub(super) fn render_prompts(state: &AppState, p: &Palette, cx: &mut Context<App
                                 Button::new("save-preset")
                                     .outline()
                                     .small()
-                                    .label("保存为预设")
+                                    .label(tr(lang, Key::SaveAsPreset))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.save_prompt_from_inputs(false, window, cx);
                                     })),
@@ -111,7 +136,7 @@ pub(super) fn render_prompts(state: &AppState, p: &Palette, cx: &mut Context<App
                                 Button::new("save-template")
                                     .primary()
                                     .small()
-                                    .label("保存为模板")
+                                    .label(tr(lang, Key::SaveAsTemplate))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.save_prompt_from_inputs(true, window, cx);
                                     })),

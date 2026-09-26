@@ -10,7 +10,7 @@ use gpui_kit::*;
 use super::Palette;
 use super::settings::{page, section, segmented, setting_row};
 use crate::app::AppState;
-use crate::i18n::{Key, tr};
+use crate::i18n::{Key, tr, tr_args};
 
 // ================= 通用设置 =================
 
@@ -25,13 +25,13 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
         .unwrap_or(-1.0);
 
     let appearance = section(
-        "外观",
+        tr(lang, Key::Appearance),
         p,
-        vec![setting_row("主题", "选择浅色或深色界面", p, {
+        vec![setting_row(tr(lang, Key::Theme), tr(lang, Key::ThemeHint), p, {
             let app = app.clone();
             segmented(
                 "theme",
-                vec![(false, "浅色".into()), (true, "深色".into())],
+                vec![(false, tr(lang, Key::Light).into()), (true, tr(lang, Key::Dark).into())],
                 state.is_dark,
                 p,
                 move |is_dark, window, cx| app.update(cx, |this, cx| this.set_dark_mode(is_dark, window, cx)),
@@ -40,60 +40,69 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
     );
 
     let conversation = section(
-        "对话",
+        tr(lang, Key::Chat),
         p,
         vec![
-            setting_row("新对话默认模型", "只影响之后创建的对话", p, {
-                let (provider_id, model_id) = state.config.default_model_selection();
-                let label = state
-                    .config
-                    .providers
-                    .iter()
-                    .find(|provider| provider.id == provider_id)
-                    .and_then(|provider| provider.models.iter().find(|model| model.id == model_id))
-                    .map(|model| model.name.clone())
-                    .unwrap_or_else(|| "选择模型".to_string());
-                let providers = state.config.providers.clone();
-                let app = app.clone();
-                Button::new("default-model")
-                    .outline()
-                    .small()
-                    .label(label)
-                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-                        providers
-                            .iter()
-                            .filter(|provider| provider.enabled)
-                            .fold(menu, |menu, provider| {
-                                provider
-                                    .models
-                                    .iter()
-                                    .filter(|model| model.enabled)
-                                    .fold(menu, |menu, model| {
-                                        let app = app.clone();
-                                        let pid = provider.id.clone();
-                                        let mid = model.id.clone();
-                                        menu.item(
-                                            PopupMenuItem::new(format!("{} / {}", provider.name, model.name))
-                                                .checked(pid == provider_id && mid == model_id)
-                                                .on_click(move |_, _, cx| {
-                                                    app.update(cx, |this, cx| {
-                                                        this.set_default_model(&pid, &mid, cx);
-                                                    });
-                                                }),
-                                        )
-                                    })
-                            })
-                    })
-            }),
+            setting_row(
+                tr(lang, Key::DefaultModelForNewChat),
+                tr(lang, Key::DefaultModelHint),
+                p,
+                {
+                    let (provider_id, model_id) = state.config.default_model_selection();
+                    let label = state
+                        .config
+                        .providers
+                        .iter()
+                        .find(|provider| provider.id == provider_id)
+                        .and_then(|provider| provider.models.iter().find(|model| model.id == model_id))
+                        .map(|model| model.name.clone())
+                        .unwrap_or_else(|| tr(lang, Key::SelectModel).to_string());
+                    let providers = state.config.providers.clone();
+                    let app = app.clone();
+                    Button::new("default-model")
+                        .outline()
+                        .small()
+                        .label(label)
+                        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                            providers
+                                .iter()
+                                .filter(|provider| provider.enabled)
+                                .fold(menu, |menu, provider| {
+                                    provider
+                                        .models
+                                        .iter()
+                                        .filter(|model| model.enabled)
+                                        .fold(menu, |menu, model| {
+                                            let app = app.clone();
+                                            let pid = provider.id.clone();
+                                            let mid = model.id.clone();
+                                            menu.item(
+                                                PopupMenuItem::new(format!("{} / {}", provider.name, model.name))
+                                                    .checked(pid == provider_id && mid == model_id)
+                                                    .on_click(move |_, _, cx| {
+                                                        app.update(cx, |this, cx| {
+                                                            this.set_default_model(&pid, &mid, cx);
+                                                        });
+                                                    }),
+                                            )
+                                        })
+                                })
+                        })
+                },
+            ),
             setting_row(
                 tr(lang, Key::Temperature),
-                format!("当前 {:.1}，数值越低回答越稳定，越高越有创意", temperature),
+                tr_args(lang, Key::TemperatureHint, &[&format!("{temperature:.1}")]),
                 p,
                 {
                     let app = app.clone();
                     segmented(
                         "temperature",
-                        vec![(0.2, "精准".into()), (0.7, "平衡".into()), (1.0, "创意".into())],
+                        vec![
+                            (0.2, tr(lang, Key::Precise).into()),
+                            (0.7, tr(lang, Key::Balanced).into()),
+                            (1.0, tr(lang, Key::Creative).into()),
+                        ],
                         temp_preset,
                         p,
                         move |t, _, cx| app.update(cx, |this, cx| this.set_temperature(t, cx)),
@@ -117,7 +126,7 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
                             div()
                                 .text_xs()
                                 .text_color(p.muted_foreground)
-                                .child("每次对话都会作为第一条 system 消息发送给模型"),
+                                .child(tr(lang, Key::SystemPromptHint)),
                         ),
                 )
                 .child(Textarea::new(&state.cfg_system_prompt_input))
@@ -135,11 +144,11 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
     );
 
     let local_tools = section(
-        "本地工具",
+        tr(lang, Key::LocalTools),
         p,
         vec![setting_row(
-            "启用本地工具",
-            "允许在对话中使用 /ls、/read、/git、/bash 指令",
+            tr(lang, Key::EnableLocalTools),
+            tr(lang, Key::LocalToolsHint),
             p,
             Switch::new("local-tools-enabled")
                 .checked(state.config.local_tools_enabled)
@@ -150,7 +159,7 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
     page(
         "settings-general",
         tr(lang, Key::GeneralSettings),
-        "外观与默认的对话参数",
+        tr(lang, Key::GeneralSectionDesc),
         p,
         v_flex()
             .gap_8()

@@ -216,6 +216,68 @@ ENTRIES = [
     ("SwitchToLight", "切换到浅色模式", "Switch to light mode", "ライトモードに切り替え", "切換到淺色模式"),
     ("SwitchToDark", "切换到深色模式", "Switch to dark mode", "ダークモードに切り替え", "切換到深色模式"),
     ("UsageDashboard", "用量与费用统计看板", "Usage & cost dashboard", "使用量と費用のダッシュボード", "用量與費用統計看板"),
+
+    # ---- 4.3-e：设置页（渠道 / 通用 / 提示词 / 关于）----
+    # 模型渠道
+    ("ModelCount", "{} 个模型", "{} models", "{} モデル", "{} 個模型"),
+    ("NoProviderYet", "还没有模型渠道", "No providers yet", "プロバイダーがまだありません", "還沒有模型渠道"),
+    ("PickProviderHint", "选择一个渠道查看配置", "Select a provider to view its settings", "設定を見るプロバイダーを選択してください", "選擇一個渠道查看設定"),
+    ("ProviderIntro", "支持 OpenAI、Gemini、Claude 等接口规范，也可以接入兼容 OpenAI 的中转服务", "Supports OpenAI, Gemini and Claude API formats, plus OpenAI-compatible relays", "OpenAI・Gemini・Claude などの API 仕様に対応。OpenAI 互換の中継サービスも利用できます", "支援 OpenAI、Gemini、Claude 等介面規格，也可以接入相容 OpenAI 的中轉服務"),
+    ("Enabled", "已启用", "Enabled", "有効", "已啟用"),
+    ("Disabled", "已停用", "Disabled", "無効", "已停用"),
+    ("DeleteProvider", "删除渠道", "Delete provider", "プロバイダーを削除", "刪除渠道"),
+    ("ConnectionConfig", "连接配置", "Connection", "接続設定", "連線設定"),
+    ("BaseUrlHint", "一般以 /v1 结尾，例如 https://api.openai.com/v1", "Usually ends with /v1, e.g. https://api.openai.com/v1", "通常は /v1 で終わります（例：https://api.openai.com/v1）", "一般以 /v1 結尾，例如 https://api.openai.com/v1"),
+    ("Proxy", "代理", "Proxy", "プロキシ", "代理"),
+    ("TimeoutSeconds", "超时（秒）", "Timeout (s)", "タイムアウト（秒）", "逾時（秒）"),
+    ("Retries", "失败重试", "Retries", "再試行", "失敗重試"),
+    ("CustomHeaders", "自定义请求头", "Custom headers", "カスタムヘッダー", "自訂請求標頭"),
+    ("CustomHeadersHint", "每行一个 Name: Value", "One Name: Value per line", "1 行に 1 つ、Name: Value 形式", "每行一個 Name: Value"),
+    ("TestConnection", "测试连接", "Test connection", "接続をテスト", "測試連線"),
+    ("SaveConfig", "保存配置", "Save settings", "設定を保存", "儲存設定"),
+    ("PinToTop", "置顶到模型列表顶部", "Pin to the top of the model list", "モデル一覧の先頭に固定", "置頂到模型列表頂部"),
+    ("DeleteModel", "删除模型", "Delete model", "モデルを削除", "刪除模型"),
+    ("ModelList", "模型", "Models", "モデル", "模型"),
+    # 通用设置
+    ("Appearance", "外观", "Appearance", "外観", "外觀"),
+    ("Theme", "主题", "Theme", "テーマ", "主題"),
+    ("ThemeHint", "选择浅色或深色界面", "Choose a light or dark interface", "ライトまたはダークの外観を選択", "選擇淺色或深色介面"),
+    ("Light", "浅色", "Light", "ライト", "淺色"),
+    ("Dark", "深色", "Dark", "ダーク", "深色"),
+    ("DefaultModelForNewChat", "新对话默认模型", "Default model for new chats", "新規チャットの既定モデル", "新對話預設模型"),
+    ("DefaultModelHint", "只影响之后创建的对话", "Only affects chats created afterwards", "これ以降に作成するチャットにのみ影響します", "只影響之後建立的對話"),
+    ("SelectModel", "选择模型", "Select a model", "モデルを選択", "選擇模型"),
+    ("TemperatureHint", "当前 {}，数值越低回答越稳定，越高越有创意", "Currently {}; lower is more consistent, higher is more creative", "現在 {}。低いほど安定し、高いほど創造的になります", "目前 {}，數值越低回答越穩定，越高越有創意"),
+    ("Precise", "精准", "Precise", "正確", "精準"),
+    ("Balanced", "平衡", "Balanced", "バランス", "平衡"),
+    ("Creative", "创意", "Creative", "創造的", "創意"),
+    ("SystemPromptHint", "每次对话都会作为第一条 system 消息发送给模型", "Sent to the model as the first system message of every chat", "毎回の会話で最初の system メッセージとして送信されます", "每次對話都會作為第一條 system 訊息傳送給模型"),
+    ("LocalTools", "本地工具", "Local tools", "ローカルツール", "本機工具"),
+    ("EnableLocalTools", "启用本地工具", "Enable local tools", "ローカルツールを有効化", "啟用本機工具"),
+    ("LocalToolsHint", "允许在对话中使用 /ls、/read、/git、/bash 指令", "Allow /ls, /read, /git and /bash commands in chats", "会話で /ls、/read、/git、/bash コマンドを使えるようにします", "允許在對話中使用 /ls、/read、/git、/bash 指令"),
+    ("GeneralSectionDesc", "外观与默认的对话参数", "Appearance and default chat parameters", "外観と既定の会話パラメータ", "外觀與預設的對話參數"),
+    # 关于
+    ("McpSettingsDesc", "通过 Model Context Protocol 为 Agent 接入外部工具", "Connect external tools to the agent via Model Context Protocol", "Model Context Protocol でエージェントに外部ツールを接続", "透過 Model Context Protocol 為 Agent 接入外部工具"),
+    ("ComingSoon", "即将推出", "Coming soon", "近日公開", "即將推出"),
+    ("McpComingSoon", "后续将支持接入本地 Stdio 与远程 SSE 类型的 MCP 服务器，让 Agent 可以使用文件系统、GitHub、数据库等工具。", "Support for local Stdio and remote SSE MCP servers is coming, giving the agent access to the filesystem, GitHub, databases and more.", "今後、ローカル Stdio とリモート SSE の MCP サーバーに対応し、エージェントがファイルシステム・GitHub・データベースなどを使えるようになります。", "後續將支援接入本機 Stdio 與遠端 SSE 類型的 MCP 伺服器，讓 Agent 可以使用檔案系統、GitHub、資料庫等工具。"),
+    ("FeatureLocalOnly", "数据只保存在本地，没有任何云端遥测", "Data stays on your machine; no cloud telemetry", "データはローカルのみ。クラウドへの送信はありません", "資料只保存在本機，沒有任何雲端遙測"),
+    ("FeatureFourApis", "支持 OpenAI Chat、OpenAI Responses、Gemini、Claude 四种接口规范", "Supports four API formats: OpenAI Chat, OpenAI Responses, Gemini and Claude", "OpenAI Chat・OpenAI Responses・Gemini・Claude の 4 つの API 仕様に対応", "支援 OpenAI Chat、OpenAI Responses、Gemini、Claude 四種介面規格"),
+    ("FeatureStreaming", "原生 SSE 流式解析，Markdown 实时渲染", "Native SSE streaming with live Markdown rendering", "ネイティブな SSE ストリーミング解析と Markdown のリアルタイム描画", "原生 SSE 串流解析，Markdown 即時渲染"),
+    ("FeatureLocalTools", "内置本地工具：/ls、/read、/git、/bash（执行前需授权）", "Built-in local tools: /ls, /read, /git, /bash (authorisation required)", "ローカルツール内蔵：/ls、/read、/git、/bash（実行前に許可が必要）", "內建本機工具：/ls、/read、/git、/bash（執行前需授權）"),
+    ("FeatureI18n", "界面支持简体中文、繁體中文、English、日本語", "Interface available in 简体中文, 繁體中文, English and 日本語", "UI は 简体中文・繁體中文・English・日本語 に対応", "介面支援简体中文、繁體中文、English、日本語"),
+    ("AboutTagline", "纯 Rust + GPUI 构建的桌面 AI 工作台", "A desktop AI workbench built in pure Rust + GPUI", "純粋な Rust + GPUI で作られたデスクトップ AI ワークベンチ", "純 Rust + GPUI 打造的桌面 AI 工作台"),
+    ("Version", "版本 {}", "Version {}", "バージョン {}", "版本 {}"),
+    ("Features", "特性", "Features", "特徴", "特色"),
+    # 提示词
+    ("Use", "使用", "Use", "使用", "使用"),
+    ("PromptsIntro", "助手预设用于新建对话，模板可在输入框输入 /名称 后回车插入", "Assistant presets are used when creating a chat; type /name in the composer and press Enter to insert a template", "アシスタントのプリセットは新規チャットで使われます。テンプレートは入力欄で /名前 と入力して Enter で挿入できます", "助手預設用於新增對話，模板可在輸入框輸入 /名稱 後按 Enter 插入"),
+    ("AssistantPresets", "助手预设", "Assistant presets", "アシスタントのプリセット", "助手預設"),
+    ("NoPresetYet", "还没有预设", "No presets yet", "プリセットがまだありません", "還沒有預設"),
+    ("PromptTemplateList", "提示词模板", "Prompt templates", "プロンプトテンプレート", "提示詞模板"),
+    ("NoTemplateYet", "还没有模板", "No templates yet", "テンプレートがまだありません", "還沒有模板"),
+    ("NewItem", "新建", "New", "新規作成", "新增"),
+    ("SaveAsPreset", "保存为预设", "Save as preset", "プリセットとして保存", "儲存為預設"),
+    ("SaveAsTemplate", "保存为模板", "Save as template", "テンプレートとして保存", "儲存為模板"),
 ]
 
 # 存进数据的值（新建会话的默认标题、默认文件夹名）不是界面文案：
@@ -249,6 +311,7 @@ FILE_KEY_OVERRIDE = {
     ("src/ui/params.rs", "开始对比 ({total_count} 个模型)"): "StartCompareWithCount",
     ("src/ui/dialogs.rs", "这条回答之后的 {later_count} 条消息会被删除，然后重新生成这条回答。"): "RegenerateDesc",
     ("src/ui/fetch_models_dialog.rs", "可添加 {} 个，已存在 {already} 个。已选 {selected_count} 个"): "FetchModelsSummary",
+    ("src/ui/settings_general.rs", "当前 {:.1}，数值越低回答越稳定，越高越有创意"): "TemperatureHint",
 }
 
 # 语言名一律用它自己的文字显示（语言选择器里每种语言写自己的名字），
@@ -256,4 +319,4 @@ FILE_KEY_OVERRIDE = {
 SKIP = {"简体中文", "繁體中文", "日本語"}
 
 # 写进 src/i18n.rs 的分节注释，一眼看出这批 key 覆盖了哪些界面
-BATCH_TITLE = "4.3-d：对话框 / 模型编辑 / 拉取模型 / 顶部工具条"
+BATCH_TITLE = "4.3-e：设置页（渠道 / 通用 / 提示词 / 关于）"
