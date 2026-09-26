@@ -69,7 +69,7 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 数据层   config.rs、model.rs、storage.rs、   数据结构、持久化、纯计算
          prompts.rs、backup.rs、paths.rs、
          file_store.rs、model_info.rs、brand.rs、
-         clipboard.rs
+         clipboard.rs、analytics.rs
 ```
 
 - 下层不能引用上层。数据层和服务层不 `use crate::app` 或 `crate::ui`；`app.rs` 不使用 `ui::` 里定义的类型。
@@ -84,7 +84,7 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 | 配置项、渠道和模型设置 | `config.rs` |
 | 对话、消息、附件的数据结构 | `model.rs` |
 | 数据库表和读写 | `storage.rs`（改表结构要升版本号、写迁移） |
-| 数据文件路径 | `paths.rs`（目前只有 `APP_NAME` / `LEGACY_APP_NAME` / `LEGACY_FILES`）；其余文件名按模块就近放，集中化见 [§13](#13-技术债清单) #16 |
+| 数据文件路径 | `paths.rs`：数据目录、`APP_NAME` / `LEGACY_APP_NAME`，以及全部数据文件名常量（`CONFIG_FILE`、`SESSIONS_FILE`、`DATABASE_FILE`、`PROMPTS_FILE`、`MODELS_DEV_CACHE_FILE`）和旧名对照表 `LEGACY_FILES`。写文件一律用 `write_atomic` / `write_atomic_bytes` |
 | 大模型请求格式 | `llm.rs`（请求体构建写成纯函数并测试） |
 | 渠道管理接口（拉取模型、测试连接） | `provider_api.rs` |
 | 一组新的业务操作 | 新建 `xxx_ops.rs`，写 `impl AppState { … }`；不要再往 `app.rs`、`session_ops.rs` 里加 |
@@ -98,7 +98,7 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 
 ### 3.3 规模
 
-- 单个文件（不算测试）超过 **800 行** 就要拆。目前超标的是 `ui/chat.rs`、`session_ops.rs`、`app.rs`、`ui/settings.rs`、`ui/dialogs.rs`（完整清单见 [§13](#13-技术债清单) #3）：新功能不要再往里加；改到其中某块时，顺手把那块拆成新文件。
+- 单个文件（不算测试）超过 **800 行** 就要拆。目前超标的是 `ui/chat.rs`、`session_ops.rs`、`ui/settings.rs`、`app.rs`、`ui/dialogs.rs`（完整清单见 [§13](#13-技术债清单) #1）：新功能不要再往里加；改到其中某块时，顺手把那块拆成新文件。
 - 界面函数超过约 100 行，或链式调用嵌套超过 4 层，拆出 `render_xxx` 子函数。
 - 每个 `xxx_ops.rs` 只负责一个领域，例如会话、模型、附件、渠道。
 
@@ -400,22 +400,18 @@ cx.spawn(async move |this, cx| {
 
 | # | 问题 | 位置 | 处理 |
 | --- | --- | --- | --- |
-| 1 | clippy 警告 31 条（编译警告已清零） | 多处 | 改到时修 |
-| 2 | `AppState` 有 66 个字段；`app.rs` 引用了 `ui::analytics` 的类型 | `app.rs` | 新功能按 [§4.1](#41-appstate) 做；统计相关状态移出 `ui` |
-| 3 | 文件过大（§3.3 红线 800 行，按"不算测试"口径） | `ui/chat.rs`（1977）、`session_ops.rs`（1011）、`app.rs`（971）、`ui/settings.rs`（929）、`ui/dialogs.rs`（803） | 按功能拆分，如消息操作、流式回复、备份导入（附件与粘贴已拆到 `attachment_ops.rs`）。注：`llm.rs` 总 986 行，但测试占 232 行、非测试 754 行，未超标 |
-| 4 | 约 600 处写死中文，只有 24 处 `tr()`；`tr` 遇到未知 key 返回空字符串 | `ui/*`、`i18n.rs` | ⚠ 国际化方案待定 |
-| 5 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
-| 6 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
-| 7 | 配置保存失败被忽略（6 处 `let _ = self.config.save()`） | `app.rs` | 改为提示用户 |
-| 8 | 启动失败直接 panic | `config.rs`、`model.rs`、`app.rs`、`paths.rs` | 改成错误提示界面 |
-| 9 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
-| 10 | 统计计算写在界面模块里，每次渲染都遍历全部消息 | `ui/analytics.rs` 的 `collect_stats` | 移到非界面模块并缓存 |
-| 11 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
-| 12 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
-| 13 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
-| 14 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
-| 15 | 命名遗留：快捷键命名空间 `personal_control`、`pub mod file_store`、`pub mod analytics` | `main.rs`、`ui/mod.rs` | 改到时修 |
-| 16 | 数据文件名没有集中：`paths.rs` 只有 `APP_NAME` / `LEGACY_APP_NAME` / `LEGACY_FILES`，其余散在 `config.rs`（`perch-config.json`）、`model.rs`（`perch-sessions.json`、`perch.db`）、`models_dev.rs`（`models-dev-cache.json`）、`prompts.rs`（`prompts.json`）。改名时得动 5 个文件，容易漏 | 5 处 | 改到时把文件名常量收拢到 `paths.rs` |
+| 1 | 文件过大（§3.3 红线 800 行，按"不算测试"口径） | `ui/chat.rs`（2222）、`session_ops.rs`（1308）、`ui/settings.rs`（1082）、`app.rs`（1023）、`ui/dialogs.rs`（966） | 按功能拆分，如消息操作、流式回复、备份导入（附件与粘贴已拆到 `attachment_ops.rs`）。注：`llm.rs` 总 1051 行，测试占 253 行、非测试 798 行，未超标 |
+| 2 | 约 600 处写死中文，只有 24 处 `tr()`；`tr` 遇到未知 key 返回空字符串 | `ui/*`、`i18n.rs` | ⚠ 国际化方案待定 |
+| 3 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
+| 4 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
+| 5 | 保存失败被吞掉，用户看不到（`app.rs` 6 处 `let _ = self.config.save()`、`config.rs` 3 处 `let _ = self.save()`） | `app.rs`、`config.rs` | 按 [§6](#6-错误处理) 改成 `toast` 提示；`config.rs` 那几个 `&mut self` 方法要改成返回 `Result`，由 AppState 层统一提示 |
+| 6 | 启动或初始化失败直接 panic（7 处） | `main.rs`（72）、`app.rs`（50、168）、`config.rs`（323）、`model.rs`（392）、`paths.rs`（117）、`llm.rs`（674） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
+| 7 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
+| 8 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
+| 9 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
+| 10 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
+| 11 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
+| 12 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/chat.rs`（896）、`ui/dialogs.rs`（520） | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
 
