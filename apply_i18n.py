@@ -129,6 +129,7 @@ def main():
     need_args = {}
     unmapped = {}
     format_lits = {}
+    multiline = {}
     skipped = {}
     changed_files = {}
 
@@ -164,6 +165,11 @@ def main():
             if lit.is_format:
                 format_lits.setdefault(path.as_posix(), []).append(lit)
                 continue
+            # 含换行的字面量不自动替换：替换后 `\n` 会消失，属于静默改行为。
+            # 这类地方要手工写成 `format!("{}\n", tr_args(...))`。
+            if "\n" in lit.text:
+                multiline.setdefault(path.as_posix(), []).append(lit)
+                continue
             expr = f"tr(lang, Key::{key})"
             if "{}" in lit.text or "{error}" in lit.text:
                 need_args.setdefault(path.as_posix(), []).append(lit)
@@ -185,6 +191,12 @@ def main():
     if format_lits:
         print("\n!! 格式串（必须手工改成 tr_args / tr_error）：")
         for f, items in format_lits.items():
+            print(f"  {f}")
+            for lit in items:
+                print(f"    L{lit.line}: {lit.text!r}")
+    if multiline:
+        print("\n!! 含换行的字面量（必须手工改成 format!(\"{}\\n\", tr_args(..))）：")
+        for f, items in multiline.items():
             print(f"  {f}")
             for lit in items:
                 print(f"    L{lit.line}: {lit.text!r}")

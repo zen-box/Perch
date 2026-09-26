@@ -8,6 +8,7 @@ use gpui_kit::*;
 use super::Palette;
 use crate::analytics::{AnalyticsTab, TimeRange, collect_stats};
 use crate::app::AppState;
+use crate::i18n::{Key, tr, tr_args};
 use crate::model_info::format_tokens;
 use crate::models_dev::USD_TO_CNY_RATE;
 
@@ -23,6 +24,7 @@ const PALETTE_COLORS: [u32; 6] = [
 pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let p = Palette::new(cx);
+        let lang = app.read(cx).language();
         let (current_range, current_tab) = {
             let state = app.read(cx);
             (state.analytics_range, state.analytics_tab)
@@ -47,11 +49,15 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
         let range_all_app = app.clone();
 
         let first_date = summary.daily.first().map(|d| d.date_str.clone()).unwrap_or_default();
-        let mid_date = summary.daily.get(summary.daily.len() / 2).map(|d| d.date_str.clone()).unwrap_or_default();
+        let mid_date = summary
+            .daily
+            .get(summary.daily.len() / 2)
+            .map(|d| d.date_str.clone())
+            .unwrap_or_default();
         let last_date = summary.daily.last().map(|d| d.date_str.clone()).unwrap_or_default();
 
         dialog
-            .title("用量与费用统计看板")
+            .title(tr(lang, Key::UsageDashboard))
             .w(px(680.))
             .child(
                 v_flex()
@@ -69,8 +75,14 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                     .child(
                                         Button::new("tab-overview")
                                             .xsmall()
-                                            .map(|b| if current_tab == AnalyticsTab::Overview { b.primary() } else { b.ghost() })
-                                            .label("Overview 概览")
+                                            .map(|b| {
+                                                if current_tab == AnalyticsTab::Overview {
+                                                    b.primary()
+                                                } else {
+                                                    b.ghost()
+                                                }
+                                            })
+                                            .label(tr(lang, Key::OverviewTab))
                                             .on_click(move |_, window, cx| {
                                                 tab_overview_app.update(cx, |this, _| {
                                                     this.analytics_tab = AnalyticsTab::Overview;
@@ -81,8 +93,14 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                     .child(
                                         Button::new("tab-models")
                                             .xsmall()
-                                            .map(|b| if current_tab == AnalyticsTab::Models { b.primary() } else { b.ghost() })
-                                            .label("Models 模型排行")
+                                            .map(|b| {
+                                                if current_tab == AnalyticsTab::Models {
+                                                    b.primary()
+                                                } else {
+                                                    b.ghost()
+                                                }
+                                            })
+                                            .label(tr(lang, Key::ModelsTab))
                                             .on_click(move |_, window, cx| {
                                                 tab_models_app.update(cx, |this, _| {
                                                     this.analytics_tab = AnalyticsTab::Models;
@@ -100,7 +118,13 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                     .child(
                                         Button::new("range-7d")
                                             .xsmall()
-                                            .map(|b| if current_range == TimeRange::Days7 { b.primary() } else { b.ghost() })
+                                            .map(|b| {
+                                                if current_range == TimeRange::Days7 {
+                                                    b.primary()
+                                                } else {
+                                                    b.ghost()
+                                                }
+                                            })
                                             .label("7d")
                                             .on_click(move |_, window, cx| {
                                                 range_7d_app.update(cx, |this, _| {
@@ -112,7 +136,13 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                     .child(
                                         Button::new("range-30d")
                                             .xsmall()
-                                            .map(|b| if current_range == TimeRange::Days30 { b.primary() } else { b.ghost() })
+                                            .map(|b| {
+                                                if current_range == TimeRange::Days30 {
+                                                    b.primary()
+                                                } else {
+                                                    b.ghost()
+                                                }
+                                            })
                                             .label("30d")
                                             .on_click(move |_, window, cx| {
                                                 range_30d_app.update(cx, |this, _| {
@@ -124,7 +154,13 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                     .child(
                                         Button::new("range-all")
                                             .xsmall()
-                                            .map(|b| if current_range == TimeRange::All { b.primary() } else { b.ghost() })
+                                            .map(|b| {
+                                                if current_range == TimeRange::All {
+                                                    b.primary()
+                                                } else {
+                                                    b.ghost()
+                                                }
+                                            })
                                             .label("All")
                                             .on_click(move |_, window, cx| {
                                                 range_all_app.update(cx, |this, _| {
@@ -138,9 +174,35 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                     .child(
                         h_flex()
                             .gap_3()
-                            .child(metric_card("总 Token 消耗", &format_tokens(summary.total_tokens as u32), format!("入 {} · 出 {}", format_tokens(summary.total_input as u32), format_tokens(summary.total_output as u32)), &p))
-                            .child(metric_card("预估费用", &format!("${:.2}", summary.total_cost_usd), format!("约合 ¥{:.2}", summary.total_cost_usd * USD_TO_CNY_RATE), &p))
-                            .child(metric_card("回答条数", &summary.total_messages.to_string(), "条助手回复".to_string(), &p)),
+                            .child(metric_card(
+                                tr(lang, Key::TotalTokens),
+                                &format_tokens(summary.total_tokens as u32),
+                                tr_args(
+                                    lang,
+                                    Key::TokenInOut,
+                                    &[
+                                        &format_tokens(summary.total_input as u32),
+                                        &format_tokens(summary.total_output as u32),
+                                    ],
+                                ),
+                                &p,
+                            ))
+                            .child(metric_card(
+                                tr(lang, Key::EstimatedCost),
+                                &format!("${:.2}", summary.total_cost_usd),
+                                tr_args(
+                                    lang,
+                                    Key::CostCny,
+                                    &[&format!("{:.2}", summary.total_cost_usd * USD_TO_CNY_RATE)],
+                                ),
+                                &p,
+                            ))
+                            .child(metric_card(
+                                tr(lang, Key::ReplyCount),
+                                &summary.total_messages.to_string(),
+                                tr(lang, Key::AssistantReplies).to_string(),
+                                &p,
+                            )),
                     )
                     .when(current_tab == AnalyticsTab::Overview, |this| {
                         this.child(
@@ -157,54 +219,51 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                         .text_xs()
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(p.muted_foreground)
-                                        .child("每日 Token 消耗走势")
-                                        .child(format!("峰值: {} / 天", format_tokens(max_daily_tokens as u32))),
+                                        .child(tr(lang, Key::DailyTokenTrend))
+                                        .child(tr_args(
+                                            lang,
+                                            Key::PeakPerDay,
+                                            &[&format_tokens(max_daily_tokens as u32)],
+                                        )),
                                 )
-                                .child(
-                                    h_flex()
-                                        .h(px(120.))
-                                        .items_end()
-                                        .gap_1()
-                                        .pt_2()
-                                        .children(summary.daily.iter().map(|day| {
-                                            let ratio = (day.total_tokens as f32 / max_daily_tokens as f32).clamp(0.04, 1.0);
-                                            let bar_h = px(100.0 * ratio);
-                                            let day_text = day.full_date.clone();
-                                            let total_tok = day.total_tokens;
-                                            let day_in = day.input_tokens;
-                                            let day_out = day.output_tokens;
-                                            let cost_val = day.cost_usd;
+                                .child(h_flex().h(px(120.)).items_end().gap_1().pt_2().children(
+                                    summary.daily.iter().map(|day| {
+                                        let ratio =
+                                            (day.total_tokens as f32 / max_daily_tokens as f32).clamp(0.04, 1.0);
+                                        let bar_h = px(100.0 * ratio);
+                                        let day_text = day.full_date.clone();
+                                        let total_tok = day.total_tokens;
+                                        let day_in = day.input_tokens;
+                                        let day_out = day.output_tokens;
+                                        let cost_val = day.cost_usd;
 
-                                            v_flex()
-                                                .flex_1()
-                                                .h_full()
-                                                .justify_end()
-                                                .items_center()
-                                                .gap_1()
-                                                .child(
-                                                    div()
-                                                        .id(SharedString::from(format!("bar-{}", day.full_date)))
-                                                        .w_full()
-                                                        .max_w(px(24.))
-                                                        .h(bar_h)
-                                                        .rounded_t_sm()
-                                                        .bg(if day.total_tokens > 0 { p.primary } else { p.muted })
-                                                        .hover(|s| s.bg(p.primary.opacity(0.8)))
-                                                        .tooltip(move |window, cx| {
-                                                            Tooltip::new(format!(
-                                                                "{}\n• 消耗: {} tokens (入 {} · 出 {})\n• 预估: ${:.4} (¥{:.3})",
-                                                                day_text,
-                                                                format_tokens(total_tok as u32),
-                                                                format_tokens(day_in as u32),
-                                                                format_tokens(day_out as u32),
-                                                                cost_val,
-                                                                cost_val * USD_TO_CNY_RATE,
-                                                            ))
-                                                            .build(window, cx)
-                                                        }),
-                                                )
-                                        })),
-                                )
+                                        v_flex().flex_1().h_full().justify_end().items_center().gap_1().child(
+                                            div()
+                                                .id(SharedString::from(format!("bar-{}", day.full_date)))
+                                                .w_full()
+                                                .max_w(px(24.))
+                                                .h(bar_h)
+                                                .rounded_t_sm()
+                                                .bg(if day.total_tokens > 0 { p.primary } else { p.muted })
+                                                .hover(|s| s.bg(p.primary.opacity(0.8)))
+                                                .tooltip(move |window, cx| {
+                                                    Tooltip::new(tr_args(
+                                                        lang,
+                                                        Key::DayTooltip,
+                                                        &[
+                                                            &day_text,
+                                                            &format_tokens(total_tok as u32),
+                                                            &format_tokens(day_in as u32),
+                                                            &format_tokens(day_out as u32),
+                                                            &format!("{cost_val:.4}"),
+                                                            &format!("{:.3}", cost_val * USD_TO_CNY_RATE),
+                                                        ],
+                                                    ))
+                                                    .build(window, cx)
+                                                }),
+                                        )
+                                    }),
+                                ))
                                 .child(
                                     h_flex()
                                         .justify_between()
@@ -230,12 +289,22 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                     .text_xs()
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(p.muted_foreground)
-                                    .child(if current_tab == AnalyticsTab::Overview { "模型用量排行 (Top Models)" } else { "全部模型用量与明细 (All Models)" })
-                                    .child("占比"),
+                                    .child(if current_tab == AnalyticsTab::Overview {
+                                        tr(lang, Key::TopModelsTitle)
+                                    } else {
+                                        tr(lang, Key::AllModelsTitle)
+                                    })
+                                    .child(tr(lang, Key::Share)),
                             )
                             .child(
                                 div()
-                                    .map(|this| if current_tab == AnalyticsTab::Overview { this.max_h(px(160.)) } else { this.max_h(px(280.)) })
+                                    .map(|this| {
+                                        if current_tab == AnalyticsTab::Overview {
+                                            this.max_h(px(160.))
+                                        } else {
+                                            this.max_h(px(280.))
+                                        }
+                                    })
                                     .child(if summary.models.is_empty() {
                                         v_flex()
                                             .py_6()
@@ -243,7 +312,7 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                             .justify_center()
                                             .text_xs()
                                             .text_color(p.muted_foreground)
-                                            .child("暂无该时间范围内的模型用量记录")
+                                            .child(tr(lang, Key::NoUsageInRange))
                                             .into_any_element()
                                     } else {
                                         v_flex()
@@ -275,10 +344,17 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                                             .gap_3()
                                                             .items_center()
                                                             .child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .text_color(p.muted_foreground)
-                                                                    .child(format!("{} (入 {} · 出 {})", format_tokens(stat.total_tokens as u32), format_tokens(stat.input_tokens as u32), format_tokens(stat.output_tokens as u32))),
+                                                                div().text_xs().text_color(p.muted_foreground).child(
+                                                                    tr_args(
+                                                                        lang,
+                                                                        Key::ModelUsageDetail,
+                                                                        &[
+                                                                            &format_tokens(stat.total_tokens as u32),
+                                                                            &format_tokens(stat.input_tokens as u32),
+                                                                            &format_tokens(stat.output_tokens as u32),
+                                                                        ],
+                                                                    ),
+                                                                ),
                                                             )
                                                             .child(
                                                                 div()
@@ -311,13 +387,13 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                         div()
                             .text_xs()
                             .text_color(p.muted_foreground)
-                            .child("计费单价同步自 models.dev，汇率按 1 USD = 7.2 CNY 换算"),
+                            .child(tr(lang, Key::PricingNote)),
                     )
                     .child(
                         Button::new("analytics-close")
                             .primary()
                             .small()
-                            .label("完成")
+                            .label(tr(lang, Key::Done))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
             )

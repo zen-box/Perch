@@ -17,6 +17,7 @@ use super::chat::{format_msg_time, markdown_view};
 use super::message_variants;
 use super::{Palette, dialogs};
 use crate::app::AppState;
+use crate::i18n::{AppLanguage, Key, current, tr, tr_args};
 use crate::model::ChatMessage;
 
 #[allow(clippy::too_many_arguments)]
@@ -31,6 +32,7 @@ pub(super) fn render_assistant_message(
     p: &Palette,
     cx: &mut App,
 ) -> impl IntoElement {
+    let lang = app.read(cx).language();
     let is_last = later == 0;
     let mono_font = cx.theme().mono_font_family.clone();
     let has_content = !msg.content.trim().is_empty();
@@ -103,9 +105,9 @@ pub(super) fn render_assistant_message(
                                 })
                                 .child(Icon::new(IconName::Brain).size(px(14.)))
                                 .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(if thinking {
-                                    "正在思考…"
+                                    tr(lang, Key::Thinking)
                                 } else {
-                                    "思考过程"
+                                    tr(lang, Key::ThinkingProcess)
                                 }))
                                 .child(
                                     Icon::new(if open {
@@ -163,7 +165,7 @@ pub(super) fn render_assistant_message(
                         .text_sm()
                         .text_color(p.muted_foreground)
                         .child(Spinner::new().small())
-                        .child("正在生成…"),
+                        .child(tr(lang, Key::Generating)),
                 )
             })
             .when_some(msg.error.clone(), |this, err| {
@@ -214,7 +216,7 @@ pub(super) fn render_assistant_message(
                                             .xsmall()
                                             .icon(IconName::ChevronLeft)
                                             .disabled(current_var_ix == 0)
-                                            .tooltip("上一个模型回答")
+                                            .tooltip(tr(lang, Key::PrevModelReply))
                                             .on_click({
                                                 let switch_app = switch_app.clone();
                                                 let message_id = message_id.clone();
@@ -241,7 +243,7 @@ pub(super) fn render_assistant_message(
                                             .xsmall()
                                             .icon(IconName::ChevronRight)
                                             .disabled(current_var_ix + 1 >= total_variants)
-                                            .tooltip("下一个模型回答")
+                                            .tooltip(tr(lang, Key::NextModelReply))
                                             .on_click({
                                                 let switch_app = switch_app.clone();
                                                 let message_id = message_id.clone();
@@ -262,7 +264,7 @@ pub(super) fn render_assistant_message(
                                     .ghost()
                                     .xsmall()
                                     .icon(IconName::Copy)
-                                    .tooltip("复制回答")
+                                    .tooltip(tr(lang, Key::CopyReply))
                                     .on_click(move |_, _, cx| {
                                         copy_app.update(cx, |this, cx| this.copy_to_clipboard(&copy_text, cx));
                                     }),
@@ -273,7 +275,7 @@ pub(super) fn render_assistant_message(
                                 .ghost()
                                 .xsmall()
                                 .icon(IconName::RefreshCw)
-                                .tooltip("重新生成")
+                                .tooltip(tr(lang, Key::Regenerate))
                                 .on_click(move |_, window, cx| {
                                     // 较早的回答重新生成会删掉后面的对话，先确认
                                     if later > 0 {
@@ -300,7 +302,7 @@ pub(super) fn render_assistant_message(
                                         .ghost()
                                         .xsmall()
                                         .icon(IconName::Repeat)
-                                        .tooltip("换模型重答"),
+                                        .tooltip(tr(lang, Key::RetryWithModel)),
                                 )
                                 .content(move |popover, window, cx| {
                                     render_regen_popover(&other_app, &other_id, later, popover, window, cx)
@@ -312,7 +314,7 @@ pub(super) fn render_assistant_message(
                                     .ghost()
                                     .xsmall()
                                     .icon(IconName::Forward)
-                                    .tooltip("继续生成")
+                                    .tooltip(tr(lang, Key::ContinueGenerating))
                                     .on_click(move |_, _, cx| {
                                         continue_app.update(cx, |this, cx| this.continue_message(cx))
                                     }),
@@ -323,7 +325,7 @@ pub(super) fn render_assistant_message(
                                 .ghost()
                                 .xsmall()
                                 .icon(IconName::Quote)
-                                .tooltip("引用")
+                                .tooltip(tr(lang, Key::Quote))
                                 .on_click(move |_, _, cx| {
                                     quote_app.update(cx, |this, cx| this.quote_message(&quote_id, cx))
                                 }),
@@ -333,13 +335,13 @@ pub(super) fn render_assistant_message(
                                 .ghost()
                                 .xsmall()
                                 .icon(IconName::Trash)
-                                .tooltip("删除")
+                                .tooltip(tr(lang, Key::Delete))
                                 .on_click(move |_, _, cx| {
                                     delete_app.update(cx, |this, cx| this.delete_message(&delete_id, cx))
                                 }),
                         )
                         .when(has_metrics, |this| {
-                            this.child(render_message_metrics(&msg, &model_label, p))
+                            this.child(render_message_metrics(&msg, &model_label, p, lang))
                         }),
                 )
             }),
@@ -355,6 +357,7 @@ fn render_regen_popover(
     cx: &mut Context<PopoverState>,
 ) -> impl IntoElement + use<> {
     let p = Palette::new(cx);
+    let lang = app.read(cx).language();
     let (providers, current_model_id) = {
         let state = app.read(cx);
         let curr = state
@@ -423,7 +426,12 @@ fn render_regen_popover(
                     .child(div().flex_1().min_w_0().truncate().child(model.name.clone()))
                     .child(model_badges(model, &p))
                     .when(is_current, |this| {
-                        this.child(div().text_xs().text_color(p.muted_foreground).child("当前"))
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(p.muted_foreground)
+                                .child(tr(lang, Key::Current)),
+                        )
                     })
                     .into_any_element(),
             );
@@ -448,13 +456,13 @@ fn render_regen_popover(
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(p.foreground)
-                        .child("换模型重答"),
+                        .child(tr(lang, Key::RetryWithModel)),
                 )
                 .child(
                     div()
                         .text_xs()
                         .text_color(p.muted_foreground)
-                        .child("选择重新生成的模型"),
+                        .child(tr(lang, Key::PickRegenerateModel)),
                 ),
         )
         .map(|this| {
@@ -472,13 +480,13 @@ fn render_regen_popover(
                         .py_6()
                         .text_xs()
                         .text_color(p.muted_foreground)
-                        .child("没有可用的模型渠道"),
+                        .child(tr(lang, Key::NoProviderAvailable)),
                 )
             }
         })
 }
 
-fn render_message_metrics(msg: &ChatMessage, model_label: &str, p: &Palette) -> impl IntoElement {
+fn render_message_metrics(msg: &ChatMessage, model_label: &str, p: &Palette, lang: AppLanguage) -> impl IntoElement {
     let (cost_usd, cost_cny) = crate::models_dev::calculate_cost(
         if !msg.model.is_empty() { &msg.model } else { model_label },
         msg.prompt_tokens,
@@ -519,24 +527,47 @@ fn render_message_metrics(msg: &ChatMessage, model_label: &str, p: &Palette) -> 
         .cursor_pointer()
         .hover(|s| s.bg(p.muted))
         .tooltip(move |window, cx| {
-            let mut text = String::from("Token 与费用明细\n");
-            text.push_str(&format!("• 输入 (Input):    {} tokens\n", input_t));
-            text.push_str(&format!("• 输出 (Output):   {} tokens\n", output_t));
+            // 换行单独拼，不塞进译文里——译文带看不见的尾部换行太容易出错
+            let mut text = format!("{}\n", tr(lang, Key::TokenBreakdown));
+            text.push_str(&format!(
+                "{}\n",
+                tr_args(lang, Key::TokenInput, &[&input_t.to_string()])
+            ));
+            text.push_str(&format!(
+                "{}\n",
+                tr_args(lang, Key::TokenOutput, &[&output_t.to_string()])
+            ));
             if reasoning_t_est > 0 {
-                text.push_str(&format!("  └ 思考生成:      ≈{} tokens\n", reasoning_t_est));
+                text.push_str(&format!(
+                    "{}\n",
+                    tr_args(lang, Key::TokenReasoning, &[&reasoning_t_est.to_string()])
+                ));
             }
             let tot = if total_tokens > 0 { total_tokens } else { output_t };
-            text.push_str(&format!("• 总计 (Total):    {} tokens\n", tot));
+            text.push_str(&format!("{}\n", tr_args(lang, Key::TokenTotal, &[&tot.to_string()])));
             if cost_usd > 0.00001 {
-                text.push_str(&format!("• 预估费用:        ${:.4} (≈ ¥{:.3})\n", cost_usd, cost_cny));
+                text.push_str(&format!(
+                    "{}\n",
+                    tr_args(
+                        lang,
+                        Key::TokenCost,
+                        &[&format!("{cost_usd:.4}"), &format!("{cost_cny:.3}")],
+                    )
+                ));
             }
-            text.push_str(&format!("• 速率与耗时:       {:.1} tok/s · {:.1}s", speed, sec));
+            text.push_str(&tr_args(
+                lang,
+                Key::TokenSpeed,
+                &[&format!("{speed:.1}"), &format!("{sec:.1}")],
+            ));
             Tooltip::new(text).build(window, cx)
         })
         .child(label)
 }
 
 fn render_code_block_actions(block: &CodeBlock, cx: &mut App) -> impl IntoElement + use<> {
+    // 这个函数由 markdown 代码块的渲染回调调用，签名定死、拿不到 `AppState`，从语言全局读。
+    let lang = current(cx);
     let code = block.code();
     let muted = cx.theme().muted_foreground;
 
@@ -551,10 +582,10 @@ fn render_code_block_actions(block: &CodeBlock, cx: &mut App) -> impl IntoElemen
                 .ghost()
                 .xsmall()
                 .icon(IconName::Copy)
-                .tooltip("复制代码")
+                .tooltip(tr(lang, Key::CopyCode))
                 .on_click(move |_, window, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(code.to_string()));
-                    window.push_notification(Notification::success("代码已复制"), cx);
+                    window.push_notification(Notification::success(tr(lang, Key::CodeCopied)), cx);
                 }),
         )
 }
