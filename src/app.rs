@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 use crate::agent::execute_local_tool;
 use crate::backup::BackupFile;
 use crate::config::{AppConfig, ChannelType};
-use crate::i18n::{AppLanguage, apply_locale, tr};
+use crate::i18n::{AppLanguage, Key, apply_locale, tr};
 use crate::model::{Attachment, ChatMessage, StorageData};
 use crate::model_ops::{ModelEditor, TokenField};
 use crate::prompts::PromptLibrary;
@@ -194,10 +194,10 @@ impl AppState {
             TextareaState::new(window, cx)
                 .auto_grow(1, 8)
                 .submit_on_enter(true)
-                .placeholder(tr(lang, "input_placeholder"))
+                .placeholder(tr(lang, Key::InputPlaceholder))
         });
 
-        let search_session_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, "search_chat")));
+        let search_session_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::SearchChat)));
         let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入新的对话名称"));
 
         let cfg_api_key_input = cx.new(|cx| {
@@ -602,13 +602,14 @@ impl AppState {
         self.config.language = lang.as_str().to_string();
         let saved = self.persist_config(cx);
         apply_locale(lang);
-        self.chat_input
-            .update(cx, |i, cx| i.set_placeholder(tr(lang, "input_placeholder"), window, cx));
+        self.chat_input.update(cx, |i, cx| {
+            i.set_placeholder(tr(lang, Key::InputPlaceholder), window, cx)
+        });
         self.search_session_input
-            .update(cx, |i, cx| i.set_placeholder(tr(lang, "search_chat"), window, cx));
+            .update(cx, |i, cx| i.set_placeholder(tr(lang, Key::SearchChat), window, cx));
         // 存不下来就别报"已切换"，免得用户以为下次启动还是这个语言
         if saved {
-            self.toast(ToastLevel::Success, tr(lang, "lang_switched"));
+            self.toast(ToastLevel::Success, tr(lang, Key::LangSwitched));
         }
         cx.notify();
     }

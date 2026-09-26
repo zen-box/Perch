@@ -1,3 +1,18 @@
+//! 界面文案的多语言表。
+//!
+//! 所有文案在下面的 `i18n!` 里**一处定义**，宏会展开出 `Key` 枚举、`Key::ALL`
+//! 和查表函数 `tr`。这样设计是为了让"漏 key / 漏语言"变成**编译错误**：
+//!
+//! - 宏要求每条译文给全四种语言，漏一种就编译不过；
+//! - `tr` 的 `match key` **故意不写 `_` 兜底**，将来加了 key 却忘了处理、或把 key 名写错，
+//!   都是非穷尽匹配，编译期直接报错。
+//!
+//! 早先的实现用 `&str` 当 key，并在末尾留了 `_ => ""`：key 一旦写错，界面会**静默变成空白**，
+//! 编译期无感、测试也测不到。改成枚举就是为了堵死这条路。
+//!
+//! 新增文案时只需在 `i18n!` 里加一行，格式是
+//! `KeyName => { "简体中文", "English", "日本語", "繁體中文" },`。
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,183 +52,116 @@ pub fn apply_locale(lang: AppLanguage) {
     });
 }
 
-pub fn tr(lang: AppLanguage, key: &str) -> &'static str {
-    match key {
-        "app_title" => "Perch",
-        "chat" => match lang {
-            AppLanguage::ZhCn => "对话",
-            AppLanguage::EnUs => "Chat",
-            AppLanguage::JaJp => "チャット",
-            AppLanguage::ZhTw => "對話",
-        },
-        "new_chat" => match lang {
-            AppLanguage::ZhCn => "新对话",
-            AppLanguage::EnUs => "New Chat",
-            AppLanguage::JaJp => "新規チャット",
-            AppLanguage::ZhTw => "新對話",
-        },
-        "search_chat" => match lang {
-            AppLanguage::ZhCn => "搜索对话",
-            AppLanguage::EnUs => "Search chats",
-            AppLanguage::JaJp => "チャットを検索",
-            AppLanguage::ZhTw => "搜尋對話",
-        },
-        "settings" => match lang {
-            AppLanguage::ZhCn => "设置",
-            AppLanguage::EnUs => "Settings",
-            AppLanguage::JaJp => "設定",
-            AppLanguage::ZhTw => "設定",
-        },
-        "general_settings" => match lang {
-            AppLanguage::ZhCn => "通用设置",
-            AppLanguage::EnUs => "General",
-            AppLanguage::JaJp => "一般設定",
-            AppLanguage::ZhTw => "一般設定",
-        },
-        "provider_settings" => match lang {
-            AppLanguage::ZhCn => "模型渠道",
-            AppLanguage::EnUs => "Providers",
-            AppLanguage::JaJp => "プロバイダー管理",
-            AppLanguage::ZhTw => "模型渠道",
-        },
-        "mcp_settings" => match lang {
-            AppLanguage::ZhCn => "MCP 服务器",
-            AppLanguage::EnUs => "MCP Servers",
-            AppLanguage::JaJp => "MCPサーバー",
-            AppLanguage::ZhTw => "MCP 伺服器",
-        },
-        "about_settings" => match lang {
-            AppLanguage::ZhCn => "关于",
-            AppLanguage::EnUs => "About",
-            AppLanguage::JaJp => "このアプリについて",
-            AppLanguage::ZhTw => "關於",
-        },
-        "language_select" => match lang {
-            AppLanguage::ZhCn => "界面语言",
-            AppLanguage::EnUs => "Language",
-            AppLanguage::JaJp => "表示言語",
-            AppLanguage::ZhTw => "介面語言",
-        },
-        "theme_select" => match lang {
-            AppLanguage::ZhCn => "外观主题 (Theme)",
-            AppLanguage::EnUs => "Appearance Theme",
-            AppLanguage::JaJp => "外観テーマ設定",
-            AppLanguage::ZhTw => "外觀主題",
-        },
-        "system_prompt" => match lang {
-            AppLanguage::ZhCn => "全局系统提示词 (System Prompt)",
-            AppLanguage::EnUs => "Global System Prompt",
-            AppLanguage::JaJp => "グローバルシステムプロンプト",
-            AppLanguage::ZhTw => "全局系統提示詞",
-        },
-        "temperature" => match lang {
-            AppLanguage::ZhCn => "模型采样温度 (Temperature)",
-            AppLanguage::EnUs => "Model Temperature",
-            AppLanguage::JaJp => "モデルサンプリング温度",
-            AppLanguage::ZhTw => "模型採樣溫度",
-        },
-        "add_provider" => match lang {
-            AppLanguage::ZhCn => "添加 AI 渠道",
-            AppLanguage::EnUs => "Add AI Provider",
-            AppLanguage::JaJp => "AIプロバイダー追加",
-            AppLanguage::ZhTw => "新增 AI 渠道",
-        },
-        "add_model" => match lang {
-            AppLanguage::ZhCn => "添加模型",
-            AppLanguage::EnUs => "Add Model",
-            AppLanguage::JaJp => "モデル追加",
-            AppLanguage::ZhTw => "新增模型",
-        },
-        "fetch_models" => match lang {
-            AppLanguage::ZhCn => "从接口拉取模型",
-            AppLanguage::EnUs => "Fetch Models from API",
-            AppLanguage::JaJp => "APIからモデル取得",
-            AppLanguage::ZhTw => "從介面拉取模型",
-        },
-        "input_placeholder" => match lang {
-            AppLanguage::ZhCn => "输入问题或指令，Enter 发送，Shift+Enter 换行...",
-            AppLanguage::EnUs => "Type a message, Enter to send, Shift+Enter for new line...",
-            AppLanguage::JaJp => "メッセージを入力。Enterで送信、Shift+Enterで改行...",
-            AppLanguage::ZhTw => "輸入訊息，Enter 發送，Shift+Enter 換行...",
-        },
-        "send" => match lang {
-            AppLanguage::ZhCn => "发送",
-            AppLanguage::EnUs => "Send",
-            AppLanguage::JaJp => "送信",
-            AppLanguage::ZhTw => "發送",
-        },
-        "stop" => match lang {
-            AppLanguage::ZhCn => "停止",
-            AppLanguage::EnUs => "Stop",
-            AppLanguage::JaJp => "停止",
-            AppLanguage::ZhTw => "停止",
-        },
-        "cancel" => match lang {
-            AppLanguage::ZhCn => "取消",
-            AppLanguage::EnUs => "Cancel",
-            AppLanguage::JaJp => "キャンセル",
-            AppLanguage::ZhTw => "取消",
-        },
-        "save" => match lang {
-            AppLanguage::ZhCn => "保存",
-            AppLanguage::EnUs => "Save",
-            AppLanguage::JaJp => "保存",
-            AppLanguage::ZhTw => "儲存",
-        },
-        "delete" => match lang {
-            AppLanguage::ZhCn => "删除",
-            AppLanguage::EnUs => "Delete",
-            AppLanguage::JaJp => "削除",
-            AppLanguage::ZhTw => "刪除",
-        },
-        "back_to_chat" => match lang {
-            AppLanguage::ZhCn => "返回对话",
-            AppLanguage::EnUs => "Back to Chat",
-            AppLanguage::JaJp => "チャットに戻る",
-            AppLanguage::ZhTw => "返回對話",
-        },
-        "channel_type" => match lang {
-            AppLanguage::ZhCn => "渠道类型规范",
-            AppLanguage::EnUs => "Channel Specification",
-            AppLanguage::JaJp => "チャンネル仕様",
-            AppLanguage::ZhTw => "渠道類型規範",
-        },
-        "channel_name" => match lang {
-            AppLanguage::ZhCn => "渠道名称",
-            AppLanguage::EnUs => "Channel Name",
-            AppLanguage::JaJp => "チャンネル名",
-            AppLanguage::ZhTw => "渠道名稱",
-        },
-        "base_url" => match lang {
-            AppLanguage::ZhCn => "接口地址 (Base URL)",
-            AppLanguage::EnUs => "API Base URL",
-            AppLanguage::JaJp => "ベースURL",
-            AppLanguage::ZhTw => "接口地址 (Base URL)",
-        },
-        "api_key" => match lang {
-            AppLanguage::ZhCn => "API 密钥 (API Key)",
-            AppLanguage::EnUs => "API Key",
-            AppLanguage::JaJp => "APIキー",
-            AppLanguage::ZhTw => "API 金鑰 (API Key)",
-        },
-        "no_providers" => match lang {
-            AppLanguage::ZhCn => "暂无渠道，请点击上方的「+」添加您自有的 AI 渠道",
-            AppLanguage::EnUs => "No providers configured. Click '+' above to add your AI channel.",
-            AppLanguage::JaJp => "プロバイダーがありません。上の「+」をクリックして追加してください。",
-            AppLanguage::ZhTw => "暫無渠道，請點擊上方的「+」新增自有的 AI 渠道",
-        },
-        "no_models" => match lang {
-            AppLanguage::ZhCn => "暂无模型，可点击右上角「从接口拉取模型」或「添加模型」",
-            AppLanguage::EnUs => "No models found. Click 'Fetch Models' or 'Add Model' above.",
-            AppLanguage::JaJp => "モデルがありません。右上の「モデル取得」または「モデル追加」をクリックしてください。",
-            AppLanguage::ZhTw => "暫無模型，可點擊右上角「從介面拉取模型」或「新增模型」",
-        },
-        "lang_switched" => match lang {
-            AppLanguage::ZhCn => "语言已切换为：简体中文",
-            AppLanguage::EnUs => "Language switched to: English",
-            AppLanguage::JaJp => "言語を日本語に切り替えました",
-            AppLanguage::ZhTw => "語言已切換為：繁體中文",
-        },
-        _ => "",
+macro_rules! i18n {
+    ($($variant:ident => { $zh_cn:expr, $en_us:expr, $ja_jp:expr, $zh_tw:expr }),* $(,)?) => {
+        /// 界面文案的 key。
+        ///
+        /// 由 `i18n!` 宏生成，不要手工维护——加文案请改 `i18n!` 里的表。
+        ///
+        /// 允许 dead_code 的原因：这张表是**文案全集**，界面文案正在分批迁进来，
+        /// 暂时会有一些 key 还没有调用点。等迁移做完就把这个属性删掉。
+        ///
+        /// 允许 enum_variant_names 的原因：表里有些 key 天然以 "Key" 结尾（如 `ApiKey`），
+        /// 它们是完整的概念名，不是"以枚举名结尾的冗余变体"，这条 lint 对文案表不适用。
+        #[allow(dead_code, clippy::enum_variant_names)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum Key { $($variant),* }
+
+        #[cfg(test)]
+        impl Key {
+            /// 全部 key。测试用它遍历，确保每种语言都不缺文案。
+            ///
+            /// 只在测试构建里存在，免得给正式构建留一个没人用的常量。
+            pub const ALL: &'static [Key] = &[$(Key::$variant),*];
+        }
+
+        /// 查一条界面文案。
+        ///
+        /// `match` 故意不写 `_` 兜底：往 `i18n!` 加了 key 却忘了处理、或 key 名写错，
+        /// 都会在编译期报错，而不是运行期悄悄返回空字符串。
+        pub fn tr(lang: AppLanguage, key: Key) -> &'static str {
+            match key {
+                $(Key::$variant => match lang {
+                    AppLanguage::ZhCn => $zh_cn,
+                    AppLanguage::EnUs => $en_us,
+                    AppLanguage::JaJp => $ja_jp,
+                    AppLanguage::ZhTw => $zh_tw,
+                }),*
+            }
+        }
+    };
+}
+
+i18n! {
+    AppTitle => { "Perch", "Perch", "Perch", "Perch" },
+    Chat => { "对话", "Chat", "チャット", "對話" },
+    NewChat => { "新对话", "New Chat", "新規チャット", "新對話" },
+    SearchChat => { "搜索对话", "Search chats", "チャットを検索", "搜尋對話" },
+    Settings => { "设置", "Settings", "設定", "設定" },
+    GeneralSettings => { "通用设置", "General", "一般設定", "一般設定" },
+    ProviderSettings => { "模型渠道", "Providers", "プロバイダー管理", "模型渠道" },
+    McpSettings => { "MCP 服务器", "MCP Servers", "MCPサーバー", "MCP 伺服器" },
+    AboutSettings => { "关于", "About", "このアプリについて", "關於" },
+    LanguageSelect => { "界面语言", "Language", "表示言語", "介面語言" },
+    ThemeSelect => { "外观主题 (Theme)", "Appearance Theme", "外観テーマ設定", "外觀主題" },
+    SystemPrompt => { "全局系统提示词 (System Prompt)", "Global System Prompt", "グローバルシステムプロンプト", "全局系統提示詞" },
+    Temperature => { "模型采样温度 (Temperature)", "Model Temperature", "モデルサンプリング温度", "模型採樣溫度" },
+    AddProvider => { "添加 AI 渠道", "Add AI Provider", "AIプロバイダー追加", "新增 AI 渠道" },
+    AddModel => { "添加模型", "Add Model", "モデル追加", "新增模型" },
+    FetchModels => { "从接口拉取模型", "Fetch Models from API", "APIからモデル取得", "從介面拉取模型" },
+    InputPlaceholder => { "输入问题或指令，Enter 发送，Shift+Enter 换行...", "Type a message, Enter to send, Shift+Enter for new line...", "メッセージを入力。Enterで送信、Shift+Enterで改行...", "輸入訊息，Enter 發送，Shift+Enter 換行..." },
+    Send => { "发送", "Send", "送信", "發送" },
+    Stop => { "停止", "Stop", "停止", "停止" },
+    Cancel => { "取消", "Cancel", "キャンセル", "取消" },
+    Save => { "保存", "Save", "保存", "儲存" },
+    Delete => { "删除", "Delete", "削除", "刪除" },
+    BackToChat => { "返回对话", "Back to Chat", "チャットに戻る", "返回對話" },
+    ChannelType => { "渠道类型规范", "Channel Specification", "チャンネル仕様", "渠道類型規範" },
+    ChannelName => { "渠道名称", "Channel Name", "チャンネル名", "渠道名稱" },
+    BaseUrl => { "接口地址 (Base URL)", "API Base URL", "ベースURL", "接口地址 (Base URL)" },
+    ApiKey => { "API 密钥 (API Key)", "API Key", "APIキー", "API 金鑰 (API Key)" },
+    NoProviders => { "暂无渠道，请点击上方的「+」添加您自有的 AI 渠道", "No providers configured. Click '+' above to add your AI channel.", "プロバイダーがありません。上の「+」をクリックして追加してください。", "暫無渠道，請點擊上方的「+」新增自有的 AI 渠道" },
+    NoModels => { "暂无模型，可点击右上角「从接口拉取模型」或「添加模型」", "No models found. Click 'Fetch Models' or 'Add Model' above.", "モデルがありません。右上の「モデル取得」または「モデル追加」をクリックしてください。", "暫無模型，可點擊右上角「從介面拉取模型」或「新增模型」" },
+    LangSwitched => { "语言已切换为：简体中文", "Language switched to: English", "言語を日本語に切り替えました", "語言已切換為：繁體中文" },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LANGS: [AppLanguage; 4] = [
+        AppLanguage::ZhCn,
+        AppLanguage::EnUs,
+        AppLanguage::JaJp,
+        AppLanguage::ZhTw,
+    ];
+
+    /// 每条文案在四种语言下都不能是空串。
+    ///
+    /// 宏能保证"漏写一个语言"编译不过，但拦不住有人把译文写成空串——那种情况界面会空白，
+    /// 所以用这个测试兜住。
+    #[test]
+    fn every_key_has_text_in_all_languages() {
+        for &key in Key::ALL {
+            for lang in LANGS {
+                assert!(!tr(lang, key).is_empty(), "{key:?} 在 {lang:?} 下为空");
+            }
+        }
+    }
+
+    /// 语言标识字符串与枚举要能互相还原。
+    ///
+    /// 这两个函数是配置读写与语言切换的入口，写反了会导致"切换语言后重启又变回去"。
+    #[test]
+    fn language_code_round_trips() {
+        for lang in LANGS {
+            assert_eq!(AppLanguage::from_str(lang.as_str()), lang);
+        }
+        // 兼容简写与地区变体
+        assert_eq!(AppLanguage::from_str("en"), AppLanguage::EnUs);
+        assert_eq!(AppLanguage::from_str("ja"), AppLanguage::JaJp);
+        assert_eq!(AppLanguage::from_str("zh-HK"), AppLanguage::ZhTw);
+        // 认不出来的一律回落简体中文
+        assert_eq!(AppLanguage::from_str("fr-FR"), AppLanguage::ZhCn);
     }
 }

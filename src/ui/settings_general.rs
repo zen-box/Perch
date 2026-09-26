@@ -10,7 +10,7 @@ use gpui_kit::*;
 use super::Palette;
 use super::settings::{page, section, segmented, setting_row};
 use crate::app::AppState;
-use crate::i18n::tr;
+use crate::i18n::{Key, tr};
 
 // ================= 通用设置 =================
 
@@ -86,7 +86,7 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
                     })
             }),
             setting_row(
-                tr(lang, "temperature"),
+                tr(lang, Key::Temperature),
                 format!("当前 {:.1}，数值越低回答越稳定，越高越有创意", temperature),
                 p,
                 {
@@ -111,7 +111,7 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::MEDIUM)
-                                .child(tr(lang, "system_prompt")),
+                                .child(tr(lang, Key::SystemPrompt)),
                         )
                         .child(
                             div()
@@ -126,7 +126,7 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
                         Button::new("save-system-prompt")
                             .primary()
                             .small()
-                            .label(tr(lang, "save"))
+                            .label(tr(lang, Key::Save))
                             .on_click(cx.listener(|this, _, _, cx| this.save_system_prompt(cx))),
                     ),
                 )
@@ -149,7 +149,7 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
 
     page(
         "settings-general",
-        tr(lang, "general_settings"),
+        tr(lang, Key::GeneralSettings),
         "外观与默认的对话参数",
         p,
         v_flex()

@@ -7,7 +7,7 @@ use gpui_kit_assets::IconName;
 use super::Palette;
 use super::{settings_general, settings_misc, settings_prompts, settings_providers};
 use crate::app::{AppState, SettingsTab};
-use crate::i18n::tr;
+use crate::i18n::{Key, tr};
 
 pub(super) const PAGE_MAX_WIDTH: Pixels = px(720.);
 
@@ -28,11 +28,15 @@ pub fn render_settings(state: &mut AppState, p: &Palette, cx: &mut Context<AppSt
 fn render_nav(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
     let lang = state.language();
     let tabs = [
-        (SettingsTab::General, IconName::Settings2, tr(lang, "general_settings")),
-        (SettingsTab::Providers, IconName::Cloud, tr(lang, "provider_settings")),
+        (
+            SettingsTab::General,
+            IconName::Settings2,
+            tr(lang, Key::GeneralSettings),
+        ),
+        (SettingsTab::Providers, IconName::Cloud, tr(lang, Key::ProviderSettings)),
         (SettingsTab::Prompts, IconName::BookOpen, "提示词"),
-        (SettingsTab::McpServers, IconName::Plug, tr(lang, "mcp_settings")),
-        (SettingsTab::About, IconName::Info, tr(lang, "about_settings")),
+        (SettingsTab::McpServers, IconName::Plug, tr(lang, Key::McpSettings)),
+        (SettingsTab::About, IconName::Info, tr(lang, Key::AboutSettings)),
     ];
 
     v_flex()
@@ -57,7 +61,7 @@ fn render_nav(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl
                 .hover(|s| s.bg(p.sidebar_accent.opacity(0.6)))
                 .on_click(cx.listener(|this, _, window, cx| this.close_settings(window, cx)))
                 .child(Icon::new(IconName::ArrowLeft).size(px(16.)))
-                .child(div().flex_1().child(tr(lang, "back_to_chat")))
+                .child(div().flex_1().child(tr(lang, Key::BackToChat)))
                 .child(div().text_xs().text_color(p.muted_foreground).child("Esc")),
         )
         .child(
@@ -68,7 +72,7 @@ fn render_nav(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl
                 .text_xs()
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(p.muted_foreground)
-                .child(tr(lang, "settings")),
+                .child(tr(lang, Key::Settings)),
         )
         .children(tabs.into_iter().map(|(tab, icon, label)| {
             let is_active = state.settings_tab == tab;

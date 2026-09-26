@@ -14,7 +14,7 @@ use super::brand_icon::{model_avatar, model_badges, provider_avatar};
 use super::settings::{PAGE_MAX_WIDTH, section};
 use super::{Palette, dialogs, icon_tile, model_editor_dialog};
 use crate::app::AppState;
-use crate::i18n::tr;
+use crate::i18n::{Key, tr};
 
 // ================= 模型渠道 =================
 
@@ -238,7 +238,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::MEDIUM)
-                                .child(tr(lang, "api_key")),
+                                .child(tr(lang, Key::ApiKey)),
                         )
                         .child(
                             div()
@@ -253,7 +253,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::MEDIUM)
-                                .child(tr(lang, "base_url")),
+                                .child(tr(lang, Key::BaseUrl)),
                         )
                         .child(div().py(px(4.)).child(Input::new(&state.cfg_base_url_input)))
                         .child(
@@ -332,7 +332,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                 .text_sm()
                 .text_color(p.muted_foreground)
                 .child(Icon::new(IconName::Boxes).size(px(24.)))
-                .child(tr(lang, "no_models"))
+                .child(tr(lang, Key::NoModels))
                 .into_any_element(),
         ]
     } else {
@@ -477,7 +477,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                                 .outline()
                                 .xsmall()
                                 .icon(IconName::Download)
-                                .label(tr(lang, "fetch_models"))
+                                .label(tr(lang, Key::FetchModels))
                                 .on_click(cx.listener(|this, _, _, cx| this.fetch_models_from_provider(cx))),
                         )
                         .child(
@@ -485,7 +485,7 @@ pub(super) fn render_provider_detail(state: &AppState, p: &Palette, cx: &mut Con
                                 .outline()
                                 .xsmall()
                                 .icon(IconName::Plus)
-                                .label(tr(lang, "add_model"))
+                                .label(tr(lang, Key::AddModel))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     // 先打开弹窗再准备草稿：弹窗打开时会抢走焦点，之后才能把焦点给到 ID 输入框
                                     model_editor_dialog::open_model_editor(cx.entity(), window, cx);

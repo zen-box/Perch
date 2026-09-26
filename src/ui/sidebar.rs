@@ -11,7 +11,7 @@ use gpui_kit_assets::IconName;
 
 use super::{Palette, SIDEBAR_WIDTH, dialogs};
 use crate::app::AppState;
-use crate::i18n::tr;
+use crate::i18n::{Key, tr};
 
 // ================= 会话侧边栏 =================
 
@@ -106,7 +106,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
                         .outline()
                         .w_full()
                         .icon(IconName::SquarePen)
-                        .label(tr(lang, "new_chat"))
+                        .label(tr(lang, Key::NewChat))
                         .tooltip("Ctrl+N")
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.create_new_session(window, cx);

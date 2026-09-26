@@ -31,7 +31,7 @@ use gpui_kit_assets::IconName;
 
 use crate::app::{AppState, SettingsTab, ToastLevel, ViewMode};
 use crate::config::ChannelType;
-use crate::i18n::{AppLanguage, tr};
+use crate::i18n::{AppLanguage, Key, tr};
 use crate::{CloseSettings, NewChat, PasteIntoChat, ToggleSettings, ToggleSidebar};
 
 /// 对话内容与输入框的最大宽度，宽屏下保持舒适的行长
@@ -286,7 +286,7 @@ impl AppState {
                             .ghost()
                             .small()
                             .icon(IconName::Languages)
-                            .tooltip(tr(lang, "language_select"))
+                            .tooltip(tr(lang, Key::LanguageSelect))
                             .occlude()
                             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
                                 LANGUAGES.iter().fold(menu, |menu, &(option, label)| {
@@ -331,7 +331,7 @@ impl AppState {
                             .small()
                             .icon(IconName::Settings)
                             .selected(in_settings)
-                            .tooltip(format!("{} (Ctrl+,)", tr(lang, "settings")))
+                            .tooltip(format!("{} (Ctrl+,)", tr(lang, Key::Settings)))
                             .occlude()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.toggle_settings(window, cx);
