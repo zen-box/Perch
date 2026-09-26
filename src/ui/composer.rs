@@ -211,7 +211,7 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                         .on_click(cx.listener(|this, _, _, cx| this.pick_attachments(cx))),
                                 )
                                 .child(model_picker::render_model_picker(state, p, cx))
-                                .child(super::params::render_params_button(cx))
+                                .child(super::params::render_params_button(lang, cx))
                                 .child(super::params::render_compare_button(state, cx)),
                         )
                         .child(if is_streaming {

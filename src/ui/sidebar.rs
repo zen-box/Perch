@@ -17,7 +17,6 @@ use crate::model::{DEFAULT_SESSION_FOLDER, DEFAULT_SESSION_TITLE};
 // ================= 会话侧边栏 =================
 
 pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
-    let app = cx.entity();
     let lang = state.language();
     let query = state.search_session_input.read(cx).value().to_lowercase();
     let active_id = state
@@ -63,7 +62,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
     if !pinned.is_empty() {
         rows.push(sidebar_group(tr(lang, Key::Pin), true, p));
         for session in pinned {
-            rows.push(session_row(&app, row_ix, session, session.id == active_id, &folders, p, cx).into_any_element());
+            rows.push(session_row(row_ix, session, session.id == active_id, &folders, lang, p, cx).into_any_element());
             row_ix += 1;
         }
     }
@@ -74,7 +73,7 @@ pub fn render_sidebar(state: &mut AppState, p: &Palette, cx: &mut Context<AppSta
             current_group = group;
             rows.push(sidebar_group(group, row_ix == 0, p));
         }
-        rows.push(session_row(&app, row_ix, session, session.id == active_id, &folders, p, cx).into_any_element());
+        rows.push(session_row(row_ix, session, session.id == active_id, &folders, lang, p, cx).into_any_element());
         row_ix += 1;
     }
 
@@ -192,15 +191,14 @@ fn filter_chip(
 }
 
 fn session_row(
-    app: &Entity<AppState>,
     ix: usize,
     session: &crate::model::ChatSession,
     is_active: bool,
     folders: &[String],
+    lang: AppLanguage,
     p: &Palette,
     cx: &mut Context<AppState>,
 ) -> impl IntoElement {
-    let lang = app.read(cx).language();
     let session_id = session.id.clone();
     // 新建后还没用过、也没被自动命名过的会话，标题仍是数据层的占位值
     // （`DEFAULT_SESSION_TITLE`）。这类占位标题在显示层换成当前语言的「新对话」，
@@ -215,7 +213,7 @@ fn session_row(
     let folder = session.folder.clone();
     let row_id = SharedString::from(format!("session-{session_id}"));
     let switch_id = session_id.clone();
-    let menu_app = app.clone();
+    let menu_app = cx.entity();
     let menu_id = session_id.clone();
     let menu_title = title.clone();
     let menu_folder = folder.clone();

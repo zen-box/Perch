@@ -3,3 +3,6 @@
 # 旧版本写在项目目录下的数据文件（包含 API Key），现在数据保存在用户目录
 personal-control-*.json
 perch-*.json
+
+# 迁移脚本的 Python 字节码缓存
+__pycache__/

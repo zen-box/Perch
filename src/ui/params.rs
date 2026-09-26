@@ -12,11 +12,10 @@ use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
 use crate::app::AppState;
-use crate::i18n::{Key, tr, tr_args};
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 
-pub fn render_params_button(cx: &mut Context<AppState>) -> impl IntoElement {
+pub fn render_params_button(lang: AppLanguage, cx: &mut Context<AppState>) -> impl IntoElement {
     let app = cx.entity();
-    let lang = app.read(cx).language();
     Popover::new("chat-params")
         .anchor(Anchor::BottomLeft)
         .w(px(360.))

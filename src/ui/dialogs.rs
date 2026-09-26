@@ -11,7 +11,7 @@ use gpui_kit::*;
 use super::{Palette, channel_icon};
 use crate::app::AppState;
 use crate::config::ChannelType;
-use crate::i18n::{AppLanguage, Key, tr, tr_args};
+use crate::i18n::{AppLanguage, Key, current, tr, tr_args};
 
 /// 弹窗里的表单项：标签 + 输入框 + 可选说明
 pub(super) fn field(
@@ -174,6 +174,8 @@ pub fn open_add_provider_dialog(app: Entity<AppState>, window: &mut Window, cx: 
     });
 }
 
+// 下面几个确认框常在 `cx.listener` 回调里打开，那时 AppState 正在更新，
+// `app.read(cx)` 会直接 panic（AGENTS.md §4.2），所以语言从全局 `current(cx)` 取。
 pub fn confirm_regenerate(
     app: Entity<AppState>,
     message_id: String,
@@ -182,7 +184,7 @@ pub fn confirm_regenerate(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let lang = app.read(cx).language();
+    let lang = current(cx);
     let description = tr_args(lang, Key::RegenerateDesc, &[&later_count.to_string()]);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
@@ -217,7 +219,7 @@ pub fn confirm_delete_session(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let lang = app.read(cx).language();
+    let lang = current(cx);
     let description = tr_args(lang, Key::DeleteSessionDesc, &[title]);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
@@ -234,7 +236,7 @@ pub fn confirm_delete_session(
 }
 
 pub fn confirm_clear_session(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
-    let lang = app.read(cx).language();
+    let lang = current(cx);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
         alert
@@ -249,7 +251,7 @@ pub fn confirm_clear_session(app: Entity<AppState>, window: &mut Window, cx: &mu
 }
 
 pub fn confirm_delete_provider(app: Entity<AppState>, provider_name: String, window: &mut Window, cx: &mut App) {
-    let lang = app.read(cx).language();
+    let lang = current(cx);
     let description = tr_args(lang, Key::DeleteChannelDesc, &[&provider_name]);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();

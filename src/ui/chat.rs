@@ -57,7 +57,7 @@ pub fn render_chat_panel(state: &mut AppState, p: &Palette, cx: &mut Context<App
                 .pb_4()
                 .pt_1()
                 .when(state.pending_import.is_some(), |this| {
-                    this.child(render_import_banner(p, cx))
+                    this.child(render_import_banner(p, lang, cx))
                 })
                 .when(
                     state
@@ -253,8 +253,7 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
         .into_any_element()
 }
 
-fn render_import_banner(p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
-    let lang = cx.entity().read(cx).language();
+fn render_import_banner(p: &Palette, lang: AppLanguage, cx: &mut Context<AppState>) -> impl IntoElement {
     h_flex()
         .w_full()
         .max_w(CONTENT_MAX_WIDTH)
