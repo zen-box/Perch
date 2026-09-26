@@ -191,15 +191,10 @@ impl AppState {
         let initial_api_key = config.get_active_api_key();
         let initial_base_url = config.get_active_base_url();
 
-        let chat_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .auto_grow(1, 8)
-                .submit_on_enter(true)
-                .placeholder(tr(lang, Key::InputPlaceholder))
-        });
+        let chat_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 8).submit_on_enter(true));
 
-        let search_session_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::SearchChat)));
-        let rename_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhSessionName)));
+        let search_session_input = cx.new(|cx| InputState::new(window, cx));
+        let rename_input = cx.new(|cx| InputState::new(window, cx));
 
         let cfg_api_key_input = cx.new(|cx| {
             let mut inp = InputState::new(window, cx).masked(true).placeholder("sk-...");
@@ -211,22 +206,18 @@ impl AppState {
             inp.set_value(&initial_base_url, window, cx);
             inp
         });
-        let cfg_search_provider_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhSearchProvider)));
-        let model_picker_search_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhSearchModelOrProvider)));
+        let cfg_search_provider_input = cx.new(|cx| InputState::new(window, cx));
+        let model_picker_search_input = cx.new(|cx| InputState::new(window, cx));
 
         let sys_prompt = config.system_prompt.clone();
         let cfg_system_prompt_input = cx.new(|cx| {
-            let mut inp = TextareaState::new(window, cx)
-                .auto_grow(3, 12)
-                .placeholder(tr(lang, Key::PhSystemPrompt));
+            let mut inp = TextareaState::new(window, cx).auto_grow(3, 12);
             inp.set_value(&sys_prompt, window, cx);
             inp
         });
 
         let new_provider_name_input = cx.new(|cx| {
-            let mut inp = InputState::new(window, cx).placeholder(tr(lang, Key::PhProviderName));
+            let mut inp = InputState::new(window, cx);
             inp.set_value(ChannelType::OpenAiChat.label(), window, cx);
             inp
         });
@@ -237,13 +228,10 @@ impl AppState {
         });
         let new_provider_api_key_input = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("sk-..."));
 
-        let model_edit_id_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhModelId)));
-        let model_edit_name_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhModelDisplayName)));
-        let model_edit_context_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhCustomContextLimit)));
-        let model_edit_output_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhCustomOutputLimit)));
+        let model_edit_id_input = cx.new(|cx| InputState::new(window, cx));
+        let model_edit_name_input = cx.new(|cx| InputState::new(window, cx));
+        let model_edit_context_input = cx.new(|cx| InputState::new(window, cx));
+        let model_edit_output_input = cx.new(|cx| InputState::new(window, cx));
 
         let (message_list_session, message_count) = storage
             .get_active_session()
@@ -257,9 +245,7 @@ impl AppState {
             .and_then(|params| params.system_prompt.clone())
             .unwrap_or_default();
         let params_prompt_input = cx.new(|cx| {
-            let mut input = TextareaState::new(window, cx)
-                .auto_grow(2, 6)
-                .placeholder(tr(lang, Key::PhSessionSystemPrompt));
+            let mut input = TextareaState::new(window, cx).auto_grow(2, 6);
             input.set_value(&initial_prompt, window, cx);
             input
         });
@@ -280,15 +266,11 @@ impl AppState {
                 .auto_grow(2, 6)
                 .placeholder("X-Title: Perch")
         });
-        let prompt_name_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhName)));
-        let prompt_icon_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhIcon)));
-        let prompt_body_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .auto_grow(3, 8)
-                .placeholder(tr(lang, Key::PhTemplateVars))
-        });
-        let folder_name_input = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::FolderName)));
-        let model_fetch_search = cx.new(|cx| InputState::new(window, cx).placeholder(tr(lang, Key::PhModelSearch)));
+        let prompt_name_input = cx.new(|cx| InputState::new(window, cx));
+        let prompt_icon_input = cx.new(|cx| InputState::new(window, cx));
+        let prompt_body_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
+        let folder_name_input = cx.new(|cx| InputState::new(window, cx));
+        let model_fetch_search = cx.new(|cx| InputState::new(window, cx));
         let prompts = PromptLibrary::load();
 
         let subscriptions = vec![
@@ -411,14 +393,68 @@ impl AppState {
         };
         // 旧数据迁移是在 data_dir() 里做的，那会儿还没有 AppState，失败信息先攒着，
         // 到这里才弹得出来。迁移失败会让程序当成全新安装，必须让用户看到。
-        for message in crate::paths::take_migration_failures() {
-            state.toast(ToastLevel::Error, tr_args(lang, Key::MigrationFailed, &[&message]));
+        for failure in crate::paths::take_migration_failures() {
+            state.toast(
+                ToastLevel::Error,
+                tr_args(lang, Key::MigrationFailed, &[&failure.message(lang)]),
+            );
         }
+        state.refresh_placeholders(window, cx);
         state
     }
 
     pub fn language(&self) -> AppLanguage {
         AppLanguage::from_str(&self.config.language)
+    }
+
+    /// 所有带**本地化占位符**的单行输入框。
+    ///
+    /// 占位符是界面文案，而 `InputState` 把它存成状态，所以切换语言时要重设一遍。
+    /// 集中在这里定义，`AppState::new` 与 [`Self::refresh_placeholders`] 共用一份，
+    /// 加新的本地化占位符只要往这里加一行，不会出现「创建处改了、切换处忘了」。
+    /// 写死内容的占位符（`sk-...`、`https://api.openai.com/v1` 之类）不进这个列表，
+    /// 它们本来就不随语言变。
+    fn localized_inputs(&self) -> Vec<(&Entity<InputState>, Key)> {
+        vec![
+            (&self.search_session_input, Key::SearchChat),
+            (&self.rename_input, Key::PhSessionName),
+            (&self.cfg_search_provider_input, Key::PhSearchProvider),
+            (&self.model_picker_search_input, Key::PhSearchModelOrProvider),
+            (&self.new_provider_name_input, Key::PhProviderName),
+            (&self.model_edit_id_input, Key::PhModelId),
+            (&self.model_edit_name_input, Key::PhModelDisplayName),
+            (&self.model_edit_context_input, Key::PhCustomContextLimit),
+            (&self.model_edit_output_input, Key::PhCustomOutputLimit),
+            (&self.prompt_name_input, Key::PhName),
+            (&self.prompt_icon_input, Key::PhIcon),
+            (&self.folder_name_input, Key::FolderName),
+            (&self.model_fetch_search, Key::PhModelSearch),
+        ]
+    }
+
+    /// 同上，多行输入框。
+    fn localized_textareas(&self) -> Vec<(&Entity<TextareaState>, Key)> {
+        vec![
+            (&self.chat_input, Key::InputPlaceholder),
+            (&self.cfg_system_prompt_input, Key::PhSystemPrompt),
+            (&self.params_prompt_input, Key::PhSessionSystemPrompt),
+            (&self.prompt_body_input, Key::PhTemplateVars),
+        ]
+    }
+
+    /// 按当前语言重设所有本地化占位符。启动时与切换语言时各调一次。
+    fn refresh_placeholders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let lang = self.language();
+        for (input, key) in self.localized_inputs() {
+            input.update(cx, |input, cx| {
+                input.set_placeholder(tr(lang, key), window, cx);
+            });
+        }
+        for (input, key) in self.localized_textareas() {
+            input.update(cx, |input, cx| {
+                input.set_placeholder(tr(lang, key), window, cx);
+            });
+        }
     }
 
     // ================= 提示 =================
@@ -621,11 +657,10 @@ impl AppState {
         apply_locale(lang);
         // 先同步全局再弹提示，否则「已切换为 xx」这条提示还是旧语言
         set_current(cx, lang);
-        self.chat_input.update(cx, |i, cx| {
-            i.set_placeholder(tr(lang, Key::InputPlaceholder), window, cx)
-        });
-        self.search_session_input
-            .update(cx, |i, cx| i.set_placeholder(tr(lang, Key::SearchChat), window, cx));
+        self.refresh_placeholders(window, cx);
+        // 图片客户端是长生命周期对象，拿不到 `App`，语言在构造时就定下来了
+        // （见 `image_http::ImageHttpClient`），所以换语言要重建一个。
+        cx.set_http_client(crate::image_http::client_for_config(&self.config));
         // 存不下来就别报"已切换"，免得用户以为下次启动还是这个语言
         if saved {
             self.toast(ToastLevel::Success, tr(lang, Key::LangSwitched));

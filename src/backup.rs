@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::config::AppConfig;
+use crate::i18n::{AppLanguage, Key, tr_args};
 use crate::model::ChatSession;
 use crate::paths::write_atomic;
 use crate::prompts::PromptLibrary;
@@ -46,11 +47,16 @@ pub fn write_backup(
     write_atomic(path, &json).map_err(|error| error.to_string())
 }
 
-pub fn read_backup(path: &Path) -> Result<BackupFile, String> {
+pub fn read_backup(path: &Path, lang: AppLanguage) -> Result<BackupFile, String> {
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let backup: BackupFile = serde_json::from_str(&text).map_err(|error| format!("备份文件无法解析: {error}"))?;
+    let backup: BackupFile =
+        serde_json::from_str(&text).map_err(|error| tr_args(lang, Key::BackupParseFailed, &[&error.to_string()]))?;
     if backup.version != 1 {
-        return Err(format!("不支持的备份版本: {}", backup.version));
+        return Err(tr_args(
+            lang,
+            Key::BackupVersionUnsupported,
+            &[&backup.version.to_string()],
+        ));
     }
     Ok(backup)
 }
@@ -91,7 +97,7 @@ mod tests {
         .unwrap();
         let raw = fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("secret-value"));
-        let backup = read_backup(&path).unwrap();
+        let backup = read_backup(&path, AppLanguage::ZhCn).unwrap();
         assert_eq!(backup.sessions[0].title, "标题");
         assert_eq!(backup.config.providers[0].timeout_secs, 30);
         assert!(backup.config.providers[0].api_key.is_empty());

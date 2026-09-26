@@ -9,6 +9,7 @@ use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use url::{Host, Url};
 
 use crate::config::AppConfig;
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
@@ -84,11 +85,15 @@ fn is_private_v4(ip: Ipv4Addr) -> bool {
 struct PublicOnlyResolver {
     /// 代理常开在本机，解析代理自身的地址时不做限制
     proxy_host: Option<String>,
+    /// 界面语言。这个 impl 由 reqwest 在后台任务里调用，拿不到 `App`，
+    /// 所以语言在构造客户端时定下来（切换语言会重建客户端，见 `app::switch_language`）。
+    lang: AppLanguage,
 }
 
 impl Resolve for PublicOnlyResolver {
     fn resolve(&self, name: Name) -> Resolving {
         let host = name.as_str().to_string();
+        let self_lang = self.lang;
         let allow_private = self
             .proxy_host
             .as_deref()
@@ -99,7 +104,7 @@ impl Resolve for PublicOnlyResolver {
                 .filter(|addr| allow_private || !is_private_ip(addr.ip()))
                 .collect();
             if addrs.is_empty() {
-                return Err(format!("{host} 指向本机或内网地址，已阻止加载").into());
+                return Err(tr_args(self_lang, Key::ImageBlockedHost, &[&host]).into());
             }
             Ok(Box::new(addrs.into_iter()) as Addrs)
         })
@@ -111,20 +116,21 @@ impl Resolve for PublicOnlyResolver {
 pub struct ImageHttpClient {
     client: Client,
     user_agent: http_client::http::HeaderValue,
+    lang: AppLanguage,
 }
 
 impl ImageHttpClient {
-    pub fn new(proxy: &str) -> Self {
+    pub fn new(proxy: &str, lang: AppLanguage) -> Self {
         let proxy = proxy_url(proxy).and_then(|value| reqwest_proxy(&value).map(|proxy| (value, proxy)));
         let proxy_host = proxy.as_ref().and_then(|(value, _)| proxy_host(value));
         let mut builder = Client::builder()
             .timeout(Duration::from_secs(20))
             .connect_timeout(Duration::from_secs(8))
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            .redirect(reqwest::redirect::Policy::custom(move |attempt| {
                 if attempt.previous().len() >= 8 {
-                    attempt.error("图片重定向次数过多")
+                    attempt.error(tr(lang, Key::ImageTooManyRedirects))
                 } else if is_blocked_host(attempt.url()) {
-                    attempt.error("图片重定向到了本机或内网地址，已阻止")
+                    attempt.error(tr(lang, Key::ImageRedirectBlocked))
                 } else {
                     attempt.follow()
                 }
@@ -134,13 +140,14 @@ impl ImageHttpClient {
         if let Some((_, proxy)) = proxy {
             builder = builder.proxy(proxy);
         } else {
-            builder = builder.dns_resolver(Arc::new(PublicOnlyResolver { proxy_host }));
+            builder = builder.dns_resolver(Arc::new(PublicOnlyResolver { proxy_host, lang }));
         }
 
         let client = builder.build().unwrap_or_else(|_| Client::new());
         Self {
             client,
             user_agent: http_client::http::HeaderValue::from_static("Perch/0.1"),
+            lang,
         }
     }
 }
@@ -152,7 +159,7 @@ pub fn client_for_config(config: &AppConfig) -> Arc<dyn HttpClient> {
         .find(|provider| provider.id == config.active_provider_id)
         .map(|provider| provider.proxy.as_str())
         .unwrap_or("");
-    Arc::new(ImageHttpClient::new(proxy))
+    Arc::new(ImageHttpClient::new(proxy, AppLanguage::from_str(&config.language)))
 }
 
 fn proxy_url(explicit: &str) -> Option<String> {
@@ -213,13 +220,13 @@ fn failure<T>(message: impl Into<String>) -> http_client::Result<T> {
 }
 
 /// 下载前的检查：地址合法、不是内网地址
-fn check_request(uri: &str) -> Result<(), String> {
+fn check_request(uri: &str, lang: AppLanguage) -> Result<(), String> {
     let Some(normalized) = normalize_image_url(uri) else {
-        return Err(format!("只支持 http/https 图片: {uri}"));
+        return Err(tr_args(lang, Key::ImageOnlyHttp, &[uri]));
     };
     let blocked = Url::parse(&normalized).map(|url| is_blocked_host(&url)).unwrap_or(true);
     if blocked {
-        return Err("不加载本机或内网地址的图片".into());
+        return Err(tr(lang, Key::ImageBlockedAddress).into());
     }
     Ok(())
 }
@@ -250,27 +257,33 @@ impl HttpClient for ImageHttpClient {
         req: Request<AsyncBody>,
     ) -> futures::future::BoxFuture<'static, http_client::Result<Response<AsyncBody>>> {
         let client = self.client.clone();
+        let lang = self.lang;
         let method = req.method().as_str().to_string();
         let uri = req.uri().to_string();
         async move {
-            if let Err(message) = check_request(&uri) {
+            if let Err(message) = check_request(&uri, lang) {
                 return failure(message);
             }
             let (tx, rx) = tokio::sync::oneshot::channel();
             crate::app::runtime().spawn(async move {
-                let result = fetch(&client, &method, &uri).await;
+                let result = fetch(&client, &method, &uri, lang).await;
                 let _ = tx.send(result);
             });
             match rx.await {
                 Ok(result) => result,
-                Err(_) => failure("图片请求已取消"),
+                Err(_) => failure(tr(lang, Key::ImageRequestCancelled)),
             }
         }
         .boxed()
     }
 }
 
-async fn fetch(client: &Client, method: &str, uri: &str) -> http_client::Result<Response<AsyncBody>> {
+async fn fetch(
+    client: &Client,
+    method: &str,
+    uri: &str,
+    lang: AppLanguage,
+) -> http_client::Result<Response<AsyncBody>> {
     let cache_file = image_cache_path(uri);
     if method.eq_ignore_ascii_case("GET")
         && let Ok(bytes) = std::fs::read(&cache_file)
@@ -293,24 +306,24 @@ async fn fetch(client: &Client, method: &str, uri: &str) -> http_client::Result<
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
         .send()
         .await
-        .map_err(|error| ImageError(format!("无法下载图片 {uri}: {error}")))?;
+        .map_err(|error| ImageError(tr_args(lang, Key::ImageDownloadFailed, &[uri, &error.to_string()])))?;
     let status = http_client::http::StatusCode::from_u16(response.status().as_u16())
         .unwrap_or(http_client::http::StatusCode::BAD_GATEWAY);
     let headers = response.headers().clone();
     if let Some(length) = response.content_length()
         && length as usize > MAX_IMAGE_BYTES
     {
-        return failure(format!("图片过大（超过 16MB）: {uri}"));
+        return failure(tr_args(lang, Key::ImageTooLarge, &[uri]));
     }
     let mut body = Vec::new();
     let mut response = response;
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| ImageError(format!("读取图片失败 {uri}: {error}")))?
+        .map_err(|error| ImageError(tr_args(lang, Key::ImageReadFailed, &[uri, &error.to_string()])))?
     {
         if body.len().saturating_add(chunk.len()) > MAX_IMAGE_BYTES {
-            return failure(format!("图片过大（超过 16MB）: {uri}"));
+            return failure(tr_args(lang, Key::ImageTooLarge, &[uri]));
         }
         body.extend_from_slice(&chunk);
     }
@@ -367,8 +380,8 @@ mod tests {
     #[test]
     fn valid_public_images_pass_check_request() {
         let url = "https://example.com/image.png";
-        assert!(check_request(url).is_ok());
-        assert!(check_request("not-a-url").is_err());
+        assert!(check_request(url, AppLanguage::ZhCn).is_ok());
+        assert!(check_request("not-a-url", AppLanguage::ZhCn).is_err());
     }
 
     #[test]
@@ -394,7 +407,7 @@ mod tests {
     #[test]
     fn private_address_with_query_is_rejected() {
         let url = "http://127.0.0.1:18765/leak.png?note=secret";
-        assert!(check_request(url).is_err());
+        assert!(check_request(url, AppLanguage::ZhCn).is_err());
     }
 
     #[test]

@@ -5,6 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+use crate::i18n::{AppLanguage, Key, tr_args};
 use crate::model::AttachmentKind;
 use crate::paths;
 
@@ -168,20 +169,24 @@ fn save_bytes_in(base_dir: &Path, data: &[u8], original_name: &str, mime_type: &
 }
 
 /// 从外部物理文件路径读取并导入到 attachments 存储库（去重）
-pub fn save_file_from_path(src: &Path) -> std::io::Result<SavedFile> {
-    check_attachment_size(fs::metadata(src)?.len())?;
+pub fn save_file_from_path(src: &Path, lang: AppLanguage) -> std::io::Result<SavedFile> {
+    check_attachment_size(fs::metadata(src)?.len(), lang)?;
     let data = fs::read(src)?;
     let name = src.file_name().and_then(|n| n.to_str()).unwrap_or("attachment");
     let (_, mime) = detect_kind_and_mime(name);
     save_bytes(&data, name, mime)
 }
 
-fn check_attachment_size(size: u64) -> std::io::Result<()> {
+fn check_attachment_size(size: u64, lang: AppLanguage) -> std::io::Result<()> {
     if size > MAX_ATTACHMENT_BYTES {
-        return Err(std::io::Error::other(format!(
-            "文件有 {:.1} MB，超过了 {} MB 的上限",
-            size as f64 / 1024.0 / 1024.0,
-            MAX_ATTACHMENT_BYTES / 1024 / 1024
+        // 小数位数留在调用点格式化：`tr_args` 只做 `{}` 替换，不支持 `{:.1}`
+        return Err(std::io::Error::other(tr_args(
+            lang,
+            Key::AttachmentTooLarge,
+            &[
+                &format!("{:.1}", size as f64 / 1024.0 / 1024.0),
+                &(MAX_ATTACHMENT_BYTES / 1024 / 1024).to_string(),
+            ],
         )));
     }
     Ok(())
@@ -244,8 +249,8 @@ mod tests {
 
     #[test]
     fn oversized_files_are_rejected_before_reading() {
-        assert!(check_attachment_size(MAX_ATTACHMENT_BYTES).is_ok());
-        let error = check_attachment_size(MAX_ATTACHMENT_BYTES + 1).unwrap_err();
+        assert!(check_attachment_size(MAX_ATTACHMENT_BYTES, AppLanguage::ZhCn).is_ok());
+        let error = check_attachment_size(MAX_ATTACHMENT_BYTES + 1, AppLanguage::ZhCn).unwrap_err();
         assert!(error.to_string().contains("50 MB"));
     }
 

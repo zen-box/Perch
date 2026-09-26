@@ -4,6 +4,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use crate::i18n::{AppLanguage, Key, tr_args};
+
 /// 当前应用名。数据目录名、凭据管理器里的服务名都用它。
 pub const APP_NAME: &str = "Perch";
 
@@ -27,22 +29,45 @@ pub const LEGACY_FILES: &[(&str, &str)] = &[
     ("personal-control.db", DATABASE_FILE),
 ];
 
+/// 一次迁移失败。
+///
+/// **只带结构化数据，不带现成文案**：迁移发生在 `data_dir()` 里，那会儿 `AppState`
+/// 还没建、界面语言也还没读出来，在这里拼字符串就没法跟着语言走了。文案留到
+/// `app.rs` 弹提示时按当时的语言渲染（见 [`MigrationFailure::message`]）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MigrationFailure {
+    /// 整个数据目录没复制过去，只能继续用旧目录
+    CopyDir { from: String, to: String },
+    /// 单个旧文件没复制成新名字
+    CopyFile { old: String, new: String, error: String },
+}
+
+impl MigrationFailure {
+    /// 渲染成给用户看的一句话。
+    pub fn message(&self, lang: AppLanguage) -> String {
+        match self {
+            Self::CopyDir { from, to } => tr_args(lang, Key::MigrationCopyDir, &[from, to]),
+            Self::CopyFile { old, new, error } => tr_args(lang, Key::MigrationCopyFile, &[old, new, error]),
+        }
+    }
+}
+
 /// 迁移旧数据时失败的记录。
 ///
 /// 迁移发生在 `data_dir()` 里，那里拿不到 `Context`，弹不了提示，只能先攒着；
 /// 启动后由 `app.rs` 取走并提示用户。这个必须让用户看到：新文件没建出来的话，
 /// 程序会当成全新安装，用户的渠道和历史会话看起来就"没了"。
-static MIGRATION_FAILURES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static MIGRATION_FAILURES: Mutex<Vec<MigrationFailure>> = Mutex::new(Vec::new());
 
-fn record_migration_failure(message: String) {
+fn record_migration_failure(failure: MigrationFailure) {
     MIGRATION_FAILURES
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
-        .push(message);
+        .push(failure);
 }
 
 /// 取走并清空迁移失败记录。启动时调用一次。
-pub fn take_migration_failures() -> Vec<String> {
+pub fn take_migration_failures() -> Vec<MigrationFailure> {
     std::mem::take(&mut *MIGRATION_FAILURES.lock().unwrap_or_else(|poison| poison.into_inner()))
 }
 
@@ -75,11 +100,10 @@ pub fn data_dir() -> &'static Path {
                     let legacy = base.join(LEGACY_APP_NAME);
                     if legacy.exists() && !migrate_dir(&legacy, &dir) {
                         // 复制失败就继续用旧目录：宁可留在旧路径，也不能让用户看到空数据
-                        record_migration_failure(format!(
-                            "{} 复制到 {} 失败，继续使用旧目录",
-                            legacy.display(),
-                            dir.display()
-                        ));
+                        record_migration_failure(MigrationFailure::CopyDir {
+                            from: legacy.display().to_string(),
+                            to: dir.display().to_string(),
+                        });
                         return legacy;
                     }
                 }
@@ -106,7 +130,11 @@ fn migrate_legacy_files(dir: &Path) {
             && let Err(error) = fs::copy(&old_path, &new_path)
         {
             // 复制不过去就等于读不到旧数据，必须让用户知道
-            record_migration_failure(format!("{old} 复制为 {new} 失败: {error}"));
+            record_migration_failure(MigrationFailure::CopyFile {
+                old: old.to_string(),
+                new: new.to_string(),
+                error: error.to_string(),
+            });
         }
     }
 }
@@ -278,10 +306,20 @@ mod tests {
 
     #[test]
     fn migration_failures_are_collected_and_taken_once() {
-        record_migration_failure("测试用的失败信息".to_string());
+        record_migration_failure(MigrationFailure::CopyFile {
+            old: "old.json".into(),
+            new: "new.json".into(),
+            error: "boom".into(),
+        });
 
         let taken = take_migration_failures();
-        assert!(taken.iter().any(|message| message == "测试用的失败信息"));
+        assert_eq!(taken.len(), 1);
+        // 记录的是结构化原因，文案按渲染时的语言生成
+        assert_eq!(
+            taken[0].message(AppLanguage::ZhCn),
+            "old.json 复制为 new.json 失败: boom"
+        );
+        assert!(taken[0].message(AppLanguage::EnUs).starts_with("Failed to copy"));
         assert!(take_migration_failures().is_empty(), "取过一次就该清空");
     }
 }

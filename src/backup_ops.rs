@@ -51,7 +51,7 @@ impl AppState {
 
         cx.spawn(async move |this, cx| {
             let Ok(Some(path)) = rx.await else { return };
-            let loaded = backup::read_backup(&path);
+            let loaded = backup::read_backup(&path, lang);
             update_state(&this, cx, |state, cx| {
                 match loaded {
                     Ok(file) => {

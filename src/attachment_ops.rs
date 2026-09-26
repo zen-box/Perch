@@ -191,7 +191,7 @@ fn import_file(path: &Path, lang: AppLanguage) -> Result<Attachment, String> {
         .unwrap_or("file")
         .to_string();
     let (kind, mime) = file_store::detect_kind_and_mime(&name);
-    let saved = file_store::save_file_from_path(path)
+    let saved = file_store::save_file_from_path(path, lang)
         .map_err(|error| tr_args(lang, Key::AttachmentNotAdded, &[&name, &error.to_string()]))?;
     Ok(Attachment {
         id: Uuid::new_v4().to_string(),
@@ -206,7 +206,7 @@ fn import_file(path: &Path, lang: AppLanguage) -> Result<Attachment, String> {
 
 /// 在后台线程把剪贴板图片转成常见格式并保存
 fn import_clipboard_image(image: &Image, lang: AppLanguage) -> Result<Attachment, String> {
-    let prepared = clipboard::prepare_image(image)?;
+    let prepared = clipboard::prepare_image(image, lang)?;
     let name = format!(
         "paste_{}.{}",
         chrono::Local::now().format("%Y%m%d_%H%M%S"),

@@ -525,6 +525,25 @@ i18n! {
     ErrModelsNotJson => { "模型列表不是有效 JSON: {}", "The model list is not valid JSON: {}", "モデル一覧が有効な JSON ではありません: {}", "模型清單不是有效 JSON: {}" },
     ErrInvalidBaseUrl => { "接口地址无效: {}", "Invalid API address: {}", "API アドレスが無効です: {}", "介面位址無效: {}" },
     ErrNoModelList => { "接口响应缺少模型列表", "The API response has no model list", "API レスポンスにモデル一覧がありません", "介面回應缺少模型清單" },
+
+    // ---- 4.4-b：请求链路的错误信息 ----
+    ImageBlockedHost => { "{} 指向本机或内网地址，已阻止加载", "{} points to a local or private address; loading was blocked", "{} は本機またはプライベートアドレスを指しているため、読み込みをブロックしました", "{} 指向本機或內網位址，已阻止載入" },
+    ImageTooManyRedirects => { "图片重定向次数过多", "Too many image redirects", "画像のリダイレクトが多すぎます", "圖片重新導向次數過多" },
+    ImageRedirectBlocked => { "图片重定向到了本机或内网地址，已阻止", "The image redirected to a local or private address; blocked", "画像が本機またはプライベートアドレスへリダイレクトされたため、ブロックしました", "圖片重新導向到了本機或內網位址，已阻止" },
+    ImageOnlyHttp => { "只支持 http/https 图片: {}", "Only http/https images are supported: {}", "http/https の画像のみ対応しています: {}", "只支援 http/https 圖片: {}" },
+    ImageBlockedAddress => { "不加载本机或内网地址的图片", "Images from local or private addresses are not loaded", "本機またはプライベートアドレスの画像は読み込みません", "不載入本機或內網位址的圖片" },
+    ImageRequestCancelled => { "图片请求已取消", "The image request was cancelled", "画像リクエストがキャンセルされました", "圖片請求已取消" },
+    ImageDownloadFailed => { "无法下载图片 {}: {}", "Could not download the image {}: {}", "画像をダウンロードできません {}: {}", "無法下載圖片 {}: {}" },
+    ImageTooLarge => { "图片过大（超过 16MB）: {}", "The image is too large (over 16 MB): {}", "画像が大きすぎます（16MB 超）: {}", "圖片過大（超過 16MB）: {}" },
+    ImageReadFailed => { "读取图片失败 {}: {}", "Failed to read the image {}: {}", "画像の読み込みに失敗しました {}: {}", "讀取圖片失敗 {}: {}" },
+    ClipboardSvgUnsupported => { "暂不支持粘贴 SVG 图片", "Pasting SVG images is not supported yet", "SVG 画像の貼り付けにはまだ対応していません", "尚未支援貼上 SVG 圖片" },
+    ClipboardImageUnrecognized => { "剪贴板里的图片无法识别：{}", "The image in the clipboard is not recognised: {}", "クリップボードの画像を判別できません：{}", "剪貼簿裡的圖片無法辨識：{}" },
+    ClipboardImageConvertFailed => { "剪贴板图片转换失败：{}", "Failed to convert the clipboard image: {}", "クリップボード画像の変換に失敗しました：{}", "剪貼簿圖片轉換失敗：{}" },
+    AttachmentTooLarge => { "文件有 {} MB，超过了 {} MB 的上限", "The file is {} MB, over the {} MB limit", "ファイルは {} MB で、上限の {} MB を超えています", "檔案有 {} MB，超過了 {} MB 的上限" },
+    BackupParseFailed => { "备份文件无法解析: {}", "The backup file could not be parsed: {}", "バックアップファイルを解析できません: {}", "備份檔案無法解析: {}" },
+    BackupVersionUnsupported => { "不支持的备份版本: {}", "Unsupported backup version: {}", "対応していないバックアップバージョンです: {}", "不支援的備份版本: {}" },
+    MigrationCopyDir => { "{} 复制到 {} 失败，继续使用旧目录", "Failed to copy {} to {}; continuing with the old directory", "{} を {} へコピーできませんでした。旧ディレクトリを引き続き使用します", "{} 複製到 {} 失敗，繼續使用舊目錄" },
+    MigrationCopyFile => { "{} 复制为 {} 失败: {}", "Failed to copy {} to {}: {}", "{} を {} へコピーできませんでした: {}", "{} 複製為 {} 失敗: {}" },
 }
 
 /// 按顺序替换文案里的 `{}` 占位符。

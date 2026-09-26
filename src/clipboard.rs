@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 use gpui_kit::{ClipboardEntry, Image, ImageFormat};
 
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
+
 /// 一次粘贴应该怎么处理
 #[derive(Debug)]
 pub enum PastePayload {
@@ -78,7 +80,7 @@ pub struct PreparedImage {
 
 /// 把剪贴板图片转成常见格式：PNG、JPEG、WebP、GIF 原样保留，
 /// 其余（Windows 截图读出来是 BMP）解码后重新编码成 PNG。大图解码较慢，在后台线程调用。
-pub fn prepare_image(image: &Image) -> Result<PreparedImage, String> {
+pub fn prepare_image(image: &Image, lang: AppLanguage) -> Result<PreparedImage, String> {
     let keep = |extension, mime| {
         Ok(PreparedImage {
             bytes: image.bytes.clone(),
@@ -95,14 +97,14 @@ pub fn prepare_image(image: &Image) -> Result<PreparedImage, String> {
         ImageFormat::Tiff => image::ImageFormat::Tiff,
         ImageFormat::Ico => image::ImageFormat::Ico,
         ImageFormat::Pnm => image::ImageFormat::Pnm,
-        ImageFormat::Svg => return Err("暂不支持粘贴 SVG 图片".into()),
+        ImageFormat::Svg => return Err(tr(lang, Key::ClipboardSvgUnsupported).into()),
     };
     let decoded = image::load_from_memory_with_format(&image.bytes, source_format)
-        .map_err(|error| format!("剪贴板里的图片无法识别：{error}"))?;
+        .map_err(|error| tr_args(lang, Key::ClipboardImageUnrecognized, &[&error.to_string()]))?;
     let mut png = Cursor::new(Vec::new());
     decoded
         .write_to(&mut png, image::ImageFormat::Png)
-        .map_err(|error| format!("剪贴板图片转换失败：{error}"))?;
+        .map_err(|error| tr_args(lang, Key::ClipboardImageConvertFailed, &[&error.to_string()]))?;
     Ok(PreparedImage {
         bytes: png.into_inner(),
         extension: "png",
@@ -174,15 +176,19 @@ mod tests {
     #[test]
     fn bitmaps_become_png_and_common_formats_are_kept() {
         let png = encode(image::ImageFormat::Png);
-        let kept = prepare_image(&image(ImageFormat::Png, png.clone())).unwrap();
+        let kept = prepare_image(&image(ImageFormat::Png, png.clone()), AppLanguage::ZhCn).unwrap();
         assert_eq!((kept.bytes, kept.extension, kept.mime), (png, "png", "image/png"));
 
-        let converted = prepare_image(&image(ImageFormat::Bmp, encode(image::ImageFormat::Bmp))).unwrap();
+        let converted = prepare_image(
+            &image(ImageFormat::Bmp, encode(image::ImageFormat::Bmp)),
+            AppLanguage::ZhCn,
+        )
+        .unwrap();
         assert_eq!(converted.extension, "png");
         let decoded = image::load_from_memory_with_format(&converted.bytes, image::ImageFormat::Png).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (4, 3));
 
-        assert!(prepare_image(&image(ImageFormat::Bmp, b"not an image".to_vec())).is_err());
-        assert!(prepare_image(&image(ImageFormat::Svg, b"<svg/>".to_vec())).is_err());
+        assert!(prepare_image(&image(ImageFormat::Bmp, b"not an image".to_vec()), AppLanguage::ZhCn).is_err());
+        assert!(prepare_image(&image(ImageFormat::Svg, b"<svg/>".to_vec()), AppLanguage::ZhCn).is_err());
     }
 }
