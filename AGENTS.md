@@ -98,7 +98,7 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 
 ### 3.3 规模
 
-- 单个文件（不算测试）超过 **800 行** 就要拆。目前超标的是 `ui/chat.rs`、`session_ops.rs`、`ui/settings.rs`、`app.rs`、`ui/dialogs.rs`（完整清单见 [§13](#13-技术债清单) #1）：新功能不要再往里加；改到其中某块时，顺手把那块拆成新文件。
+- 单个文件（不算测试）超过 **800 行** 就要拆。目前没有超标文件（最大的 `llm.rs` 非测试 796 行）：新功能不要再往大文件里加；改到其中某块时，顺手把那块拆成新文件。
 - 界面函数超过约 100 行，或链式调用嵌套超过 4 层，拆出 `render_xxx` 子函数。
 - 每个 `xxx_ops.rs` 只负责一个领域，例如会话、模型、附件、渠道。
 
@@ -400,17 +400,16 @@ cx.spawn(async move |this, cx| {
 
 | # | 问题 | 位置 | 处理 |
 | --- | --- | --- | --- |
-| 1 | 文件过大（§3.3 红线 800 行，按"不算测试"口径） | `ui/chat.rs`（2222）、`session_ops.rs`（1308）、`ui/settings.rs`（1082）、`app.rs`（1023）、`ui/dialogs.rs`（966） | 按功能拆分，如消息操作、流式回复、备份导入（附件与粘贴已拆到 `attachment_ops.rs`）。注：`llm.rs` 总 1051 行，测试占 253 行、非测试 798 行，未超标 |
-| 2 | 约 600 处写死中文，只有 24 处 `tr()`；`tr` 遇到未知 key 返回空字符串 | `ui/*`、`i18n.rs` | ⚠ 国际化方案待定 |
-| 3 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
-| 4 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
-| 5 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
-| 6 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
-| 7 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
-| 8 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
-| 9 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
-| 10 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
-| 11 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/chat.rs`、`ui/dialogs.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
+| 1 | 约 600 处写死中文，只有 24 处 `tr()`；`tr` 遇到未知 key 返回空字符串 | `ui/*`、`i18n.rs` | ⚠ 国际化方案待定 |
+| 2 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
+| 3 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
+| 4 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
+| 5 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
+| 6 | 重复的小组件：`filter_chip` 和 `chip`、`labeled` 和 `row_title`、`section` 和 `form_card` | `ui/*` | 合并到 `ui/widgets.rs` |
+| 7 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
+| 8 | OpenAI Responses 渠道仍按 Chat Completions 格式发请求 | `llm.rs` | 修好之前不要推荐用户使用 |
+| 9 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
+| 10 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
 
