@@ -3,6 +3,7 @@
 use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel};
+use crate::i18n::{Key, tr, tr_args};
 use crate::model::ChatParams;
 use crate::prompts::{PromptPreset, PromptTemplate, expand_variables};
 
@@ -57,7 +58,7 @@ impl AppState {
         let body = self.prompt_body_input.read(cx).value().to_string();
         let icon = self.prompt_icon_input.read(cx).value().trim().to_string();
         if name.is_empty() || body.trim().is_empty() {
-            self.toast(ToastLevel::Error, "名称和内容不能为空");
+            self.toast(ToastLevel::Error, tr(self.language(), Key::NameAndBodyRequired));
             cx.notify();
             return false;
         }
@@ -100,9 +101,12 @@ impl AppState {
         self.prompt_body_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Err(error) = self.prompts.save() {
-            self.toast(ToastLevel::Error, format!("保存失败: {error}"));
+            self.toast(
+                ToastLevel::Error,
+                tr_args(self.language(), Key::SaveFailed, &[&error.to_string()]),
+            );
         } else {
-            self.toast(ToastLevel::Success, "已保存");
+            self.toast(ToastLevel::Success, tr(self.language(), Key::Saved));
         }
         cx.notify();
         true
@@ -115,7 +119,10 @@ impl AppState {
             self.prompts.presets.retain(|preset| preset.id != id);
         }
         if let Err(error) = self.prompts.save() {
-            self.toast(ToastLevel::Error, format!("删除失败: {error}"));
+            self.toast(
+                ToastLevel::Error,
+                tr_args(self.language(), Key::DeleteFailed, &[&error.to_string()]),
+            );
         }
         cx.notify();
     }

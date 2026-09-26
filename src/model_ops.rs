@@ -2,7 +2,7 @@ use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel};
 use crate::config::ModelConfig;
-use crate::i18n::{Key, tr_args};
+use crate::i18n::{Key, tr, tr_args};
 use crate::model::ReasoningLevel;
 use crate::model_info::{self, Capability, TokenParseError};
 
@@ -242,7 +242,7 @@ impl AppState {
         };
         let name = self.model_edit_name_input.read(cx).value().trim().to_string();
         if id.is_empty() {
-            self.toast(ToastLevel::Error, "模型 ID 不能为空");
+            self.toast(ToastLevel::Error, tr(self.language(), Key::ModelIdRequired));
             cx.notify();
             return false;
         }
@@ -263,7 +263,10 @@ impl AppState {
                     .any(|model| model.id == id && editor.original_id.as_deref() != Some(id.as_str()))
             });
         if duplicate {
-            self.toast(ToastLevel::Error, format!("这个渠道已经有模型「{id}」了"));
+            self.toast(
+                ToastLevel::Error,
+                tr_args(self.language(), Key::ModelAlreadyExists, &[&id]),
+            );
             cx.notify();
             return false;
         }
@@ -291,19 +294,23 @@ impl AppState {
         match self.config.save() {
             Ok(()) => {
                 self.model_editor = None;
+                let lang = self.language();
                 self.toast(
                     ToastLevel::Success,
                     if is_new {
-                        "模型已添加"
+                        tr(lang, Key::ModelAdded)
                     } else {
-                        "模型设置已保存"
+                        tr(lang, Key::ModelSaved)
                     },
                 );
                 cx.notify();
                 true
             }
             Err(error) => {
-                self.toast(ToastLevel::Error, format!("模型保存失败: {error}"));
+                self.toast(
+                    ToastLevel::Error,
+                    tr_args(self.language(), Key::ModelSaveFailed, &[&error.to_string()]),
+                );
                 cx.notify();
                 false
             }

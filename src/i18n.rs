@@ -544,6 +544,19 @@ i18n! {
     BackupVersionUnsupported => { "不支持的备份版本: {}", "Unsupported backup version: {}", "対応していないバックアップバージョンです: {}", "不支援的備份版本: {}" },
     MigrationCopyDir => { "{} 复制到 {} 失败，继续使用旧目录", "Failed to copy {} to {}; continuing with the old directory", "{} を {} へコピーできませんでした。旧ディレクトリを引き続き使用します", "{} 複製到 {} 失敗，繼續使用舊目錄" },
     MigrationCopyFile => { "{} 复制为 {} 失败: {}", "Failed to copy {} to {}: {}", "{} を {} へコピーできませんでした: {}", "{} 複製為 {} 失敗: {}" },
+
+    // ---- 4.4-c：图片与文件链路 ----
+    ModelIdRequired => { "模型 ID 不能为空", "The model ID cannot be empty", "モデル ID は必須です", "模型 ID 不能為空" },
+    ModelAlreadyExists => { "这个渠道已经有模型「{}」了", "This provider already has a model named “{}”", "このプロバイダーには既にモデル「{}」があります", "這個管道已經有模型「{}」了" },
+    ModelAdded => { "模型已添加", "Model added", "モデルを追加しました", "模型已新增" },
+    ModelSaved => { "模型设置已保存", "Model settings saved", "モデル設定を保存しました", "模型設定已儲存" },
+    ModelSaveFailed => { "模型保存失败: {}", "Failed to save the model: {}", "モデルの保存に失敗しました: {}", "模型儲存失敗: {}" },
+    NameAndBodyRequired => { "名称和内容不能为空", "The name and the content cannot be empty", "名前と内容は必須です", "名稱和內容不能為空" },
+    SaveFailed => { "保存失败: {}", "Failed to save: {}", "保存に失敗しました: {}", "儲存失敗: {}" },
+    Saved => { "已保存", "Saved", "保存しました", "已儲存" },
+    DeleteFailed => { "删除失败: {}", "Failed to delete: {}", "削除に失敗しました: {}", "刪除失敗: {}" },
+    DefaultPresetName => { "通用助手", "General assistant", "汎用アシスタント", "通用助手" },
+    PresetExplainCodeTemplate => { "请逐段解释下面这段代码：\n{{selection}}", "Please explain the following code section by section://n{{selection}}", "以下のコードを順を追って解説してください：\n{{selection}}", "請逐段解釋下面這段程式碼：\n{{selection}}" },
 }
 
 /// 按顺序替换文案里的 `{}` 占位符。

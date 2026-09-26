@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use uuid::Uuid;
 
+use crate::i18n::{AppLanguage, Key, tr};
 use crate::model::ChatParams;
 use crate::paths::{PROMPTS_FILE, data_file, write_atomic};
 
@@ -36,10 +37,14 @@ pub struct PromptLibrary {
 }
 
 impl PromptLibrary {
-    pub fn load() -> Self {
+    /// 读提示词库。文件不存在时按 `lang` 生成一份内置的，并落盘。
+    ///
+    /// 内置内容只在**首次运行**时生成：之后就是用户自己的数据了，换界面语言不该改动它。
+    /// 所以这里传语言是安全的——它只影响"种子内容"，不会让已有数据变脸。
+    pub fn load(lang: AppLanguage) -> Self {
         let path = data_file(PROMPTS_FILE);
         if !path.exists() {
-            let library = Self::defaults();
+            let library = Self::defaults(lang);
             // 写不进去也无所谓：默认提示词库是代码里生成的，下次启动会再建一遍
             let _ = library.save();
             return library;
@@ -56,11 +61,13 @@ impl PromptLibrary {
         write_atomic(&data_file(PROMPTS_FILE), &json)
     }
 
-    pub fn defaults() -> Self {
+    /// 内置的预设与模板。文案复用界面文案里已有的 `Preset*` key——
+    /// 空状态那四个快捷入口用的是同一批字符串，没必要再抄一份。
+    pub fn defaults(lang: AppLanguage) -> Self {
         Self {
             presets: vec![PromptPreset {
                 id: Uuid::new_v4().to_string(),
-                name: "通用助手".into(),
+                name: tr(lang, Key::DefaultPresetName).into(),
                 icon: "✨".into(),
                 system_prompt: String::new(),
                 provider_id: String::new(),
@@ -68,16 +75,13 @@ impl PromptLibrary {
                 params: ChatParams::default(),
             }],
             templates: vec![
+                template(tr(lang, Key::PresetTranslate), tr(lang, Key::PresetTranslatePrompt)),
+                template(tr(lang, Key::PresetPolish), tr(lang, Key::PresetPolishPrompt)),
+                template(tr(lang, Key::PresetSummary), tr(lang, Key::PresetSummaryPrompt)),
                 template(
-                    "翻译",
-                    "请把下面的内容翻译成英文（如果原文是英文则翻译成中文），保留原有格式：\n",
+                    tr(lang, Key::PresetExplainCode),
+                    tr(lang, Key::PresetExplainCodeTemplate),
                 ),
-                template(
-                    "润色文字",
-                    "请帮我润色下面这段文字，使表达更通顺专业，并说明主要改动：\n",
-                ),
-                template("总结要点", "请用要点的形式总结下面的内容：\n"),
-                template("解释代码", "请逐段解释下面这段代码：\n{{selection}}"),
             ],
         }
     }

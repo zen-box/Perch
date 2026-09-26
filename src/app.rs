@@ -271,7 +271,7 @@ impl AppState {
         let prompt_body_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let folder_name_input = cx.new(|cx| InputState::new(window, cx));
         let model_fetch_search = cx.new(|cx| InputState::new(window, cx));
-        let prompts = PromptLibrary::load();
+        let prompts = PromptLibrary::load(lang);
 
         let subscriptions = vec![
             cx.subscribe_in(&chat_input, window, |this, _, event: &InputEvent, window, cx| {
