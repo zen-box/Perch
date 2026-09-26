@@ -10,6 +10,7 @@ use super::chat::{attachment_badge, format_msg_time, preview};
 use super::markdown_image::open_local_image_viewer;
 use super::{Palette, dialogs};
 use crate::app::AppState;
+use crate::i18n::{AppLanguage, Key, tr};
 use crate::model::{Attachment, ChatMessage};
 
 fn render_message_attachments(app: &Entity<AppState>, attachments: &[Attachment], p: &Palette) -> impl IntoElement {
@@ -117,6 +118,7 @@ pub(super) fn render_user_message(
     ix: usize,
     msg: ChatMessage,
     streaming: bool,
+    lang: AppLanguage,
     p: &Palette,
 ) -> impl IntoElement {
     let copy_app = app.clone();
@@ -182,7 +184,7 @@ pub(super) fn render_user_message(
                         .ghost()
                         .xsmall()
                         .icon(IconName::Copy)
-                        .tooltip("复制")
+                        .tooltip(tr(lang, Key::Copy))
                         .on_click(move |_, _, cx| {
                             copy_app.update(cx, |this, cx| this.copy_to_clipboard(&copy_text, cx));
                         }),
@@ -192,7 +194,7 @@ pub(super) fn render_user_message(
                         .ghost()
                         .xsmall()
                         .icon(IconName::Pencil)
-                        .tooltip("编辑并重发")
+                        .tooltip(tr(lang, Key::EditAndResend))
                         .disabled(streaming)
                         .on_click(move |_, window, cx| {
                             dialogs::open_edit_message_dialog(edit_app.clone(), window, cx);
@@ -204,7 +206,7 @@ pub(super) fn render_user_message(
                         .ghost()
                         .xsmall()
                         .icon(IconName::Quote)
-                        .tooltip("引用")
+                        .tooltip(tr(lang, Key::Quote))
                         .on_click(move |_, _, cx| quote_app.update(cx, |this, cx| this.quote_message(&quote_id, cx))),
                 )
                 .child(
@@ -212,7 +214,7 @@ pub(super) fn render_user_message(
                         .ghost()
                         .xsmall()
                         .icon(IconName::Trash)
-                        .tooltip("删除")
+                        .tooltip(tr(lang, Key::Delete))
                         .disabled(streaming)
                         .on_click(move |_, _, cx| {
                             delete_app.update(cx, |this, cx| this.delete_message(&delete_id, cx))

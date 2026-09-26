@@ -10,11 +10,17 @@ use gpui_kit_assets::IconName;
 use super::chat::{attachment_badge, preview};
 use super::{CONTENT_MAX_WIDTH, Palette, model_picker};
 use crate::app::AppState;
+use crate::i18n::{AppLanguage, Key, tr};
 use crate::model::Attachment;
 
 // ================= 输入框 =================
 
-fn render_pending_attachments(attachments: &[Attachment], p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+fn render_pending_attachments(
+    attachments: &[Attachment],
+    p: &Palette,
+    lang: AppLanguage,
+    cx: &mut Context<AppState>,
+) -> impl IntoElement {
     h_flex()
         .gap_2()
         .px_3()
@@ -84,7 +90,7 @@ fn render_pending_attachments(attachments: &[Attachment], p: &Palette, cx: &mut 
                         .ghost()
                         .xsmall()
                         .icon(IconName::X)
-                        .tooltip("移除")
+                        .tooltip(tr(lang, Key::Remove))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.remove_pending_attachment(&id, cx);
                         })),
@@ -123,6 +129,7 @@ fn is_current_model_vision_capable(state: &AppState) -> bool {
 }
 
 pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+    let lang = state.language();
     let is_streaming = state.is_streaming;
     let draft = state.chat_input.read(cx).value().to_string();
     let has_attachments = !state.pending_attachments.is_empty();
@@ -136,8 +143,10 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
         .w_full()
         .max_w(CONTENT_MAX_WIDTH)
         .gap_2()
-        .when(!slash.is_empty(), |this| this.child(render_slash_menu(slash, p, cx)))
-        .when_some(quote, |this, quote| this.child(render_quote_chip(&quote, p, cx)))
+        .when(!slash.is_empty(), |this| {
+            this.child(render_slash_menu(slash, p, lang, cx))
+        })
+        .when_some(quote, |this, quote| this.child(render_quote_chip(&quote, p, lang, cx)))
         .child(
             v_flex()
                 .w_full()
@@ -147,7 +156,7 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                 .bg(p.background)
                 .shadow_sm()
                 .when(has_attachments, |this| {
-                    this.child(render_pending_attachments(&state.pending_attachments, p, cx))
+                    this.child(render_pending_attachments(&state.pending_attachments, p, lang, cx))
                 })
                 .when(has_images && !is_vision, |this| {
                     this.child(
@@ -165,7 +174,7 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                 div()
                                     .text_xs()
                                     .text_color(p.warning)
-                                    .child("提示：当前选中的模型未标注视觉能力，建议切换为支持视觉的多模态模型"),
+                                    .child(tr(lang, Key::VisionNotSupportedHint)),
                             ),
                     )
                 })
@@ -198,7 +207,7 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                         .ghost()
                                         .small()
                                         .icon(IconName::Paperclip)
-                                        .tooltip("添加附件 (图片/文档/表格/代码)")
+                                        .tooltip(tr(lang, Key::AddAttachment))
                                         .on_click(cx.listener(|this, _, _, cx| this.pick_attachments(cx))),
                                 )
                                 .child(model_picker::render_model_picker(state, p, cx))
@@ -211,7 +220,7 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                 .small()
                                 .rounded(px(999.))
                                 .icon(IconName::Square)
-                                .tooltip("停止生成")
+                                .tooltip(tr(lang, Key::StopGenerating))
                                 .on_click(cx.listener(|this, _, _, cx| this.cancel_streaming(cx)))
                         } else {
                             Button::new("send")
@@ -220,9 +229,9 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                 .rounded(px(999.))
                                 .icon(IconName::ArrowUp)
                                 .tooltip(if state.compare_selection.is_empty() {
-                                    "发送 (Enter)"
+                                    tr(lang, Key::SendEnter)
                                 } else {
-                                    "对比发送 (Enter)"
+                                    tr(lang, Key::SendCompareEnter)
                                 })
                                 .disabled(input_empty)
                                 .on_click(cx.listener(|this, _, window, cx| this.send_message(window, cx)))
@@ -231,7 +240,7 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
         )
 }
 
-fn render_quote_chip(quote: &str, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
+fn render_quote_chip(quote: &str, p: &Palette, lang: AppLanguage, cx: &mut Context<AppState>) -> impl IntoElement {
     h_flex()
         .gap_2()
         .px_3()
@@ -253,7 +262,7 @@ fn render_quote_chip(quote: &str, p: &Palette, cx: &mut Context<AppState>) -> im
                 .ghost()
                 .xsmall()
                 .icon(IconName::X)
-                .tooltip("取消引用")
+                .tooltip(tr(lang, Key::ClearQuote))
                 .on_click(cx.listener(|this, _, _, cx| this.clear_quote(cx))),
         )
 }
@@ -277,6 +286,7 @@ fn slash_matches(state: &AppState, draft: &str) -> Vec<(String, String, String)>
 fn render_slash_menu(
     items: Vec<(String, String, String)>,
     p: &Palette,
+    lang: AppLanguage,
     cx: &mut Context<AppState>,
 ) -> impl IntoElement {
     v_flex()
@@ -293,7 +303,7 @@ fn render_slash_menu(
                 .py_1p5()
                 .text_xs()
                 .text_color(p.muted_foreground)
-                .child("提示词模板 · 回车或点击插入"),
+                .child(tr(lang, Key::PromptTemplateHint)),
         )
         .children(items.into_iter().enumerate().map(|(ix, (id, name, body))| {
             h_flex()

@@ -217,8 +217,9 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
     };
 
     let p = Palette::new(cx);
+    let lang = app.read(cx).language();
     let content = if msg.role == "user" {
-        message_user::render_user_message(app, ix, msg, streaming, &p).into_any_element()
+        message_user::render_user_message(app, ix, msg, streaming, lang, &p).into_any_element()
     } else {
         let (avatar, model_label) = match owner {
             Some(model) => (model_avatar(&model, px(28.), &p), model.name.clone()),

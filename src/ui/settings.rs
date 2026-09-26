@@ -34,7 +34,7 @@ fn render_nav(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl
             tr(lang, Key::GeneralSettings),
         ),
         (SettingsTab::Providers, IconName::Cloud, tr(lang, Key::ProviderSettings)),
-        (SettingsTab::Prompts, IconName::BookOpen, "提示词"),
+        (SettingsTab::Prompts, IconName::BookOpen, tr(lang, Key::PromptTemplates)),
         (SettingsTab::McpServers, IconName::Plug, tr(lang, Key::McpSettings)),
         (SettingsTab::About, IconName::Info, tr(lang, Key::AboutSettings)),
     ];

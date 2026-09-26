@@ -11,6 +11,7 @@ use super::Palette;
 use super::brand_icon::{model_avatar, model_id_avatar};
 use super::chat::markdown_view;
 use crate::app::AppState;
+use crate::i18n::{Key, tr};
 use crate::model::ChatMessage;
 
 pub(super) fn render_variants(
@@ -20,6 +21,7 @@ pub(super) fn render_variants(
     p: &Palette,
     cx: &mut App,
 ) -> impl IntoElement {
+    let lang = app.read(cx).language();
     let (owners, expanded_ids) = {
         let state = app.read(cx);
         let owners: Vec<Option<crate::config::ModelConfig>> = msg
@@ -90,7 +92,7 @@ pub(super) fn render_variants(
                                 Button::new(SharedString::from(format!("adopt-{ix}-{variant_ix}")))
                                     .xsmall()
                                     .primary()
-                                    .label("采用")
+                                    .label(tr(lang, Key::Adopt))
                                     .disabled(variant.is_streaming)
                                     .on_click(move |_, _, cx| {
                                         adopt_app
@@ -124,9 +126,9 @@ pub(super) fn render_variants(
                                         .child(Icon::new(IconName::Brain).size(px(14.)))
                                         .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(
                                             if variant_thinking {
-                                                "正在思考…"
+                                                tr(lang, Key::Thinking)
                                             } else {
-                                                "思考过程"
+                                                tr(lang, Key::ThinkingProcess)
                                             },
                                         ))
                                         .child(
@@ -161,7 +163,7 @@ pub(super) fn render_variants(
                                 .text_sm()
                                 .text_color(p.muted_foreground)
                                 .child(Spinner::new().small())
-                                .child("正在生成…"),
+                                .child(tr(lang, Key::Generating)),
                         )
                     })
                     .when(variant_has_content, |this| {
@@ -193,7 +195,7 @@ pub(super) fn render_variants(
             div()
                 .text_xs()
                 .text_color(p.muted_foreground)
-                .child("模型对比输出中，采用一条后继续对话："),
+                .child(tr(lang, Key::ComparePickHint)),
         )
         .child(h_flex().w_full().items_start().gap_3().children(columns))
 }

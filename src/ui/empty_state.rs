@@ -8,6 +8,7 @@ use gpui_kit_assets::IconName;
 
 use super::{Palette, icon_tile, model_picker};
 use crate::app::AppState;
+use crate::i18n::{Key, tr};
 
 // ================= 空状态 =================
 
@@ -21,7 +22,7 @@ pub(super) fn render_empty_state(state: &AppState, p: &Palette, cx: &mut Context
             model_picker::current_model_label(state)
         )
     } else {
-        "还没有配置模型渠道，先添加一个吧".to_string()
+        tr(lang, Key::EmptyNoProviderHint).to_string()
     };
 
     v_flex()
@@ -41,7 +42,7 @@ pub(super) fn render_empty_state(state: &AppState, p: &Palette, cx: &mut Context
                     div()
                         .text_2xl()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child("今天想聊点什么？"),
+                        .child(tr(lang, Key::EmptyGreeting)),
                 )
                 .child(div().text_sm().text_color(p.muted_foreground).child(subtitle)),
         )
@@ -86,55 +87,49 @@ pub(super) fn render_empty_state(state: &AppState, p: &Palette, cx: &mut Context
                 .child(render_suggestion(
                     "suggest-translate",
                     IconName::Languages,
-                    "翻译",
-                    "中英互译，保留原文格式",
+                    tr(lang, Key::PresetTranslate),
+                    tr(lang, Key::PresetTranslateDesc),
                     p,
-                    cx.listener(|this, _, window, cx| {
-                        this.fill_chat_input(
-                            "请把下面的内容翻译成英文（如果原文是英文则翻译成中文），保留原有格式：\n",
-                            window,
-                            cx,
-                        )
+                    cx.listener(move |this, _, window, cx| {
+                        this.fill_chat_input(tr(lang, Key::PresetTranslatePrompt), window, cx)
                     }),
                 ))
                 .child(render_suggestion(
                     "suggest-polish",
                     IconName::PencilLine,
-                    "润色文字",
-                    "让表达更通顺、更专业",
+                    tr(lang, Key::PresetPolish),
+                    tr(lang, Key::PresetPolishDesc),
                     p,
-                    cx.listener(|this, _, window, cx| {
-                        this.fill_chat_input(
-                            "请帮我润色下面这段文字，使表达更通顺专业，并说明主要改动：\n",
-                            window,
-                            cx,
-                        )
+                    cx.listener(move |this, _, window, cx| {
+                        this.fill_chat_input(tr(lang, Key::PresetPolishPrompt), window, cx)
                     }),
                 ))
                 .child(render_suggestion(
                     "suggest-summary",
                     IconName::FileText,
-                    "总结要点",
-                    "提炼长文的核心内容",
+                    tr(lang, Key::PresetSummary),
+                    tr(lang, Key::PresetSummaryDesc),
                     p,
-                    cx.listener(|this, _, window, cx| {
-                        this.fill_chat_input("请用要点的形式总结下面的内容：\n", window, cx)
+                    cx.listener(move |this, _, window, cx| {
+                        this.fill_chat_input(tr(lang, Key::PresetSummaryPrompt), window, cx)
                     }),
                 ))
                 .child(render_suggestion(
                     "suggest-explain",
                     IconName::Code,
-                    "解释一段代码",
-                    "粘贴代码，让 AI 逐段讲解",
+                    tr(lang, Key::PresetExplainCode),
+                    tr(lang, Key::PresetExplainCodeDesc),
                     p,
-                    cx.listener(|this, _, window, cx| this.fill_chat_input("请逐段解释下面这段代码：\n", window, cx)),
+                    cx.listener(move |this, _, window, cx| {
+                        this.fill_chat_input(tr(lang, Key::PresetExplainCodePrompt), window, cx)
+                    }),
                 ))
                 .into_any_element()
         } else {
             Button::new("empty-add-provider")
                 .primary()
                 .icon(IconName::Plus)
-                .label("添加模型渠道")
+                .label(tr(lang, Key::AddModelChannel))
                 .on_click(cx.listener(|this, _, window, cx| this.open_providers_settings(window, cx)))
                 .into_any_element()
         })

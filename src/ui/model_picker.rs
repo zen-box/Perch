@@ -11,6 +11,7 @@ use super::Palette;
 use super::brand_icon::{model_avatar, model_badges, model_id_avatar, provider_avatar};
 use crate::app::AppState;
 use crate::config::ModelConfig;
+use crate::i18n::{Key, tr};
 
 /// 当前对话使用的模型 ID，以及它在渠道里的配置（找不到时为空）
 fn current_model(state: &AppState) -> (String, Option<ModelConfig>) {
@@ -38,8 +39,9 @@ fn current_model(state: &AppState) -> (String, Option<ModelConfig>) {
 
 /// 当前模型的展示名（优先使用渠道里配置的显示名称）
 pub fn current_model_label(state: &AppState) -> String {
+    let lang = state.language();
     if state.config.providers.is_empty() {
-        return "未配置模型".to_string();
+        return tr(lang, Key::NoModelConfigured).to_string();
     }
     let (model_id, config) = current_model(state);
     config.map(|model| model.name).unwrap_or(model_id)
@@ -75,6 +77,7 @@ fn render_model_list(
     cx: &mut Context<PopoverState>,
 ) -> impl IntoElement + use<> {
     let p = Palette::new(cx);
+    let lang = app.read(cx).language();
     let (providers, active_provider_id, active_model, search_input) = {
         let state = app.read(cx);
         (
@@ -192,16 +195,16 @@ fn render_model_list(
                         .text_sm()
                         .text_color(p.muted_foreground)
                         .child(if query.is_empty() {
-                            "还没有可用的模型"
+                            tr(lang, Key::NoAvailableModel)
                         } else {
-                            "没有匹配的模型"
+                            tr(lang, Key::NoMatchingModel)
                         })
                         .child(
                             Button::new("goto-providers")
                                 .outline()
                                 .small()
                                 .icon(IconName::Settings)
-                                .label("管理模型渠道")
+                                .label(tr(lang, Key::ManageModelChannel))
                                 .on_click(cx.listener(move |popover, _, window, cx| {
                                     goto_app.update(cx, |this, cx| this.open_providers_settings(window, cx));
                                     popover.dismiss(window, cx);
