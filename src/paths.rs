@@ -10,13 +10,21 @@ pub const APP_NAME: &str = "Perch";
 /// 改名前的应用名。首次启动时据此把旧数据目录和旧凭据搬过来。
 pub const LEGACY_APP_NAME: &str = "PersonalControl";
 
+// 数据目录里的文件名。集中放在这里，改名时只要动这一处。
+
+pub const CONFIG_FILE: &str = "perch-config.json";
+pub const SESSIONS_FILE: &str = "perch-sessions.json";
+pub const DATABASE_FILE: &str = "perch.db";
+pub const PROMPTS_FILE: &str = "prompts.json";
+pub const MODELS_DEV_CACHE_FILE: &str = "models-dev-cache.json";
+
 /// 改名前的数据文件名 → 现在用的名字。
 ///
 /// 迁移一律用**复制**而不是改名：旧文件原样留着，万一新版有问题还能退回去。
 pub const LEGACY_FILES: &[(&str, &str)] = &[
-    ("personal-control-config.json", "perch-config.json"),
-    ("personal-control-sessions.json", "perch-sessions.json"),
-    ("personal-control.db", "perch.db"),
+    ("personal-control-config.json", CONFIG_FILE),
+    ("personal-control-sessions.json", SESSIONS_FILE),
+    ("personal-control.db", DATABASE_FILE),
 ];
 
 /// 应用数据目录：
@@ -122,6 +130,11 @@ pub fn attachments_dir() -> PathBuf {
 
 /// 先写临时文件再替换，避免写到一半时崩溃把数据弄坏
 pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
+    write_atomic_bytes(path, contents.as_bytes())
+}
+
+/// `write_atomic` 的字节版本，给图片缓存这类二进制数据用
+pub fn write_atomic_bytes(path: &Path, contents: &[u8]) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, contents)?;
     fs::rename(&tmp, path)

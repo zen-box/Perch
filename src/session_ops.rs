@@ -594,22 +594,21 @@ impl AppState {
             let _ = tx.send(file);
         });
 
-        let _ = cx
-            .spawn(async move |this, cx| {
-                let Ok(Some(path)) = rx.await else { return };
-                let loaded = backup::read_backup(&path);
-                let _ = this.update(cx, |state, cx| {
-                    match loaded {
-                        Ok(file) => {
-                            state.pending_import = Some(file);
-                            state.toast(ToastLevel::Info, "已读取备份，请确认是否恢复");
-                        }
-                        Err(error) => state.toast(ToastLevel::Error, error),
+        cx.spawn(async move |this, cx| {
+            let Ok(Some(path)) = rx.await else { return };
+            let loaded = backup::read_backup(&path);
+            let _ = this.update(cx, |state, cx| {
+                match loaded {
+                    Ok(file) => {
+                        state.pending_import = Some(file);
+                        state.toast(ToastLevel::Info, "已读取备份，请确认是否恢复");
                     }
-                    cx.notify();
-                });
-            })
-            .detach();
+                    Err(error) => state.toast(ToastLevel::Error, error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub fn confirm_import(&mut self, cx: &mut Context<Self>) {
@@ -1165,10 +1164,10 @@ impl AppState {
             if provider.api_key.is_empty() {
                 if let Some(existing) = old_keys.get(&provider.id) {
                     provider.api_key = existing.clone();
-                } else if !provider.api_key_ref.is_empty() {
-                    if let Ok(secret) = crate::config::load_provider_key(&provider.api_key_ref) {
-                        provider.api_key = secret;
-                    }
+                } else if !provider.api_key_ref.is_empty()
+                    && let Ok(secret) = crate::config::load_provider_key(&provider.api_key_ref)
+                {
+                    provider.api_key = secret;
                 }
             }
         }

@@ -1,6 +1,5 @@
-use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
@@ -13,16 +12,6 @@ use crate::config::AppConfig;
 
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
-/// 用户点击「加载」同意过的图片地址。
-///
-/// 对话里的远程图片默认不请求：模型回复可能被网页或文档里的提示词注入操纵，
-/// 把对话内容拼进图片链接发出去。只有用户点过的地址才会真正下载。
-#[allow(dead_code)]
-fn approved_urls() -> &'static Mutex<HashSet<String>> {
-    static APPROVED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    APPROVED.get_or_init(Default::default)
-}
-
 /// 统一图片地址的写法：只接受 http/https，去掉 `#` 片段，非 ASCII 字符转义。
 /// 渲染与下载两边都用它比较，避免同一地址因写法不同而对不上。
 pub fn normalize_image_url(raw: &str) -> Option<String> {
@@ -32,21 +21,6 @@ pub fn normalize_image_url(raw: &str) -> Option<String> {
     }
     url.set_fragment(None);
     Some(url.into())
-}
-
-#[allow(dead_code)]
-pub fn approve_image(url: &str) {
-    if let Some(url) = normalize_image_url(url) {
-        approved_urls()
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .insert(url);
-    }
-}
-
-#[allow(dead_code)]
-pub fn is_image_approved(url: &str) -> bool {
-    normalize_image_url(url).is_some()
 }
 
 /// 图片地址的主机名，用于在占位卡片上告诉用户图片来自哪里
@@ -297,16 +271,15 @@ impl HttpClient for ImageHttpClient {
 
 async fn fetch(client: &Client, method: &str, uri: &str) -> http_client::Result<Response<AsyncBody>> {
     let cache_file = image_cache_path(uri);
-    if method.eq_ignore_ascii_case("GET") {
-        if let Ok(bytes) = std::fs::read(&cache_file) {
-            if !bytes.is_empty() {
-                return http_client::http::Response::builder()
-                    .status(http_client::http::StatusCode::OK)
-                    .header(http_client::http::header::CONTENT_TYPE, "image/*")
-                    .body(AsyncBody::from(bytes))
-                    .map_err(|error| ImageError(error.to_string()).into());
-            }
-        }
+    if method.eq_ignore_ascii_case("GET")
+        && let Ok(bytes) = std::fs::read(&cache_file)
+        && !bytes.is_empty()
+    {
+        return http_client::http::Response::builder()
+            .status(http_client::http::StatusCode::OK)
+            .header(http_client::http::header::CONTENT_TYPE, "image/*")
+            .body(AsyncBody::from(bytes))
+            .map_err(|error| ImageError(error.to_string()).into());
     }
 
     let method_obj = reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET);
@@ -323,10 +296,10 @@ async fn fetch(client: &Client, method: &str, uri: &str) -> http_client::Result<
     let status = http_client::http::StatusCode::from_u16(response.status().as_u16())
         .unwrap_or(http_client::http::StatusCode::BAD_GATEWAY);
     let headers = response.headers().clone();
-    if let Some(length) = response.content_length() {
-        if length as usize > MAX_IMAGE_BYTES {
-            return failure(format!("图片过大（超过 16MB）: {uri}"));
-        }
+    if let Some(length) = response.content_length()
+        && length as usize > MAX_IMAGE_BYTES
+    {
+        return failure(format!("图片过大（超过 16MB）: {uri}"));
     }
     let mut body = Vec::new();
     let mut response = response;
@@ -342,7 +315,8 @@ async fn fetch(client: &Client, method: &str, uri: &str) -> http_client::Result<
     }
 
     if status.is_success() && method.eq_ignore_ascii_case("GET") && !body.is_empty() {
-        let _ = std::fs::write(&cache_file, &body);
+        // 缓存写失败不影响这次请求：图片已经在内存里了，下次重新下就是了
+        let _ = crate::paths::write_atomic_bytes(&cache_file, &body);
     }
 
     let mut builder = http_client::http::Response::builder().status(status);
@@ -393,7 +367,6 @@ mod tests {
     fn valid_public_images_pass_check_request() {
         let url = "https://example.com/image.png";
         assert!(check_request(url).is_ok());
-        assert!(is_image_approved(url));
         assert!(check_request("not-a-url").is_err());
     }
 
@@ -416,10 +389,10 @@ mod tests {
         assert!(!blocked("https://8.8.8.8/a.png"));
     }
 
+    /// 私网地址带查询串也一样拦掉：查询串不能把主机名解析绕过去
     #[test]
-    fn approved_private_address_is_still_rejected() {
+    fn private_address_with_query_is_rejected() {
         let url = "http://127.0.0.1:18765/leak.png?note=secret";
-        approve_image(url);
         assert!(check_request(url).is_err());
     }
 

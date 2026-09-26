@@ -8,10 +8,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::model_info::{Capability, ModelSpec};
-use crate::paths::{data_dir, write_atomic};
+use crate::paths::{MODELS_DEV_CACHE_FILE, data_dir, write_atomic};
 
 const MODELS_DEV_URL: &str = "https://models.dev/models.json";
-const CACHE_FILE_NAME: &str = "models-dev-cache.json";
 const CACHE_TTL_SECS: u64 = 86400; // 24 小时更新一次
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -96,10 +95,10 @@ impl ModelsDevRegistry {
         }
 
         // 如果包含版本后缀，也可以建一个基础别名（如 "claude-3-5-sonnet-20241022" -> "claude-3-5-sonnet"）
-        if let Some(stripped) = strip_version_suffix(&short_key) {
-            if !self.short.contains_key(stripped) {
-                self.short.insert(stripped.to_string(), entry);
-            }
+        if let Some(stripped) = strip_version_suffix(&short_key)
+            && !self.short.contains_key(stripped)
+        {
+            self.short.insert(stripped.to_string(), entry);
         }
     }
 
@@ -112,10 +111,10 @@ impl ModelsDevRegistry {
         if let Some(entry) = self.short.get(short_key) {
             return Some(entry.clone());
         }
-        if let Some(stripped) = strip_version_suffix(short_key) {
-            if let Some(entry) = self.short.get(stripped) {
-                return Some(entry.clone());
-            }
+        if let Some(stripped) = strip_version_suffix(short_key)
+            && let Some(entry) = self.short.get(stripped)
+        {
+            return Some(entry.clone());
         }
         None
     }
@@ -128,7 +127,7 @@ static REGISTRY: LazyLock<RwLock<ModelsDevRegistry>> = LazyLock::new(|| {
 });
 
 fn cache_file_path() -> PathBuf {
-    data_dir().join(CACHE_FILE_NAME)
+    data_dir().join(MODELS_DEV_CACHE_FILE)
 }
 
 /// 尝试从本地缓存文件恢复
@@ -157,16 +156,14 @@ fn load_from_cache(lock: &RwLock<ModelsDevRegistry>) {
 pub fn sync_cache_background(force: bool) {
     std::thread::spawn(move || {
         let path = cache_file_path();
-        if !force && path.exists() {
-            if let Ok(meta) = fs::metadata(&path) {
-                if let Ok(modified) = meta.modified() {
-                    if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
-                        if elapsed.as_secs() < CACHE_TTL_SECS {
-                            return; // 还在有效期内
-                        }
-                    }
-                }
-            }
+        if !force
+            && path.exists()
+            && let Ok(meta) = fs::metadata(&path)
+            && let Ok(modified) = meta.modified()
+            && let Ok(elapsed) = SystemTime::now().duration_since(modified)
+            && elapsed.as_secs() < CACHE_TTL_SECS
+        {
+            return; // 还在有效期内
         }
 
         let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
@@ -223,18 +220,16 @@ pub fn lookup_spec(model_id: &str) -> Option<ModelSpec> {
                 if !capabilities.contains(&Capability::Vision) {
                     capabilities.push(Capability::Vision);
                 }
-            } else if lower == "pdf" || lower == "file" || lower == "document" {
-                if !capabilities.contains(&Capability::Files) {
-                    capabilities.push(Capability::Files);
-                }
+            } else if (lower == "pdf" || lower == "file" || lower == "document")
+                && !capabilities.contains(&Capability::Files)
+            {
+                capabilities.push(Capability::Files);
             }
         }
     }
 
-    if entry.tool_call == Some(true) {
-        if !capabilities.contains(&Capability::Tools) {
-            capabilities.push(Capability::Tools);
-        }
+    if entry.tool_call == Some(true) && !capabilities.contains(&Capability::Tools) {
+        capabilities.push(Capability::Tools);
     }
 
     capabilities.sort();
@@ -259,17 +254,16 @@ pub fn lookup_cost(model_id: &str) -> Option<ModelCost> {
     // 1. 先查 models.dev 缓存中记录的官方价格
     {
         let reg = REGISTRY.read().unwrap_or_else(|poison| poison.into_inner());
-        if let Some(entry) = reg.lookup(model_id) {
-            if let Some(cost) = entry.cost {
-                if cost.input.is_some() || cost.output.is_some() {
-                    return Some(ModelCost {
-                        input: cost.input.unwrap_or(0.0),
-                        output: cost.output.unwrap_or(0.0),
-                        cache_read: cost.cache_read.unwrap_or(0.0),
-                        cache_write: cost.cache_write.unwrap_or(0.0),
-                    });
-                }
-            }
+        if let Some(entry) = reg.lookup(model_id)
+            && let Some(cost) = entry.cost
+            && (cost.input.is_some() || cost.output.is_some())
+        {
+            return Some(ModelCost {
+                input: cost.input.unwrap_or(0.0),
+                output: cost.output.unwrap_or(0.0),
+                cache_read: cost.cache_read.unwrap_or(0.0),
+                cache_write: cost.cache_write.unwrap_or(0.0),
+            });
         }
     }
 

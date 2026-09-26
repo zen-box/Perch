@@ -71,69 +71,77 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
         .child(Textarea::new(&prompt))
         .child(choice_row(
             app,
-            "temp",
-            "温度",
-            temperature
-                .map(|value| format!("{value:.1}"))
-                .unwrap_or_else(|| "默认".into()),
-            temperature,
-            vec![
-                (None, "默认"),
-                (Some(0.2), "0.2"),
-                (Some(0.7), "0.7"),
-                (Some(1.0), "1.0"),
-            ],
+            ChoiceRow {
+                id_prefix: "temp",
+                title: "温度",
+                current: temperature
+                    .map(|value| format!("{value:.1}"))
+                    .unwrap_or_else(|| "默认".into()),
+                selected: temperature,
+                options: vec![
+                    (None, "默认"),
+                    (Some(0.2), "0.2"),
+                    (Some(0.7), "0.7"),
+                    (Some(1.0), "1.0"),
+                ],
+            },
             &p,
             |value, this, cx| this.patch_params(cx, |params| params.temperature = value),
         ))
         .child(choice_row(
             app,
-            "top-p",
-            "top_p",
-            top_p
-                .map(|value| format!("{value:.2}"))
-                .unwrap_or_else(|| "默认".into()),
-            top_p,
-            vec![
-                (None, "默认"),
-                (Some(0.8), "0.8"),
-                (Some(0.95), "0.95"),
-                (Some(1.0), "1.0"),
-            ],
+            ChoiceRow {
+                id_prefix: "top-p",
+                title: "top_p",
+                current: top_p
+                    .map(|value| format!("{value:.2}"))
+                    .unwrap_or_else(|| "默认".into()),
+                selected: top_p,
+                options: vec![
+                    (None, "默认"),
+                    (Some(0.8), "0.8"),
+                    (Some(0.95), "0.95"),
+                    (Some(1.0), "1.0"),
+                ],
+            },
             &p,
             |value, this, cx| this.patch_params(cx, |params| params.top_p = value),
         ))
         .child(choice_row(
             app,
-            "max-tokens",
-            "最大 tokens",
-            max_tokens
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "默认".into()),
-            max_tokens,
-            vec![
-                (None, "默认"),
-                (Some(1024u32), "1024"),
-                (Some(4096), "4096"),
-                (Some(8192), "8192"),
-            ],
+            ChoiceRow {
+                id_prefix: "max-tokens",
+                title: "最大 tokens",
+                current: max_tokens
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "默认".into()),
+                selected: max_tokens,
+                options: vec![
+                    (None, "默认"),
+                    (Some(1024u32), "1024"),
+                    (Some(4096), "4096"),
+                    (Some(8192), "8192"),
+                ],
+            },
             &p,
             |value, this, cx| this.patch_params(cx, |params| params.max_tokens = value),
         ))
         .child(choice_row(
             app,
-            "context",
-            "上下文条数",
-            context_limit
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "全部".into()),
-            context_limit,
-            vec![
-                (None, "全部"),
-                (Some(10usize), "10"),
-                (Some(20), "20"),
-                (Some(40), "40"),
-            ],
+            ChoiceRow {
+                id_prefix: "context",
+                title: "上下文条数",
+                current: context_limit
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "全部".into()),
+                selected: context_limit,
+                options: vec![
+                    (None, "全部"),
+                    (Some(10usize), "10"),
+                    (Some(20), "20"),
+                    (Some(40), "40"),
+                ],
+            },
             &p,
             |value, this, cx| this.patch_params(cx, |params| params.context_limit = value),
         ))
@@ -212,16 +220,28 @@ fn labeled(title: String, value: String, p: &Palette, control: impl IntoElement)
         .into_any_element()
 }
 
-fn choice_row<T: Copy + PartialEq + 'static>(
-    app: &Entity<AppState>,
+/// 一行互斥选项的展示信息：`id_prefix` 用来生成按钮 id，`current` 是右侧显示的当前值文本。
+struct ChoiceRow<'a, T> {
     id_prefix: &'static str,
-    title: &str,
+    title: &'a str,
     current: String,
     selected: Option<T>,
     options: Vec<(Option<T>, &'static str)>,
+}
+
+fn choice_row<T: Copy + PartialEq + 'static>(
+    app: &Entity<AppState>,
+    row: ChoiceRow<'_, T>,
     p: &Palette,
     on_select: impl Fn(Option<T>, &mut AppState, &mut Context<AppState>) + 'static,
 ) -> AnyElement {
+    let ChoiceRow {
+        id_prefix,
+        title,
+        current,
+        selected,
+        options,
+    } = row;
     let on_select = std::rc::Rc::new(on_select);
     labeled(
         title.to_string(),

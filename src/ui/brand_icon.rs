@@ -13,6 +13,20 @@ const FALLBACK_COLORS: [u32; 10] = [
     0x3B82F6, 0x8B5CF6, 0xEC4899, 0xF97316, 0x10B981, 0x14B8A6, 0x6366F1, 0xEF4444, 0x0EA5E9, 0x84CC16,
 ];
 
+/// 彩色头像上叠加的文字色（白）
+const AVATAR_TEXT_ON_COLOR: u32 = 0xFFFFFF;
+
+/// 「思考」能力标签的紫色
+const THINKING_COLOR: u32 = 0x8B5CF6;
+
+// 附件类型图标的语义配色。和品牌色、能力色一样属于语义配色，集中在这里定义，
+// 界面代码不要再出现新的色值。
+pub const FILE_TYPE_PDF: Hsla = hsla(350.0 / 360.0, 0.85, 0.55, 1.0);
+pub const FILE_TYPE_CODE: Hsla = hsla(200.0 / 360.0, 0.90, 0.45, 1.0);
+pub const FILE_TYPE_SHEET: Hsla = hsla(145.0 / 360.0, 0.75, 0.40, 1.0);
+pub const FILE_TYPE_DOC: Hsla = hsla(215.0 / 360.0, 0.85, 0.55, 1.0);
+pub const FILE_TYPE_SLIDES: Hsla = hsla(25.0 / 360.0, 0.90, 0.50, 1.0);
+
 /// 品牌头像：品牌色底 + 图标。没有图标文件时显示品牌首字母，没有品牌时显示名字首字母。
 pub fn brand_avatar(brand: Option<&'static Brand>, label: &str, size: Pixels, p: &Palette) -> AnyElement {
     let Some(brand) = brand else {
@@ -65,7 +79,7 @@ fn letter_avatar(label: &str, size: Pixels) -> AnyElement {
         .size(size)
         .rounded(size * 0.28)
         .bg(rgb(FALLBACK_COLORS[hash as usize % FALLBACK_COLORS.len()]))
-        .text_color(rgb(0xFFFFFF))
+        .text_color(rgb(AVATAR_TEXT_ON_COLOR))
         .text_size(size * 0.5)
         .font_weight(FontWeight::SEMIBOLD)
         .flex()
@@ -110,7 +124,7 @@ pub fn capability_color(capability: Capability) -> Hsla {
 }
 
 pub fn thinking_color() -> Hsla {
-    rgb(0x8B5CF6).into()
+    rgb(THINKING_COLOR).into()
 }
 
 /// 模型列表里的小标签：上下文长度、思考、能力图标

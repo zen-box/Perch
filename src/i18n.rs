@@ -26,26 +26,6 @@ impl AppLanguage {
             AppLanguage::ZhTw => "zh-TW",
         }
     }
-
-    #[allow(dead_code)]
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            AppLanguage::ZhCn => "简体中文 (Simplified Chinese)",
-            AppLanguage::EnUs => "English (US)",
-            AppLanguage::JaJp => "日本語 (Japanese)",
-            AppLanguage::ZhTw => "繁體中文 (Traditional Chinese)",
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn code_tag(&self) -> &'static str {
-        match self {
-            AppLanguage::ZhCn => "CN",
-            AppLanguage::EnUs => "EN",
-            AppLanguage::JaJp => "JA",
-            AppLanguage::ZhTw => "TW",
-        }
-    }
 }
 
 /// 同步组件库自带文案（弹窗按钮等）的语言。组件库没有日语，日语时使用英文。

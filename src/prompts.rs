@@ -4,9 +4,7 @@ use std::fs;
 use uuid::Uuid;
 
 use crate::model::ChatParams;
-use crate::paths::{data_file, write_atomic};
-
-const FILE_NAME: &str = "prompts.json";
+use crate::paths::{PROMPTS_FILE, data_file, write_atomic};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PromptPreset {
@@ -39,23 +37,22 @@ pub struct PromptLibrary {
 
 impl PromptLibrary {
     pub fn load() -> Self {
-        let path = data_file(FILE_NAME);
+        let path = data_file(PROMPTS_FILE);
         if !path.exists() {
             let library = Self::defaults();
             let _ = library.save();
             return library;
         }
-        match fs::read_to_string(&path).and_then(|text| {
-            serde_json::from_str(&text).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
-        }) {
-            Ok(library) => library,
-            Err(_) => Self::default(),
-        }
+        fs::read_to_string(&path)
+            .and_then(|text| {
+                serde_json::from_str(&text).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+            })
+            .unwrap_or_default()
     }
 
     pub fn save(&self) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self)?;
-        write_atomic(&data_file(FILE_NAME), &json)
+        write_atomic(&data_file(PROMPTS_FILE), &json)
     }
 
     pub fn defaults() -> Self {

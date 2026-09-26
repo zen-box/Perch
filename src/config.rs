@@ -5,9 +5,7 @@ use std::path::Path;
 
 use crate::model::ReasoningLevel;
 use crate::model_info::{self, Capability, ModelSpec};
-use crate::paths::{APP_NAME, LEGACY_APP_NAME, data_file, write_atomic};
-
-const CONFIG_FILE: &str = "perch-config.json";
+use crate::paths::{APP_NAME, CONFIG_FILE, LEGACY_APP_NAME, data_file, write_atomic};
 
 /// 改名前的配置文件名。旧版本还会把它写在程序目录下，启动时顺手清掉里面的明文 API Key。
 const LEGACY_CONFIG_FILE: &str = "personal-control-config.json";
@@ -54,16 +52,6 @@ impl ChannelType {
             ChannelType::OpenAiResponses => "/responses",
             ChannelType::Gemini => "/models/{model}:streamGenerateContent",
             ChannelType::Claude => "/messages",
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn default_model(&self) -> &'static str {
-        match self {
-            ChannelType::OpenAiChat => "gpt-4o",
-            ChannelType::OpenAiResponses => "gpt-4o",
-            ChannelType::Gemini => "gemini-1.5-pro",
-            ChannelType::Claude => "claude-3-5-sonnet-20241022",
         }
     }
 }
@@ -498,11 +486,11 @@ impl AppConfig {
     }
 
     pub fn toggle_model_pinned(&mut self, provider_id: &str, model_id: &str) {
-        if let Some(p) = self.providers.iter_mut().find(|p| p.id == provider_id) {
-            if let Some(m) = p.models.iter_mut().find(|m| m.id == model_id) {
-                m.is_pinned = !m.is_pinned;
-                let _ = self.save();
-            }
+        if let Some(p) = self.providers.iter_mut().find(|p| p.id == provider_id)
+            && let Some(m) = p.models.iter_mut().find(|m| m.id == model_id)
+        {
+            m.is_pinned = !m.is_pinned;
+            let _ = self.save();
         }
     }
 }

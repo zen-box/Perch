@@ -45,18 +45,18 @@ fn effective_message_text(msg: &ChatMessageReq) -> String {
         parts.push(msg.content.clone());
     }
     for att in &msg.attachments {
-        if att.kind == AttachmentKind::Text {
-            if let Some(text) = crate::file_store::read_text(&att.path) {
-                let ext = std::path::Path::new(&att.name)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("");
-                let fence = if text.contains("```") { "````" } else { "```" };
-                parts.push(format!(
-                    "\n\n---\n**附件文件: {}**\n{fence}{ext}\n{text}\n{fence}",
-                    att.name
-                ));
-            }
+        if att.kind == AttachmentKind::Text
+            && let Some(text) = crate::file_store::read_text(&att.path)
+        {
+            let ext = std::path::Path::new(&att.name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            let fence = if text.contains("```") { "````" } else { "```" };
+            parts.push(format!(
+                "\n\n---\n**附件文件: {}**\n{fence}{ext}\n{text}\n{fence}",
+                att.name
+            ));
         }
     }
     parts.join("\n")
@@ -351,10 +351,9 @@ fn emit_complete(channel: ChannelType, value: &Value, tx: &UnboundedSender<Strea
             if let Some(text) = value
                 .pointer("/choices/0/message/reasoning_content")
                 .and_then(Value::as_str)
+                && !text.is_empty()
             {
-                if !text.is_empty() {
-                    let _ = tx.send(StreamEvent::Thinking(text.to_string()));
-                }
+                let _ = tx.send(StreamEvent::Thinking(text.to_string()));
             }
             if let Some(text) = value.pointer("/choices/0/message/content").and_then(Value::as_str) {
                 *completion_chars += text.chars().count();
@@ -409,16 +408,15 @@ fn emit_delta(channel: ChannelType, value: &Value, tx: &UnboundedSender<StreamEv
             if let Some(text) = value
                 .pointer("/choices/0/delta/reasoning_content")
                 .and_then(Value::as_str)
+                && !text.is_empty()
             {
-                if !text.is_empty() {
-                    let _ = tx.send(StreamEvent::Thinking(text.to_string()));
-                }
+                let _ = tx.send(StreamEvent::Thinking(text.to_string()));
             }
-            if let Some(text) = value.pointer("/choices/0/delta/content").and_then(Value::as_str) {
-                if !text.is_empty() {
-                    count += text.chars().count();
-                    let _ = tx.send(StreamEvent::Content(text.to_string()));
-                }
+            if let Some(text) = value.pointer("/choices/0/delta/content").and_then(Value::as_str)
+                && !text.is_empty()
+            {
+                count += text.chars().count();
+                let _ = tx.send(StreamEvent::Content(text.to_string()));
             }
             count
         }

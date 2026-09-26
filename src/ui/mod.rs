@@ -1,4 +1,4 @@
-pub mod analytics;
+mod analytics;
 mod brand_icon;
 mod chat;
 mod dialogs;

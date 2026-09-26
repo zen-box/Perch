@@ -1,7 +1,6 @@
 use std::fs;
 use std::process::Command;
 
-#[allow(dead_code)]
 pub struct AgentToolResult {
     pub display: String,
     pub output: String,

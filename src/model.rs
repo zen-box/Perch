@@ -6,11 +6,8 @@ use std::fs;
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::paths::{data_dir, data_file};
+use crate::paths::{DATABASE_FILE, SESSIONS_FILE, data_dir, data_file};
 use crate::storage::{Database, StorageResult};
-
-const DATA_FILE: &str = "perch-sessions.json";
-const DATABASE_FILE: &str = "perch.db";
 
 /// 思考强度。不同接口的叫法不同：OpenAI 叫 reasoning_effort，Claude 和 Gemini 用思考预算（token 数）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -361,20 +358,12 @@ impl ChatSession {
                 Some((message.role.clone(), content, message.attachments.clone()))
             })
             .collect();
-        if let Some(limit) = limit.filter(|value| *value > 0) {
-            if items.len() > limit {
-                items = items.split_off(items.len() - limit);
-            }
+        if let Some(limit) = limit.filter(|value| *value > 0)
+            && items.len() > limit
+        {
+            items = items.split_off(items.len() - limit);
         }
         items
-    }
-
-    #[allow(dead_code)]
-    pub fn api_messages(&self, limit: Option<usize>) -> Vec<(String, String)> {
-        self.api_turns(limit)
-            .into_iter()
-            .map(|(role, content, _)| (role, content))
-            .collect()
     }
 
     pub fn has_unresolved_compare(&self) -> bool {
@@ -399,7 +388,7 @@ struct LegacyStorageData {
 
 impl StorageData {
     pub fn load_or_init() -> Self {
-        Self::open(&data_dir().join(DATABASE_FILE), &data_file(DATA_FILE))
+        Self::open(&data_dir().join(DATABASE_FILE), &data_file(SESSIONS_FILE))
             .unwrap_or_else(|error| panic!("Unable to open chat storage: {error}"))
     }
 

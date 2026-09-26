@@ -84,7 +84,7 @@ mod tests {
         write_backup(
             &path,
             &session.id,
-            &[session.clone()],
+            std::slice::from_ref(&session),
             &PromptLibrary::default(),
             &config,
         )

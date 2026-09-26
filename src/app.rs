@@ -61,8 +61,8 @@ pub struct AppState {
     pub sidebar_collapsed: bool,
 
     // 统计看板状态
-    pub analytics_range: crate::ui::analytics::TimeRange,
-    pub analytics_tab: crate::ui::analytics::AnalyticsTab,
+    pub analytics_range: crate::analytics::TimeRange,
+    pub analytics_tab: crate::analytics::AnalyticsTab,
 
     // 添加渠道弹窗中当前选中的渠道类型
     pub add_channel_type: ChannelType,
@@ -330,8 +330,8 @@ impl AppState {
             selected_settings_provider_id: selected_provider_id,
             is_dark,
             sidebar_collapsed: false,
-            analytics_range: crate::ui::analytics::TimeRange::Days30,
-            analytics_tab: crate::ui::analytics::AnalyticsTab::Overview,
+            analytics_range: crate::analytics::TimeRange::Days30,
+            analytics_tab: crate::analytics::AnalyticsTab::Overview,
             add_channel_type: ChannelType::OpenAiChat,
             rename_target_session_id: None,
             pending_tool_name: None,
@@ -554,14 +554,13 @@ impl AppState {
 
     pub fn confirm_rename_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let new_title = self.rename_input.read(cx).value().trim().to_string();
-        if !new_title.is_empty() {
-            if let Some(target_id) = &self.rename_target_session_id {
-                if let Some(session) = self.storage.sessions.iter_mut().find(|s| &s.id == target_id) {
-                    session.title = new_title;
-                    session.title_auto = false;
-                    self.persist_storage(cx);
-                }
-            }
+        if !new_title.is_empty()
+            && let Some(target_id) = &self.rename_target_session_id
+            && let Some(session) = self.storage.sessions.iter_mut().find(|s| &s.id == target_id)
+        {
+            session.title = new_title;
+            session.title_auto = false;
+            self.persist_storage(cx);
         }
         self.rename_target_session_id = None;
         self.rename_input.update(cx, |i, cx| {
@@ -674,10 +673,8 @@ impl AppState {
             .providers
             .iter()
             .any(|p| p.id == self.selected_settings_provider_id);
-        if !exists {
-            if let Some(first) = self.config.providers.first().map(|p| p.id.clone()) {
-                self.select_settings_provider(&first, window, cx);
-            }
+        if !exists && let Some(first) = self.config.providers.first().map(|p| p.id.clone()) {
+            self.select_settings_provider(&first, window, cx);
         }
     }
 
@@ -706,12 +703,12 @@ impl AppState {
     }
 
     pub fn toggle_model_enabled(&mut self, provider_id: &str, model_id: &str, cx: &mut Context<Self>) {
-        if let Some(provider) = self.config.providers.iter_mut().find(|p| p.id == provider_id) {
-            if let Some(model) = provider.models.iter_mut().find(|m| m.id == model_id) {
-                model.enabled = !model.enabled;
-                let _ = self.config.save();
-                cx.notify();
-            }
+        if let Some(provider) = self.config.providers.iter_mut().find(|p| p.id == provider_id)
+            && let Some(model) = provider.models.iter_mut().find(|m| m.id == model_id)
+        {
+            model.enabled = !model.enabled;
+            let _ = self.config.save();
+            cx.notify();
         }
     }
 
@@ -849,11 +846,11 @@ impl AppState {
             return;
         }
         let mut key_cleanup_failed = false;
-        if let Some(key_ref) = key_ref {
-            if let Err(error) = AppConfig::store_provider_key(&key_ref, "") {
-                self.toast(ToastLevel::Error, format!("渠道已删除，但凭据清理失败: {error}"));
-                key_cleanup_failed = true;
-            }
+        if let Some(key_ref) = key_ref
+            && let Err(error) = AppConfig::store_provider_key(&key_ref, "")
+        {
+            self.toast(ToastLevel::Error, format!("渠道已删除，但凭据清理失败: {error}"));
+            key_cleanup_failed = true;
         }
         if let Some(first) = self.config.providers.first().map(|p| p.id.clone()) {
             self.select_settings_provider(&first, window, cx);

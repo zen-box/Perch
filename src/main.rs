@@ -2,13 +2,14 @@ use gpui_kit::component::{Root, TitleBar};
 use gpui_kit::*;
 
 mod agent;
+mod analytics;
 mod app;
 mod attachment_ops;
 mod backup;
 mod brand;
 mod clipboard;
 mod config;
-pub mod file_store;
+mod file_store;
 mod i18n;
 mod image_http;
 mod llm;
@@ -28,7 +29,7 @@ use app::AppState;
 use ui::Workspace;
 
 actions!(
-    personal_control,
+    perch,
     [NewChat, ToggleSettings, ToggleSidebar, CloseSettings, PasteIntoChat]
 );
 

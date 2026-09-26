@@ -12,9 +12,7 @@ use crate::paths;
 pub struct SavedFile {
     pub hash: String,
     pub storage_path: String, // 相对路径，例如 "images/a1b2c3d4e5f60718_photo.png"
-    pub absolute_path: PathBuf,
     pub size_bytes: u64,
-    pub created: bool,
 }
 
 /// 计算二进制数据的 SHA-256 哈希值十六进制字符串
@@ -139,10 +137,8 @@ fn save_bytes_in(base_dir: &Path, data: &[u8], original_name: &str, mime_type: &
         fs::create_dir_all(parent)?;
     }
 
-    let created = if abs_path.exists() {
-        // 文件已存在且内容一致，直接复用，完全去重
-        false
-    } else {
+    // 路径里带了内容哈希，所以文件已存在就说明内容一致，直接复用，完全去重
+    if !abs_path.exists() {
         // 原子写入：先写入临时文件，再原子 rename
         let staging_name = format!(".staging_{}_{}", Uuid::new_v4(), sanitized);
         let staging_path = abs_path.with_file_name(staging_name);
@@ -161,15 +157,12 @@ fn save_bytes_in(base_dir: &Path, data: &[u8], original_name: &str, mime_type: &
             let _ = fs::remove_file(&staging_path);
             return Err(e);
         }
-        true
-    };
+    }
 
     Ok(SavedFile {
         hash,
         storage_path: relative_path,
-        absolute_path: abs_path,
         size_bytes: data.len() as u64,
-        created,
     })
 }
 
@@ -221,26 +214,11 @@ pub fn read_base64(storage_path: &str) -> Option<String> {
     Some(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
-/// 读取附件的原始二进制字节
-pub fn read_bytes(storage_path: &str) -> Option<Vec<u8>> {
-    let abs = resolve_path(storage_path);
-    fs::read(abs).ok()
-}
-
 /// 读取文本类附件的 UTF-8 文本内容
 pub fn read_text(storage_path: &str) -> Option<String> {
     let abs = resolve_path(storage_path);
     let bytes = fs::read(abs).ok()?;
     String::from_utf8(bytes).ok()
-}
-
-/// 安全删除物理文件
-pub fn delete_file(storage_path: &str) -> std::io::Result<()> {
-    let abs = resolve_path(storage_path);
-    if abs.exists() {
-        fs::remove_file(abs)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -253,15 +231,13 @@ mod tests {
         let data = b"hello personal control attachment";
         let saved1 = save_bytes_in(dir.path(), data, "test.txt", "text/plain").expect("save1");
         assert!(saved1.storage_path.starts_with("files/"));
-        assert!(saved1.absolute_path.exists());
 
-        // 第二次保存相同数据应返回相同哈希和路径，且 created 为 false
+        // 第二次保存相同数据应返回相同哈希和路径（内容一致，直接复用）
         let saved2 = save_bytes_in(dir.path(), data, "test.txt", "text/plain").expect("save2");
         assert_eq!(saved1.hash, saved2.hash);
         assert_eq!(saved1.storage_path, saved2.storage_path);
-        assert!(!saved2.created);
 
-        let read_back = fs::read_to_string(&saved1.absolute_path).expect("read");
+        let read_back = fs::read_to_string(dir.path().join(&saved1.storage_path)).expect("read");
         assert_eq!(read_back, "hello personal control attachment");
     }
 

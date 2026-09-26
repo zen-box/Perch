@@ -17,7 +17,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
-use super::brand_icon::{model_avatar, model_badges, model_id_avatar, provider_avatar};
+use super::brand_icon::{
+    FILE_TYPE_CODE, FILE_TYPE_DOC, FILE_TYPE_PDF, FILE_TYPE_SHEET, FILE_TYPE_SLIDES, model_avatar, model_badges,
+    model_id_avatar, provider_avatar,
+};
 use super::markdown_image::open_local_image_viewer;
 use super::{CONTENT_MAX_WIDTH, Palette, SIDEBAR_WIDTH, dialogs, icon_tile, model_picker};
 use crate::app::AppState;
@@ -669,9 +672,9 @@ fn attachment_badge(att: &Attachment, p: &Palette) -> (IconName, Hsla, &'static 
     if att.is_image() {
         (IconName::Image, p.primary, "图片")
     } else if att.is_pdf() {
-        (IconName::FileText, hsla(350.0 / 360.0, 0.85, 0.55, 1.0), "PDF")
+        (IconName::FileText, FILE_TYPE_PDF, "PDF")
     } else if att.is_text() {
-        (IconName::FileCode, hsla(200.0 / 360.0, 0.90, 0.45, 1.0), "文本/代码")
+        (IconName::FileCode, FILE_TYPE_CODE, "文本/代码")
     } else {
         let ext = std::path::Path::new(&att.name)
             .extension()
@@ -679,9 +682,9 @@ fn attachment_badge(att: &Attachment, p: &Palette) -> (IconName, Hsla, &'static 
             .unwrap_or("")
             .to_ascii_lowercase();
         match ext.as_str() {
-            "xlsx" | "xls" | "csv" => (IconName::FileSpreadsheet, hsla(145.0 / 360.0, 0.75, 0.40, 1.0), "表格"),
-            "docx" | "doc" => (IconName::FileText, hsla(215.0 / 360.0, 0.85, 0.55, 1.0), "Word"),
-            "pptx" | "ppt" => (IconName::FileText, hsla(25.0 / 360.0, 0.90, 0.50, 1.0), "PPT"),
+            "xlsx" | "xls" | "csv" => (IconName::FileSpreadsheet, FILE_TYPE_SHEET, "表格"),
+            "docx" | "doc" => (IconName::FileText, FILE_TYPE_DOC, "Word"),
+            "pptx" | "ppt" => (IconName::FileText, FILE_TYPE_SLIDES, "PPT"),
             _ => (IconName::File, p.muted_foreground, "文件"),
         }
     }
