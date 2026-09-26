@@ -8,6 +8,10 @@ mod model_editor_dialog;
 mod model_picker;
 mod params;
 mod settings;
+mod settings_general;
+mod settings_misc;
+mod settings_prompts;
+mod settings_providers;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
