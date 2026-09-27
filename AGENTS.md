@@ -464,13 +464,21 @@ cx.spawn(async move |this, cx| {
 | --- | --- | --- | --- |
 | 1 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
 | 2 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
-| 3 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm_request.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
-| 4 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
-| 5 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
-| 6 | 重复的小组件：`section` 和 `form_card`（几乎逐行相同）、`labeled` 和 `row_title`（都是"标题+说明"） | `ui/settings.rs`、`ui/model_editor_dialog.rs`、`ui/params.rs` | 合并到 `ui/widgets.rs`。⚠️ 本条目原先还列了 `filter_chip` 和 `chip`，**2026-09-26 核实为错判**——前者是 `Button`、后者是手绘 `Div`，视觉与交互都不同，不该合并 |
-| 7 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
+| 3 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
+| 4 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
+| 5 | 重复的小组件：`section` 和 `form_card`（几乎逐行相同）、`labeled` 和 `row_title`（都是"标题+说明"） | `ui/settings.rs`、`ui/model_editor_dialog.rs`、`ui/params.rs` | 合并到 `ui/widgets.rs`。⚠️ 本条目原先还列了 `filter_chip` 和 `chip`，**2026-09-26 核实为错判**——前者是 `Button`、后者是手绘 `Div`，视觉与交互都不同，不该合并 |
+| 6 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
+
+> **2026-09-27 已修并删除**：原 #3「启动或初始化失败直接 panic」（当时记的 7 处，
+> 实际 6 处——`llm_request.rs::claude_body` 是误记，那里没有 panic 点）。
+> 现在 `AppState::bootstrap()` 把读盘失败变成 `StartupFailure`，
+> 由 `ui/error_page.rs` 显示（原因 + 数据目录 + 「打开数据目录」「退出」）；
+> `main.rs` 按 `bootstrap()` 的结果决定根视图；`paths.rs::data_file` 的复制失败
+> 改走 `MigrationFailure`；`app.rs::runtime` 改成启动时预检。
+> **删除后原 #4~#7 顺次上移为 #3~#6**，本文件、`TECH_DEBT.md`、`ROADMAP.md`、
+> `TODO.md` 里的交叉引用都已同步。
 
 > **2026-09-26 已修并删除**：原 #7「OpenAI Responses 渠道仍按 Chat Completions 格式发请求」——
 > P3-1 打通工具调用协议时一并修好。现在 `OpenAiResponses` 在 `emit_delta` / `emit_complete` 里

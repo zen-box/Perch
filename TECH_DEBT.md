@@ -12,6 +12,7 @@
 **只有 3 条会被 P3 碰到**，其中 2 条恰好是 P3 的前置条件——提前清反而要改两遍。
 现在 P3-1 / P3-2 做完了，那 3 条里已有 2 条就地结清（`#7 Responses 格式`、
 `#4 本地工具阻塞`），只有"消息常驻内存"那条按计划留到 v2。
+**另：#3「启动失败直接 panic」也已在 2026-09-27 结清**——与 P3 无关，属顺手做掉。
 
 ## 二、总览
 
@@ -21,13 +22,19 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 
 | # | 问题 | 性质 | 规模 | 阻塞谁 | 建议 |
 | --- | --- | --- | --- | --- | --- |
-| 3 | 启动/初始化失败直接 panic（7 处） | 技术债 | ~120 行 | 无 | **随时可做**，唯一两条"用户能感知"的之一 |
-| 4 | 拉取模型、测试连接不走渠道代理 | 技术债（已是 bug） | ~25 行 | 无 | **随时可做**，最便宜 |
-| 5 | 2 处 `too_many_arguments` | 技术债 | ~100 行 | 无 | **随时可做**，顺手拆函数 |
-| 6 | 重复小组件 | 技术债（**表有错判**） | ~100 行 | 无 | 顺手修，见下 |
+| 3 | 拉取模型、测试连接不走渠道代理 | 技术债（已是 bug） | ~25 行 | 无 | **随时可做**，最便宜 |
+| 4 | 2 处 `too_many_arguments` | 技术债 | ~100 行 | 无 | **随时可做**，顺手拆函数 |
+| 5 | 重复小组件 | 技术债（**表有错判**） | ~100 行 | 无 | 顺手修，见下 |
 | 1 | 远程图片自动落盘、无上限、无清理 | **待拍板** | ~50 行 | 无 | 需你定行为 |
 | 2 | models.dev 自动同步（自建线程 / 不走代理 / 静默） | **待拍板** | ~30 行 | 无 | 需你定是否保留 |
-| 7 | 全部会话消息常驻内存 | **架构** | 300~700 行 | P3/P4 | 放 v2，见第四节 |
+| 6 | 全部会话消息常驻内存 | **架构** | 300~700 行 | P3/P4 | 放 v2，见第四节 |
+
+> ✅ **2026-09-27 结清：原 #3「启动或初始化失败直接 panic」**。
+> 实际是 **6 处**（不是当初写的 7 处——`llm_request.rs::claude_body` 根本没有 panic 点，
+> 那里的 `body.as_object_mut().unwrap()` 加在 `json!` 出来的对象上，不可能失败）。
+> 改法见下面「三、逐条详情」里的结项记录。
+> **原 #4~#7 顺次上移为 #3~#6**：本文档、`AGENTS.md §13`、`ROADMAP.md`、`TODO.md`
+> 里所有交叉引用都已同步。
 
 > ✅ **2026-09-26 结清：原 #7「OpenAI Responses 渠道格式不对」**（约 150 行）。
 > P3-1 打通工具调用协议时一并修好——`handle_sse_line` 重写后保留 `event:` 行，
@@ -49,26 +56,35 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 
 ## 三、逐条详情
 
-### #3 启动或初始化失败直接 panic —— 建议先做
+### ~~#3 启动或初始化失败直接 panic~~ —— ✅ 2026-09-27 已结清
 
-7 个位置（`main.rs::main`、`app.rs::runtime`/`new`、`config.rs::load`、`model.rs::load_or_init`、
-`paths.rs::data_file`、`llm_request.rs::claude_body`）。
+**实际是 6 处**（当初列的 7 处里，`llm_request.rs::claude_body` 是误记——那里没有 panic 点）：
+`main.rs::main`（开窗口的 `.unwrap()`）、`app.rs::runtime` / `new`（会话渠道回填后 `save()`）、
+`config.rs::load`、`model.rs::load_or_init`、`paths.rs::data_file`。
 
-现在配置损坏时程序**直接闪退、不给任何提示**，用户只能猜。这是清单里唯一"用户能感知到"的健壮性问题。
+当时的问题：配置损坏时程序**直接闪退、不给任何提示**，用户只能猜。
 
-改法（关键是**不用改 UI 层任何签名**）：
+**实际做法（和下面的原方案不同，更省事）**：原方案要在 `AppState` 上挂 `init_error`，
+但那需要伪造一份"最小 `StorageData`"（它的字段里有 `RefCell<Database>`，构造不出来）。
+改成**让 `main.rs` 决定根视图**——`Root::new` 接受任意 `Into<AnyView>`：
 
-1. 把 `AppState::new` 的实际初始化抽成 `fn init(...) -> Result<Self, String>`。
-2. `AppState` 加 `init_error: Option<String>` 字段。
-3. `AppState::new` 里 `init(...)` 失败时，构造一个只有 `init_error` 的最小状态。
-4. `Workspace`（或 `AppState::render`）开头短路：有 `init_error` 就渲染一个错误页——带错误详情、
-   「打开数据目录」按钮、「退出」按钮。
-5. `main.rs` 里开窗口的 `.unwrap()` 单独处理（那时还没有 `cx` 可用来渲染，只能打日志 + 退出）。
+1. 新增 `AppState::bootstrap() -> Result<Bootstrap, StartupFailure>`，只做"读"：
+   预检 tokio 运行时 → 读会话库 → 读配置 → 回填老会话的渠道 id 并存回。
+2. 失败时把原因包成 `StartupFailure`（`Runtime` / `Config` / `Storage` 三种），
+   由 `ui/error_page.rs` 渲染——标题栏 + 原因 + 数据目录路径 + 「打开数据目录」「退出」。
+   `StartupFailure` 只带结构化数据，文案按渲染时的语言生成（和 `MigrationFailure` 一个路子）。
+3. `AppState::new` 改成接收 `Bootstrap`，不再自己读盘，也就没有会失败的步骤。
+4. `paths.rs::data_file` 的 `fs::copy` 改走已有的 `MigrationFailure` 通道，不再 panic。
+5. `app.rs::runtime`：`OnceLock` 里缓存的从 `Runtime` 改成 `Result`，
+   启动时用 `preflight_runtime` 试建一次（失败 → 错误页），
+   `runtime()` 只在**运行期**资源耗尽时才 panic。
+6. `main.rs` 开窗口失败（那时连窗口都没有）打一行日志再 `quit`。
 
-`paths.rs:197` 的 `fs::copy` panic 要单独看：那是**单文件迁移失败**，本来已有
-`MigrationFailure` 收集机制（见 `paths.rs`），应该改走那条路而不是 panic。
+⚠️ `model_info.rs` 的 5 处 `LazyLock<Regex>` **没动**，属 AGENTS.md §6 合法例外。
 
-⚠️ `model_info.rs` 的 5 处 `LazyLock<Regex>` **不动**，属 AGENTS.md §6 合法例外。
+**验证**：坏 `perch-config.json` → 错误页显示「读取配置失败：key must be a string…」；
+坏 `perch.db` → 「读写会话数据失败：file is not a database」；两种都实测过，
+「退出」按钮点得动。正常配置启动无回归。
 
 ### ~~#4 本地工具同步执行~~ —— ✅ 2026-09-26 已结清（含异步化，2026-09-27 补齐）
 
@@ -88,7 +104,7 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 `ExecControl` 提供超时与取消（「停止」结束进程树）。界面侧"占位块怎么画、
 停止按钮放哪"随实现一起定了，没再单独留债。
 
-### #4 拉取模型不走代理 —— 最便宜的一条
+### #3 拉取模型不走代理 —— 最便宜的一条
 
 `llm.rs` 已有完整的代理套用逻辑（含 `Proxy::all` 与失败时的报错翻译），
 但 `provider_api.rs` 的 `Client::builder()` 是裸的。
@@ -97,7 +113,7 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 `provider_api::fetch_models` 需要多接一个 `proxy: &str` 参数——注意它的调用点在
 `provider_ops.rs`，`AppConfig` 里已有代理字段可取。
 
-### #5 `too_many_arguments` ×2 —— 顺带拆函数
+### #4 `too_many_arguments` ×2 —— 顺带拆函数
 
 | 函数 | 参数 | 体量 | 调用点 | 做法 |
 | --- | --- | --- | --- | --- |
@@ -107,7 +123,7 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 参考 `ui/params.rs` 的 `ChoiceRow`——那是本项目已有的"用结构体收参数"范式。
 改完把两处 `#[allow(clippy::too_many_arguments)]` 删掉。
 
-### #6 重复小组件 —— ⚠️ 表里有错判
+### #5 重复小组件 —— ⚠️ 表里有错判
 
 逐对读过源码，AGENTS.md §13 的第 5 条**写错了**：
 
@@ -174,7 +190,7 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 ⚠️ **遗留一项，另记**（见文末「新发现」）：`openai_body()` 对 Responses 依旧发 `messages`。
 真的要用 Responses 渠道时得单独拆 body 函数——和"协议层"不是同一个话题。
 
-### #7 全部会话消息常驻内存 —— 放 v2
+### #6 全部会话消息常驻内存 —— 放 v2
 
 `storage.rs:79` 加载时把**所有会话的所有消息** `SELECT ... ORDER BY position` 全部读进内存。
 `.messages` 字段散在 **56 处**（`session_ops.rs` 16、`llm.rs` 11、`model.rs` 10、`reply_ops.rs` 5、
@@ -196,20 +212,20 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
    `"tools"` 出现 **0 次**，`tool_calls` / `tool_use` / `functionCall` / `functionDeclarations`
    / `tool_result` / `functionResponse` **一个都没有**。那是从零开始的一层。
 
-2. **9 条里只有 3 条会被 P3 碰到，其中两条已经结清。**
+2. **当初 9 条里只有 3 条会被 P3 碰到，其中两条已经结清。**
    - ~~#7（Responses 格式）~~ —— **P3-1 已结清**。
    - ~~#4（本地工具阻塞）~~ —— **P3-2 已完整结清**（重写 + 异步化 + 超时 + 可停止）。
-   - #7（消息常驻内存，原 #8）——P3 会让消息多出工具调用相关字段、体积变大，
+   - #6（消息常驻内存）——P3 会让消息多出工具调用相关字段、体积变大，
      内存压力只会更明显，但那时的数据结构才定型。现在改是在旧结构上改一遍再改一遍。
 
-3. **另外 6 条和 P3/P4 完全无关，随时可做**，加起来约 **425 行**。
-   与其现在做，不如等它们**自己浮上来**：做到哪块顺手清哪块（#4 做渠道功能时、
-   #5 改消息渲染时、#6 改设置页时），这比专门排一批划算。
+3. **另外 5 条和 P3/P4 完全无关，随时可做**，加起来约 **305 行**。
+   与其现在做，不如等它们**自己浮上来**：做到哪块顺手清哪块（#3 做渠道功能时、
+   #4 改消息渲染时、#5 改设置页时），这比专门排一批划算。
 
 4. **P1/P2 已完成，P3/P4 是最后两个大块。** 做完功能再统一优化，能避免"优化完又被新功能推翻"。
 
-**唯一建议现在就做的：#3。** 它和任何功能都不冲突，而且是"数据坏了程序闪退无提示"——
-属于用户会真实遇到的问题。约 120 行，一批提交就能收。
+**当初"唯一建议现在就做的"是 #3（启动失败 panic）**，2026-09-27 已做掉（见第三节）。
+剩下的 6 条都没有"用户能感知"的紧迫性，按上面第 3 条插空清即可。
 
 ---
 
