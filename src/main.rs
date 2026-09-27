@@ -39,6 +39,7 @@ mod storage;
 mod theme;
 mod tool_ops;
 mod ui;
+mod workspace_ops;
 
 use app::AppState;
 use ui::{ErrorPage, Workspace};

@@ -763,6 +763,17 @@ impl ChatSession {
         self.tools.as_ref().is_some_and(|tools| tools.is_disabled(name))
     }
 
+    /// 这个会话的项目目录——智能体干活的地方，也是「边界」的基准。
+    ///
+    /// 没设、或者存的是相对路径（基准本身就不确定，等于没有边界）时返回 `None`，
+    /// 那种情况下**本机工具一个都不会交给模型**（见 `tool_ops::session_tool_specs`）。
+    pub fn workspace(&self) -> Option<crate::local_tools::ProjectDir> {
+        self.tools
+            .as_ref()
+            .and_then(|tools| tools.workspace.as_deref())
+            .and_then(crate::local_tools::ProjectDir::parse)
+    }
+
     pub fn resolved_params(&self, global_prompt: &str, global_temperature: f32) -> ResolvedParams {
         let params = self.params.clone().unwrap_or_default();
         ResolvedParams {

@@ -38,10 +38,24 @@ pub(crate) enum SourceLabel {
     McpServer(String),
 }
 
+/// 这一行来源**为什么现在给不出工具**。
+///
+/// 只有本机那一行用得上。MCP 服务器给不出工具的原因（没连上、一个工具都没暴露）
+/// 已经显示在服务器名旁边了，不用在这里再说一遍。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceNote {
+    /// 设置里的「允许智能体读写本机文件」关着
+    LocalToolsOff,
+    /// 还没选项目目录——本机工具没有"从哪算"的基准，所以一个都不给
+    NeedsWorkspace,
+}
+
 /// 选择器里的一行来源。
 pub(crate) struct SourceGroup {
     pub source: ToolSource,
     pub label: SourceLabel,
+    /// 有值表示这行现在给不出工具，界面显示这条说明而不是「N 个工具」
+    pub note: Option<SourceNote>,
     /// 这条来源下有几个工具。0 表示还没连上、或者服务器一个工具都没暴露。
     pub tools: Vec<ToolOption>,
 }
@@ -70,9 +84,12 @@ pub(crate) fn session_tool_specs(
     let wants = |source: &ToolSource| session.tools.as_ref().is_some_and(|tools| tools.wants_source(source));
     let mut specs = Vec::new();
 
-    // 本机工具。`wants_source` 已经把对话模式下的 `Local` 挡掉了，这里只管全局开关：
-    // 那个开关**只管本机**，不再卡 MCP（它以前叫「本地工具」却管着 MCP，语义是错的）。
-    if local_tools_enabled && wants(&ToolSource::Local) {
+    // 本机工具。三道都过了才给：
+    // ① `wants_source` 挡住对话模式（那条结构性保证在 `SessionTools` 里）；
+    // ② 全局开关（那个开关**只管本机**，不再卡 MCP——它以前叫「本地工具」却管着 MCP）；
+    // ③ **必须设了项目目录**。没有基准就没有边界，"相对路径按程序启动目录算"正是
+    //    这次要消掉的东西，不能留一个隐式兜底（产品决策，见 AGENTS.md §11）。
+    if local_tools_enabled && wants(&ToolSource::Local) && session.workspace().is_some() {
         specs.extend(crate::local_tools::specs());
     }
 
@@ -230,11 +247,25 @@ impl AppState {
         // 本机那一行只在智能体模式下出现。对话模式不摆它，是因为摆出来也只能灰着——
         // 而灰着的勾选框比不显示更让人困惑（想勾勾不上，还不知道为什么）。
         if self.session_is_agent() {
-            let local = crate::local_tools::specs();
-            if !local.is_empty() {
+            // 先算 note 再决定列不列工具：有 note 就说明这行现在**一个工具都跑不了**，
+            // 这时候还把 5 个工具摆出来，「高级」里能勾掉几个根本用不上的东西。
+            let note = if !self.config.local_tools_enabled {
+                Some(SourceNote::LocalToolsOff)
+            } else if self.session_workspace().is_none() {
+                Some(SourceNote::NeedsWorkspace)
+            } else {
+                None
+            };
+            let local = if note.is_none() {
+                crate::local_tools::specs()
+            } else {
+                Vec::new()
+            };
+            if note.is_some() || !local.is_empty() {
                 groups.push(SourceGroup {
                     source: ToolSource::Local,
                     label: SourceLabel::Local,
+                    note,
                     tools: local
                         .into_iter()
                         .map(|spec| ToolOption {
@@ -252,6 +283,7 @@ impl AppState {
                     server_id: server.id.clone(),
                 },
                 label: SourceLabel::McpServer(server.name.clone()),
+                note: None,
                 tools: tools
                     .into_iter()
                     .map(|tool| ToolOption {
@@ -371,9 +403,14 @@ mod tests {
     use crate::config::McpTransport;
 
     /// 智能体的默认工具状态：没动过选择器 = 只带本机工具、不带任何 MCP。
+    /// 智能体的默认工具状态：没动过选择器 = 只带本机工具。
+    ///
+    /// **必须带上项目目录**：没设目录时本机工具一个都不给（见 `session_tool_specs`），
+    /// 不带它就测不到本机那一支。
     fn agent_tools() -> SessionTools {
         SessionTools {
             mode: SessionMode::Agent,
+            workspace: Some(crate::local_tools::current_dir_string()),
             ..Default::default()
         }
     }
@@ -507,6 +544,37 @@ mod tests {
         };
         assert!(session_tool_specs(&agent, false, &mcp, &[]).is_empty());
         assert!(!session_tool_specs(&agent, true, &mcp, &[]).is_empty());
+    }
+
+    #[std::prelude::v1::test]
+    fn without_a_project_folder_no_local_tool_is_offered() {
+        // 产品决策（AGENTS.md §11 第 4 条）：智能体模式下没设项目目录就**不给**本机工具，
+        // 界面上提示"先选项目目录"。「拿程序自己的安装目录兜底」正是这次要消掉的那个坑。
+        let mcp = McpState::default();
+        let mut tools = agent_tools();
+        tools.workspace = None;
+        let session = ChatSession {
+            tools: Some(tools),
+            ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
+        };
+        assert!(session.workspace().is_none());
+        assert!(
+            session_tool_specs(&session, true, &mcp, &[]).is_empty(),
+            "没项目目录时本机工具一个都不该给"
+        );
+    }
+
+    #[std::prelude::v1::test]
+    fn a_relative_project_folder_counts_as_unset() {
+        // 相对路径的基准本身就不确定，拿它当边界等于没有边界
+        let mut tools = agent_tools();
+        tools.workspace = Some("proj".into());
+        let session = ChatSession {
+            tools: Some(tools),
+            ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
+        };
+        assert!(session.workspace().is_none());
+        assert!(session_tool_specs(&session, true, &McpState::default(), &[]).is_empty());
     }
 
     #[std::prelude::v1::test]

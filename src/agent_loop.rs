@@ -34,7 +34,7 @@ use gpui_kit::*;
 use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::i18n::{Key, tr};
 use crate::llm_tools::{ToolCall, ToolResult};
-use crate::local_tools::{self, ExecControl, PendingTool};
+use crate::local_tools::{self, ExecControl, PendingTool, ProjectDir};
 use crate::mcp::{self, Connection};
 use crate::mcp_ops::Route;
 use crate::model::{ChatMessage, ChatSession, ToolSource};
@@ -158,11 +158,14 @@ pub(crate) enum RoundAction {
 /// - `calls`：这条助手消息要求的调用
 /// - `answered`：会话里已经有结果的调用 id
 /// - `round`：已经续跑过几次
+/// - `workspace`：这次干活的项目目录。**目录之外的读写一律要用户点头**，
+///   所以"免确认"这件事离了它判断不了；`None` 时按「全在外面」处理（保守方向）。
 pub(crate) fn next_action(
     calls: &[ToolCall],
     answered: &HashSet<String>,
     round: usize,
     tools_enabled: bool,
+    workspace: Option<&ProjectDir>,
 ) -> RoundAction {
     if calls.is_empty() {
         return RoundAction::Finish;
@@ -198,7 +201,7 @@ pub(crate) fn next_action(
                 // 工具表里当然查不到，那样会被误判成"模型编的名字"直接放行。
                 false
             } else if local_tools::is_known(&tool.name) {
-                !tool.needs_approval()
+                !tool.needs_approval(workspace)
             } else {
                 true
             }
@@ -261,7 +264,9 @@ impl AppState {
         };
 
         let tools_live = self.session_tools_live(&origin.session_id);
-        match next_action(&calls, &answered, self.agent.round, tools_live) {
+        // 判断「免确认还是要授权」要知道项目目录在哪——目录之外的读写一律要问
+        let workspace = self.session(&origin.session_id).and_then(ChatSession::workspace);
+        match next_action(&calls, &answered, self.agent.round, tools_live, workspace.as_ref()) {
             RoundAction::Finish => {
                 self.agent.end_loop();
                 false
@@ -361,8 +366,10 @@ impl AppState {
             self.push_to_session(session_id, message);
         }
         // 超时跟着设置走：编译、装依赖这类命令要多久因项目而异，
-        // 写死在代码里总有人不够用（也总有人嫌久）
-        let control = ExecControl::with_timeout_secs(self.config.command_timeout_secs);
+        // 写死在代码里总有人不够用（也总有人嫌久）。
+        // 工作目录也在这里定下来：命令在哪儿跑、相对路径从哪儿算，全看它。
+        let control = ExecControl::with_timeout_secs(self.config.command_timeout_secs)
+            .in_workspace(self.session(session_id).and_then(ChatSession::workspace));
         self.agent.next_run_id += 1;
         let run_id = self.agent.next_run_id;
         self.agent.running = Some(ToolRun {
@@ -488,9 +495,11 @@ impl AppState {
             Some((server_id, _)) => sources.contains(&ToolSource::Mcp {
                 server_id: server_id.to_string(),
             }),
-            // 本机工具：既要会话还勾着本机来源（对话模式会被 `tool_sources` 剔掉），
-            // 也要全局开关还开着
-            None => self.config.local_tools_enabled && sources.contains(&ToolSource::Local),
+            // 本机工具：会话还勾着本机来源（对话模式会被 `tool_sources` 剔掉）、
+            // 全局开关还开着、**而且项目目录还在**——用户可能一边看着卡片一边把它清了
+            None => {
+                self.config.local_tools_enabled && sources.contains(&ToolSource::Local) && session.workspace().is_some()
+            }
         }
     }
 
@@ -730,9 +739,21 @@ mod tests {
         }
     }
 
+    /// 测试用的项目目录：拿进程当前目录当根。
+    ///
+    /// 这样 `a.rs`、`src/main.rs` 这类相对路径都落在「里面」（免确认），
+    /// 而写死的绝对路径落在「外面」（要授权）。不写死盘符，别的平台也能跑。
+    fn test_dir() -> ProjectDir {
+        let cwd = std::env::current_dir().expect("拿不到当前目录");
+        ProjectDir::parse(&cwd.display().to_string()).expect("当前目录是绝对路径")
+    }
+
     #[std::prelude::v1::test]
     fn no_calls_means_finish() {
-        assert_eq!(next_action(&[], &HashSet::new(), 0, true), RoundAction::Finish);
+        assert_eq!(
+            next_action(&[], &HashSet::new(), 0, true, Some(&test_dir())),
+            RoundAction::Finish
+        );
     }
 
     #[std::prelude::v1::test]
@@ -740,13 +761,16 @@ mod tests {
         // 调用都有结果了，就该带着结果再请求一次模型——而不是停下
         let calls = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
         let answered: HashSet<String> = ["c1".to_string()].into_iter().collect();
-        assert_eq!(next_action(&calls, &answered, 0, true), RoundAction::Continue);
+        assert_eq!(
+            next_action(&calls, &answered, 0, true, Some(&test_dir())),
+            RoundAction::Continue
+        );
     }
 
     #[std::prelude::v1::test]
     fn read_only_tools_run_without_asking() {
         let calls = vec![call("c1", "read_file", json!({"path": "src/main.rs"}))];
-        match next_action(&calls, &HashSet::new(), 0, true) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
             RoundAction::RunTools(tools) => {
                 assert_eq!(tools.len(), 1);
                 assert_eq!(tools[0].name, "read_file");
@@ -758,7 +782,7 @@ mod tests {
     #[std::prelude::v1::test]
     fn dangerous_tools_stop_for_approval() {
         let calls = vec![call("c1", "run_command", json!({"command": "rm -rf /"}))];
-        match next_action(&calls, &HashSet::new(), 0, true) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.name, "run_command"),
             other => panic!("危险工具应当挂起等授权，得到 {other:?}"),
         }
@@ -772,7 +796,7 @@ mod tests {
             call("c1", "run_command", json!({"command": "cargo test"})),
             call("c2", "read_file", json!({"path": "a.rs"})),
         ];
-        match next_action(&calls, &HashSet::new(), 0, true) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
             RoundAction::RunTools(tools) => {
                 assert_eq!(tools.len(), 1);
                 assert_eq!(tools[0].id, "c2");
@@ -781,7 +805,7 @@ mod tests {
         }
         // 读文件有结果之后，才轮到命令
         let answered: HashSet<String> = ["c2".to_string()].into_iter().collect();
-        match next_action(&calls, &answered, 0, true) {
+        match next_action(&calls, &answered, 0, true, Some(&test_dir())) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.id, "c1"),
             other => panic!("接着应当问命令，得到 {other:?}"),
         }
@@ -793,12 +817,12 @@ mod tests {
             call("c1", "run_command", json!({"command": "echo 1"})),
             call("c2", "run_command", json!({"command": "echo 2"})),
         ];
-        match next_action(&calls, &HashSet::new(), 0, true) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.id, "c1"),
             other => panic!("应当只挂第一条，得到 {other:?}"),
         }
         let answered: HashSet<String> = ["c1".to_string()].into_iter().collect();
-        match next_action(&calls, &answered, 0, true) {
+        match next_action(&calls, &answered, 0, true, Some(&test_dir())) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.id, "c2"),
             other => panic!("第一条处理完应当轮到第二条，得到 {other:?}"),
         }
@@ -808,7 +832,7 @@ mod tests {
     fn sensitive_reads_also_stop_for_approval() {
         let calls = vec![call("c1", "read_file", json!({"path": "~/.ssh/id_rsa"}))];
         assert!(matches!(
-            next_action(&calls, &HashSet::new(), 0, true),
+            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())),
             RoundAction::AskApproval(_)
         ));
     }
@@ -816,13 +840,13 @@ mod tests {
     #[std::prelude::v1::test]
     fn round_limit_stops_the_loop() {
         let calls = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
-        match next_action(&calls, &HashSet::new(), MAX_AGENT_ROUNDS, true) {
+        match next_action(&calls, &HashSet::new(), MAX_AGENT_ROUNDS, true, Some(&test_dir())) {
             RoundAction::HitLimit(waiting) => assert_eq!(waiting.len(), 1, "没执行的调用要交出来补结果"),
             other => panic!("到上限应当停下，得到 {other:?}"),
         }
         // 差一轮的时候还能继续
         assert!(matches!(
-            next_action(&calls, &HashSet::new(), MAX_AGENT_ROUNDS - 1, true),
+            next_action(&calls, &HashSet::new(), MAX_AGENT_ROUNDS - 1, true, Some(&test_dir())),
             RoundAction::RunTools(_)
         ));
     }
@@ -831,7 +855,7 @@ mod tests {
     fn disabled_tools_still_report_back() {
         // 工具没开也要回结果：不回的话历史里留着没回的调用，下一次请求会被拒绝
         let calls = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
-        match next_action(&calls, &HashSet::new(), 0, false) {
+        match next_action(&calls, &HashSet::new(), 0, false, Some(&test_dir())) {
             RoundAction::Disabled(tools) => assert_eq!(tools.len(), 1),
             other => panic!("工具停用时也该产出结果，得到 {other:?}"),
         }
@@ -843,7 +867,7 @@ mod tests {
         let calls = vec![call("c1", "delete_everything", json!({}))];
         assert!(!local_tools::is_known("delete_everything"));
         assert!(matches!(
-            next_action(&calls, &HashSet::new(), 0, true),
+            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())),
             RoundAction::RunTools(_)
         ));
         let result = local_tools::execute(&PendingTool::from_call(&calls[0]), &ExecControl::default());
@@ -862,9 +886,63 @@ mod tests {
         // 调用跑在别人的服务器上，只能每次确认
         let calls = vec![call("c1", "mcp__files__read_file", json!({"path": "a.rs"}))];
         assert!(!local_tools::is_known("mcp__files__read_file"));
-        match next_action(&calls, &HashSet::new(), 0, true) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.name, "mcp__files__read_file"),
             other => panic!("MCP 工具应当每次都问，得到 {other:?}"),
         }
+    }
+
+    /// 一定落在工作目录之外的一个路径（拿当前目录的上一级拼一个）。
+    ///
+    /// 不写死 `C:\Windows` 之类：那在别的平台上会变成相对路径，测试就没意义了。
+    fn outside_path() -> String {
+        let cwd = std::env::current_dir().expect("拿不到当前目录");
+        let parent = cwd.parent().expect("当前目录没有父目录").to_path_buf();
+        parent.join("perch-outside-test.txt").display().to_string()
+    }
+
+    #[std::prelude::v1::test]
+    fn reads_outside_the_project_folder_stop_for_approval() {
+        // **这才是真正的边界。** 以前只有「敏感文件判断」——那只是防呆，模型换个
+        // 路径就读走了（`TECH_DEBT` 第五节第 ③ 条）。现在同一个只读工具、同样的相对
+        // 路径，落在目录里免确认、落在外面就要问。
+        let inside = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
+        assert!(
+            matches!(
+                next_action(&inside, &HashSet::new(), 0, true, Some(&test_dir())),
+                RoundAction::RunTools(_)
+            ),
+            "目录里的文件该免确认"
+        );
+
+        let outside = vec![call("c1", "read_file", json!({"path": outside_path()}))];
+        assert!(
+            matches!(
+                next_action(&outside, &HashSet::new(), 0, true, Some(&test_dir())),
+                RoundAction::AskApproval(_)
+            ),
+            "目录之外的文件该问一次"
+        );
+    }
+
+    #[std::prelude::v1::test]
+    fn listing_outside_the_project_folder_also_asks() {
+        // 「读」不只是 read_file：列目录同样是在看你机器上的东西
+        let calls = vec![call("c1", "list_directory", json!({"path": outside_path()}))];
+        assert!(matches!(
+            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())),
+            RoundAction::AskApproval(_)
+        ));
+    }
+
+    #[std::prelude::v1::test]
+    fn without_a_project_folder_every_path_counts_as_outside() {
+        // 没有工作目录就没有基准，保守方向：一律当成在外，多问一次不致命。
+        // 正常流程走不到这里——没目录时本机工具根本不会交给模型（闸门在 tool_ops）。
+        let calls = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
+        assert!(matches!(
+            next_action(&calls, &HashSet::new(), 0, true, None),
+            RoundAction::AskApproval(_)
+        ));
     }
 }

@@ -628,6 +628,13 @@ i18n! {
     AdvancedTools => { "高级：单独停用某些工具", "Advanced: turn off individual tools", "詳細設定：個別のツールを無効化", "進階：單獨停用某些工具" },
     LocalToolsDisabledHint => { "「允许智能体读写本机文件」关着，本机工具不会交给模型。", "Local file access is off, so local tools are not offered to the model.", "ローカルファイルの利用が無効のため、ローカルツールはモデルへ渡されません。", "「允許智能體讀寫本機檔案」關著，本機工具不會交給模型。" },
     ToolNoLongerAllowed => { "这条调用已经不可用了（工具来源被关掉，或者模式已经切换）。", "This call is no longer allowed: its tool source was turned off, or the mode changed.", "この呼び出しはもう許可されていません（ツールの提供元が無効になったか、モードが変わりました）。", "這條呼叫已經不可用了（工具來源被關掉，或者模式已經切換）。" },
+    WorkspaceChoose => { "选择项目目录", "Choose project folder", "プロジェクトフォルダを選択", "選擇專案資料夾" },
+    WorkspacePickTitle => { "选择智能体的项目目录", "Choose the agent's project folder", "エージェントのプロジェクトフォルダを選択", "選擇智能體的專案資料夾" },
+    WorkspaceChange => { "更换项目目录", "Change project folder", "プロジェクトフォルダを変更", "更換專案資料夾" },
+    WorkspaceClear => { "清除项目目录", "Clear project folder", "プロジェクトフォルダを解除", "清除專案資料夾" },
+    WorkspaceHint => { "智能体只在这个目录里干活，目录之外的读写每次都要你确认。", "The agent works inside this folder; reading or writing outside it needs your approval each time.", "エージェントはこのフォルダの中だけで作業します。外側の読み書きは毎回確認が必要です。", "智能體只在這個資料夾裡幹活，資料夾之外的讀寫每次都要你確認。" },
+    WorkspaceMissing => { "先选项目目录", "Pick a folder first", "先にフォルダを選択", "先選專案資料夾" },
+    LocalToolsOffNote => { "本机工具已关闭", "Local tools off", "ローカルツールは無効", "本機工具已關閉" },
 }
 
 /// 按顺序替换文案里的 `{}` 占位符。

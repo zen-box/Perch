@@ -179,7 +179,7 @@ impl AppState {
         Some((provider, model))
     }
 
-    pub(crate) fn make_job(&self, spec: JobSpec, messages: Vec<ChatMessageReq>) -> Option<Job> {
+    pub(crate) fn make_job(&self, spec: JobSpec, mut messages: Vec<ChatMessageReq>) -> Option<Job> {
         let (provider, model) = self.resolve_model(spec.provider_id, spec.model_id)?;
         let session = self.session(spec.session_id)?;
         let resolved = session.resolved_params(&self.config.system_prompt, self.config.temperature);
@@ -188,8 +188,8 @@ impl AppState {
             .as_ref()
             .is_some_and(|params| params.temperature.is_some());
         // 第一道闸：这次调用要不要带工具（多模型对比、起标题、「继续生成」都不带）。
-        // 剩下的（模型的 `Capability::Tools`、会话的模式与来源、全局的本机开关）
-        // 全在 `tool_list_for` 里，只有那一份实现——选择器的计数也走它。
+        // 剩下的（模型的 `Capability::Tools`、会话的模式与来源、全局的本机开关、
+        // 有没有项目目录）全在 `tool_list_for` 里，只有那一份实现——选择器的计数也走它。
         let tools = if spec.with_tools {
             tool_list_for(
                 model,
@@ -201,6 +201,13 @@ impl AppState {
         } else {
             Vec::new()
         };
+        // 只有**真的带了本机工具**才告诉模型「在哪儿干活」。没给工具却报一个项目目录，
+        // 它会以为能读文件，白跑一轮再被拒。
+        if tools.iter().any(|tool| crate::local_tools::is_known(&tool.name))
+            && let Some(dir) = session.workspace()
+        {
+            attach_environment(&mut messages, &dir);
+        }
         Some(Job {
             key: stream_key(spec.message_id, spec.variant_id),
             session_id: spec.session_id.to_string(),
@@ -454,6 +461,25 @@ fn tool_list_for(
     crate::tool_ops::session_tool_specs(session, local_tools_enabled, mcp, servers)
 }
 
+/// 把「这次在哪儿干活」拼进 system 消息。
+///
+/// 加在**末尾**而不是开头：用户自己写的 system prompt 往往以身份设定开头，
+/// 把它顶到第二段会让模型把身份说明当成补充材料。
+///
+/// 内容对同一份会话是固定的（路径不变就逐字节一致），所以不影响 prompt 缓存；
+/// 换项目目录会改请求体，那是应该的——边界确实变了。
+fn attach_environment(messages: &mut [ChatMessageReq], dir: &crate::local_tools::ProjectDir) {
+    let Some(system) = messages.iter_mut().find(|message| message.role == "system") else {
+        return;
+    };
+    let preamble = crate::local_tools::environment_preamble(dir);
+    system.content = if system.content.trim().is_empty() {
+        preamble
+    } else {
+        format!("{}\n\n{preamble}", system.content)
+    };
+}
+
 /// 组装一次请求。
 fn chat_request(
     provider: &ProviderConfig,
@@ -586,9 +612,12 @@ mod tests {
     }
 
     /// 智能体的默认工具状态：没动过选择器 = 只带本机工具。
+    ///
+    /// **必须带上项目目录**：没设目录时本机工具一个都不给（见 `tool_ops::session_tool_specs`）。
     fn agent_tools() -> SessionTools {
         SessionTools {
             mode: SessionMode::Agent,
+            workspace: Some(crate::local_tools::current_dir_string()),
             ..Default::default()
         }
     }

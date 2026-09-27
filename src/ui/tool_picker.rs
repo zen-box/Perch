@@ -22,7 +22,7 @@ use super::chat::preview;
 use super::settings::{SegmentedSize, segmented_sized};
 use crate::app::AppState;
 use crate::i18n::{Key, tr, tr_args};
-use crate::tool_ops::SourceLabel;
+use crate::tool_ops::{SourceLabel, SourceNote};
 
 /// 「对话 / 智能体」分段开关。
 ///
@@ -73,24 +73,26 @@ pub(super) fn render_tool_picker(state: &AppState, p: &Palette, cx: &mut Context
 fn render_tool_panel(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl IntoElement + use<> {
     let p = Palette::new(cx);
     let lang = app.read(cx).language();
-    let (groups, agent, master_on, model_supports) = {
+    let (groups, agent, master_on, model_supports, workspace_missing) = {
         let state = app.read(cx);
         (
             state.source_groups(),
             state.session_is_agent(),
             state.config.local_tools_enabled,
             state.tools_supported_by_model(),
+            state.workspace_missing(),
         )
     };
 
     let all_app = app.clone();
     let none_app = app.clone();
     let has_groups = !groups.is_empty();
-    // 高级那一层只在有东西可停用时出现：一条来源都没勾，列一堆单个工具只是噪声
+    // 高级那一层只在有东西可停用时出现：一条来源都没勾，列一堆单个工具只是噪声。
+    // 「有 note 的来源」也算没有东西可停用——那种情况它的工具表本来就是空的。
     let picked: Vec<usize> = groups
         .iter()
         .enumerate()
-        .filter(|(_, group)| app.read(cx).is_source_picked(&group.source))
+        .filter(|(_, group)| !group.tools.is_empty() && app.read(cx).is_source_picked(&group.source))
         .map(|(ix, _)| ix)
         .collect();
 
@@ -104,7 +106,18 @@ fn render_tool_panel(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> 
                 SourceLabel::Local => tr(lang, Key::LocalTools).to_string(),
                 SourceLabel::McpServer(name) => name.clone(),
             };
-            let count_text = tr_args(lang, Key::ToolCount, &[group.tool_count().to_string().as_str()]);
+            // 有 note 就把「N 个工具」换成原因：这一行现在一个工具都给不出来，
+            // 还显示个数字只会让人以为勾了就能用。
+            let trailing = match group.note {
+                Some(SourceNote::LocalToolsOff) => tr(lang, Key::LocalToolsOffNote).to_string(),
+                Some(SourceNote::NeedsWorkspace) => tr(lang, Key::WorkspaceMissing).to_string(),
+                None => tr_args(lang, Key::ToolCount, &[group.tool_count().to_string().as_str()]),
+            };
+            let trailing_color = if group.note.is_some() {
+                p.warning
+            } else {
+                p.muted_foreground
+            };
             h_flex()
                 .id(SharedString::from(format!("tool-source-{label}")))
                 .items_center()
@@ -128,13 +141,7 @@ fn render_tool_panel(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> 
                         .items_center()
                         .gap_2()
                         .child(div().truncate().text_sm().text_color(p.foreground).child(label))
-                        .child(
-                            div()
-                                .flex_none()
-                                .text_xs()
-                                .text_color(p.muted_foreground)
-                                .child(count_text),
-                        ),
+                        .child(div().flex_none().text_xs().text_color(trailing_color).child(trailing)),
                 )
                 .into_any_element()
         })
@@ -256,6 +263,10 @@ fn render_tool_panel(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> 
         // （对话模式不提示——它本来就不该有本机工具，不是"被关掉了"。）
         .when(model_supports && agent && !master_on, |this| {
             this.child(hint(p.warning, tr(lang, Key::LocalToolsDisabledHint)))
+        })
+        // 智能体模式 + 还没选项目目录：本机工具一个都给不出来，告诉用户下一步做什么
+        .when(model_supports && agent && master_on && workspace_missing, |this| {
+            this.child(hint(p.warning, tr(lang, Key::WorkspaceHint)))
         })
         .when(model_supports && !agent, |this| {
             this.child(hint(p.muted_foreground, tr(lang, Key::SessionToolsChatHint)))

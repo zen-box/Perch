@@ -111,12 +111,12 @@ OpenAI 平台
 目录 {dir} 是空的。
 无法列出目录 {dir}：{error}
 缺少参数 path，或者它不是字符串。
-无法读取文件 {path}：{error}
+无法读取文件 {path_text}：{error}
 工作区干净，没有改动。
 无法执行 git：{error}
 缺少参数 content，或者它不是字符串。
-已写入 {path}（{} 字节）。
-无法写入文件 {path}：{error}
+已写入 {path_text}（{} 字节）。
+无法写入文件 {path_text}：{error}
 缺少参数 command，或者它不是字符串。
 (没有输出)
 无法执行命令：{error}

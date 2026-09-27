@@ -52,6 +52,9 @@ pub struct ExecControl {
     pub cancel: Arc<AtomicBool>,
     /// `run_command` 的超时
     pub command_timeout: Duration,
+    /// 这次执行归属的工作目录。没有它就不该执行任何本机工具——
+    /// 闸门在 `tool_ops::session_tool_specs`，这里只是最后一道「万一还是被调到」的兜底。
+    pub workspace: Option<ProjectDir>,
 }
 
 impl Default for ExecControl {
@@ -59,6 +62,7 @@ impl Default for ExecControl {
         Self {
             cancel: Arc::new(AtomicBool::new(false)),
             command_timeout: COMMAND_TIMEOUT,
+            workspace: None,
         }
     }
 }
@@ -71,6 +75,101 @@ impl ExecControl {
             ..Self::default()
         }
     }
+
+    /// 带上这次执行的工作目录。
+    pub fn in_workspace(mut self, workspace: Option<ProjectDir>) -> Self {
+        self.workspace = workspace;
+        self
+    }
+}
+
+/// 智能体干活的那个目录。**它就是边界**。
+///
+/// 以前相对路径按「程序从哪个目录启动」算，装好的程序就是安装目录，基本没法用；
+/// 而"工作目录之外"的判断也一直拿进程的当前目录当基准，等于没有边界。
+/// 现在基准由会话指定（`SessionTools::workspace`），
+/// 它同时管三件事：相对路径从哪算、命令在哪跑、什么算「外面」。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectDir {
+    root: PathBuf,
+}
+
+impl ProjectDir {
+    /// 从会话里存的字符串构造。
+    ///
+    /// 空串、以及**相对路径**都当没设：相对路径的基准本身就不确定，拿它当边界等于没有边界。
+    pub fn parse(raw: &str) -> Option<Self> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let path = Path::new(trimmed);
+        path.is_absolute().then(|| Self { root: normalize(path) })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// 把工具参数里的路径解析成绝对路径：相对路径按工作目录算。
+    pub fn resolve(&self, raw: &str) -> PathBuf {
+        let path = Path::new(raw);
+        if path.is_absolute() {
+            normalize(path)
+        } else {
+            normalize(&self.root.join(path))
+        }
+    }
+
+    /// 路径在不在边界内。**不访问文件系统**（目标可能还不存在）。
+    pub fn contains(&self, raw: &str) -> bool {
+        is_under(&self.resolve(raw), &self.root)
+    }
+
+    /// 给界面显示的短名：最后一段目录名。取不到就退回完整路径。
+    pub fn display_name(&self) -> String {
+        self.root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.root.display().to_string())
+    }
+}
+
+/// 进程当前目录的字符串形式，给测试当项目目录用。
+///
+/// 为什么不写死一个盘符：`ProjectDir::parse` 只认绝对路径，而 `C:/work` 在非 Windows
+/// 上是相对路径，测试会莫名其妙地退化成「没设目录」。拿当前目录就没这个问题，
+/// 而且 `a.rs` 这类相对路径照样落在边界内，测试不必改路径写法。
+#[cfg(test)]
+pub(crate) fn current_dir_string() -> String {
+    std::env::current_dir().expect("拿不到当前目录").display().to_string()
+}
+
+/// `path` 是否就是 `root` 或者它的子孙。
+///
+/// 按组件比而不是字符串前缀：`E:\a` 不该匹配上 `E:\ab`。
+/// Windows 上还要忽略大小写——用户和模型都可能在盘符或目录名上换个大小写，
+/// 按字节比会把「明明在目录里」判成「在外面」，白问一次。
+fn is_under(path: &Path, root: &Path) -> bool {
+    let mut rest = path.components();
+    for expected in root.components() {
+        match rest.next() {
+            Some(actual) if component_eq(actual, expected) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+#[cfg(target_os = "windows")]
+fn component_eq(a: Component<'_>, b: Component<'_>) -> bool {
+    a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn component_eq(a: Component<'_>, b: Component<'_>) -> bool {
+    a == b
 }
 
 /// 工具执行前需要用户点头的程度。
@@ -222,14 +321,32 @@ impl PendingTool {
 
     /// 这条调用执行前要不要用户确认。
     ///
-    /// 除了工具本身的级别，读文件还有一条额外规则：**路径落在当前工作目录之外，
-    /// 且看起来是敏感文件时也要确认**。否则模型可以直接把 `~/.ssh/id_rsa` 读走，
-    /// 而这些都是免确认的只读工具。
-    pub fn needs_approval(&self) -> bool {
+    /// 三道，任何一道命中都要问：
+    ///
+    /// 1. 工具本身的级别（写文件、跑命令一律要确认）；
+    /// 2. **路径落在工作目录之外**——这才是真正的边界。以前只有下面那条"敏感文件判断"，
+    ///    那只是防呆：模型换个路径就绕过去了；
+    /// 3. 读的是敏感文件（`.env`、密钥之类），即使就在工作目录里也问一次。
+    pub fn needs_approval(&self, workspace: Option<&ProjectDir>) -> bool {
         match guard_for(&self.name) {
             Guard::NeedsApproval => true,
-            Guard::Free => self.name == "read_file" && self.reads_a_sensitive_path(),
+            Guard::Free => self.touches_path_outside(workspace) || self.reads_a_sensitive_path(),
         }
+    }
+
+    /// 参数里的路径是否落在工作目录之外。
+    ///
+    /// **没有工作目录时一律算「在外」**：保守方向，多问一次不致命。
+    /// `path` 留空表示工作目录自己，不算越界；没有 `path` 参数的工具（`git_status`）
+    /// 取不到参数，也就不会因为这条被问。
+    fn touches_path_outside(&self, workspace: Option<&ProjectDir>) -> bool {
+        let Some(raw) = self.string_arg("path") else {
+            return false;
+        };
+        if raw.trim().is_empty() {
+            return false;
+        }
+        workspace.is_none_or(|workspace| !workspace.contains(raw))
     }
 
     fn reads_a_sensitive_path(&self) -> bool {
@@ -243,20 +360,22 @@ impl PendingTool {
     }
 }
 
-/// 敏感文件判断。**这是防呆不是防线**：模型可以换条路径绕过去，
-/// 真正的防线是"读取要用户点一次同意"，这里只负责把明显该问的挑出来。
+/// 敏感文件判断。**这是防呆不是防线**——模型可以换条路径绕过去，
+/// 真正的防线是「工作目录之外要授权」加上「读取要用户点一次同意」，
+/// 这里只负责把明显该问的挑出来。
 pub fn is_sensitive_path(path: &Path) -> bool {
-    let outside_cwd = !is_inside_cwd(path);
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    let sensitive_name = matches!(
-        name.as_str(),
-        "id_rsa" | "id_ed25519" | "id_ecdsa" | "id_dsa" | ".env" | ".env.local" | "credentials" | "credentials.json"
-    );
+    // `.env` 开头的都算（`.env.production`、`.env.local` …），不止那一个名字
+    let sensitive_name = name.starts_with(".env")
+        || matches!(
+            name.as_str(),
+            "id_rsa" | "id_ed25519" | "id_ecdsa" | "id_dsa" | "credentials" | "credentials.json"
+        );
     let sensitive_ext = matches!(
         path.extension()
             .and_then(|ext| ext.to_str())
@@ -268,21 +387,7 @@ pub fn is_sensitive_path(path: &Path) -> bool {
     // 数据目录里存着渠道配置和 API Key 的引用，一并在内
     let inside_data_dir = path.starts_with(crate::paths::data_dir());
 
-    sensitive_name || sensitive_ext || inside_data_dir || (outside_cwd && name.starts_with(".env"))
-}
-
-/// 路径是否在当前工作目录下（不做 canonicalize，允许文件还不存在）。
-fn is_inside_cwd(path: &Path) -> bool {
-    let Ok(cwd) = std::env::current_dir() else {
-        // 拿不到工作目录就没法判断"在外"，保守起见当成在外——多问一次不致命
-        return false;
-    };
-    let absolute = if path.is_absolute() {
-        normalize(path)
-    } else {
-        normalize(&cwd.join(path))
-    };
-    absolute.starts_with(normalize(&cwd))
+    sensitive_name || sensitive_ext || inside_data_dir
 }
 
 /// 消掉 `.` 和 `..`，不访问文件系统。`canonicalize` 在这里不能用：文件可能还不存在。
@@ -309,16 +414,16 @@ pub fn execute(pending: &PendingTool, control: &ExecControl) -> ToolResult {
     // 文件操作不产生进程，退出码一律 `None`；只有 `git_status` / `run_command` 会给。
     let (content, is_error, exit_code) = match pending.name.as_str() {
         "list_directory" => {
-            let (content, is_error) = list_directory(pending);
+            let (content, is_error) = list_directory(pending, control);
             (content, is_error, None)
         }
         "read_file" => {
-            let (content, is_error) = read_file(pending);
+            let (content, is_error) = read_file(pending, control);
             (content, is_error, None)
         }
         "git_status" => git_status(control),
         "write_file" => {
-            let (content, is_error) = write_file(pending);
+            let (content, is_error) = write_file(pending, control);
             (content, is_error, None)
         }
         "run_command" => run_command(pending, control),
@@ -409,12 +514,33 @@ pub fn disabled_result(pending: &PendingTool) -> ToolResult {
     }
 }
 
-fn list_directory(pending: &PendingTool) -> (String, bool) {
-    let dir = pending
+/// 取这次执行的工作目录。拿不到就回一条说明。
+///
+/// 正常情况下走不到这里：没设项目目录时，清单里根本不会有本机工具
+/// （见 `tool_ops::session_tool_specs`）。这是最后一道兜底——
+/// 万一被绕到这里，宁可回一句"跑不了"，也不要拿程序自己的目录凑数。
+fn workspace_or_error(control: &ExecControl) -> Result<&ProjectDir, String> {
+    control.workspace.as_ref().ok_or_else(|| {
+        "This session has no project folder set, so file and command tools are unavailable. \
+         Ask the user to pick one first."
+            .to_string()
+    })
+}
+
+fn list_directory(pending: &PendingTool, control: &ExecControl) -> (String, bool) {
+    let workspace = match workspace_or_error(control) {
+        Ok(workspace) => workspace,
+        Err(message) => return (message, true),
+    };
+    let raw = pending
         .string_arg("path")
         .filter(|path| !path.trim().is_empty())
         .unwrap_or(".");
-    match fs::read_dir(dir) {
+    // 相对路径按工作目录算——这是这次改动最实在的一条：以前按「程序从哪个目录启动」算，
+    // 装好的程序就是安装目录，模型说「看看这个项目」它会去翻 Perch 自己的目录。
+    let path = workspace.resolve(raw);
+    let dir = path.display().to_string();
+    match fs::read_dir(&path) {
         Ok(entries) => {
             let mut items = Vec::new();
             for entry in entries.flatten() {
@@ -442,24 +568,30 @@ fn list_directory(pending: &PendingTool) -> (String, bool) {
     }
 }
 
-fn read_file(pending: &PendingTool) -> (String, bool) {
-    let Some(path) = pending.string_arg("path") else {
+fn read_file(pending: &PendingTool, control: &ExecControl) -> (String, bool) {
+    let workspace = match workspace_or_error(control) {
+        Ok(workspace) => workspace,
+        Err(message) => return (message, true),
+    };
+    let Some(raw) = pending.string_arg("path") else {
         return ("缺少参数 path，或者它不是字符串。".to_string(), true);
     };
-    let file = match fs::File::open(path) {
+    let path = workspace.resolve(raw);
+    let path_text = path.display().to_string();
+    let file = match fs::File::open(&path) {
         Ok(file) => file,
-        Err(error) => return (format!("无法读取文件 {path}：{error}"), true),
+        Err(error) => return (format!("无法读取文件 {path_text}：{error}"), true),
     };
     let total = file.metadata().map(|meta| meta.len()).unwrap_or(0);
     // 只读开头一段：几百 MB 的日志整个读进内存，界面和模型都受不了
     let mut bytes = Vec::new();
     if let Err(error) = file.take(MAX_READ_BYTES).read_to_end(&mut bytes) {
-        return (format!("无法读取文件 {path}：{error}"), true);
+        return (format!("无法读取文件 {path_text}：{error}"), true);
     }
     // 文本文件里不会有 NUL 字节。二进制内容转成文字只是一堆乱码，还白白占上下文
     if bytes.contains(&0) {
         return (
-            format!("{path} looks like a binary file; only text files can be read."),
+            format!("{path_text} looks like a binary file; only text files can be read."),
             true,
         );
     }
@@ -480,8 +612,14 @@ fn read_file(pending: &PendingTool) -> (String, bool) {
 }
 
 fn git_status(control: &ExecControl) -> (String, bool, Option<i32>) {
+    let workspace = match workspace_or_error(control) {
+        Ok(workspace) => workspace,
+        Err(message) => return (message, true, None),
+    };
     let mut command = Command::new("git");
     command.args(["status", "--short"]);
+    // 在项目目录里跑，不是程序自己的目录
+    command.current_dir(workspace.root());
     match run_process(command, control, GIT_TIMEOUT) {
         Ok(output) if output.exit_code() == Some(0) => {
             let text = String::from_utf8_lossy(&output.stdout);
@@ -502,20 +640,30 @@ fn git_status(control: &ExecControl) -> (String, bool, Option<i32>) {
     }
 }
 
-fn write_file(pending: &PendingTool) -> (String, bool) {
-    let Some(path) = pending.string_arg("path") else {
+fn write_file(pending: &PendingTool, control: &ExecControl) -> (String, bool) {
+    let workspace = match workspace_or_error(control) {
+        Ok(workspace) => workspace,
+        Err(message) => return (message, true),
+    };
+    let Some(raw) = pending.string_arg("path") else {
         return ("缺少参数 path，或者它不是字符串。".to_string(), true);
     };
     let Some(content) = pending.string_arg("content") else {
         return ("缺少参数 content，或者它不是字符串。".to_string(), true);
     };
-    match fs::write(path, content) {
-        Ok(()) => (format!("已写入 {path}（{} 字节）。", content.len()), false),
-        Err(error) => (format!("无法写入文件 {path}：{error}"), true),
+    let path = workspace.resolve(raw);
+    let path_text = path.display().to_string();
+    match fs::write(&path, content) {
+        Ok(()) => (format!("已写入 {path_text}（{} 字节）。", content.len()), false),
+        Err(error) => (format!("无法写入文件 {path_text}：{error}"), true),
     }
 }
 
 fn run_command(pending: &PendingTool, control: &ExecControl) -> (String, bool, Option<i32>) {
+    let workspace = match workspace_or_error(control) {
+        Ok(workspace) => workspace,
+        Err(message) => return (message, true, None),
+    };
     let Some(command) = pending.string_arg("command") else {
         return ("缺少参数 command，或者它不是字符串。".to_string(), true, None);
     };
@@ -534,6 +682,10 @@ fn run_command(pending: &PendingTool, control: &ExecControl) -> (String, bool, O
         process.args(["-c", command]);
         process
     };
+
+    let mut process = process;
+    // 命令在项目目录里跑：模型说「跑一下测试」，它该跑的是这个项目的测试
+    process.current_dir(workspace.root());
 
     match run_process(process, control, control.command_timeout) {
         Ok(output) => {
@@ -732,6 +884,35 @@ pub fn truncate_middle(text: &str, max_chars: usize) -> String {
     )
 }
 
+/// 给模型看的「这次在哪儿干活」说明，拼进 system 消息。
+///
+/// 只在**真的带了本机工具**时才加（见 `reply_ops::make_job`）：没给工具却告诉它有个
+/// 项目目录，它会以为能读文件，白跑一轮再被拒。
+///
+/// 内容不跟着界面语言走——它和工具描述、工具输出一样是请求体的一部分，
+/// 同一个会话换个界面语言就变成另一个请求体，prompt 缓存会失效
+/// （取向见 `i18n_skip.txt` 第三类）。
+pub fn environment_preamble(workspace: &ProjectDir) -> String {
+    let shell = if cfg!(target_os = "windows") {
+        "PowerShell (invoked as `powershell -NoProfile -NonInteractive -Command`)"
+    } else {
+        "the system shell (invoked as `sh -c`)"
+    };
+    format!(
+        "# Environment\n\
+         \n\
+         - Operating system: {os}\n\
+         - Shell used by `run_command`: {shell}\n\
+         - Project folder (working directory): {dir}\n\
+         \n\
+         Relative paths in tool arguments are resolved against the project folder. \
+         Reading or writing anything outside it asks the user for permission first, \
+         so keep your work inside it unless the user asks otherwise.",
+        os = std::env::consts::OS,
+        dir = workspace.root().display(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -744,8 +925,17 @@ mod tests {
         }
     }
 
+    /// 测试用的项目目录：拿进程当前目录当根（就是 crate 根）。
+    ///
+    /// 这样 `src/main.rs`、`.` 这类相对路径都落在边界内，测试不必改路径写法；
+    /// 要造"在外面"的路径就拼临时目录或者上一级。
+    fn test_dir() -> ProjectDir {
+        ProjectDir::parse(&current_dir_string()).expect("当前目录是绝对路径")
+    }
+
     fn execute_default(pending: &PendingTool) -> ToolResult {
-        execute(pending, &ExecControl::default())
+        let control = ExecControl::default().in_workspace(Some(test_dir()));
+        execute(pending, &control)
     }
 
     #[test]
@@ -857,7 +1047,8 @@ mod tests {
         let control = ExecControl {
             command_timeout: Duration::from_secs(1),
             ..ExecControl::default()
-        };
+        }
+        .in_workspace(Some(test_dir()));
         let started = Instant::now();
         let result = execute(&pending("run_command", json!({ "command": command })), &control);
         assert!(started.elapsed() < Duration::from_secs(15), "超时之后应当马上返回");
@@ -875,7 +1066,7 @@ mod tests {
         let command = "Start-Sleep -Seconds 30";
         #[cfg(not(target_os = "windows"))]
         let command = "sleep 30";
-        let control = ExecControl::default();
+        let control = ExecControl::default().in_workspace(Some(test_dir()));
         let cancel = control.cancel.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(500));
@@ -943,13 +1134,147 @@ mod tests {
 
     #[test]
     fn read_and_list_are_free_but_execution_is_not() {
-        assert!(!pending("list_directory", json!({"path": "src"})).needs_approval());
-        assert!(!pending("read_file", json!({"path": "src/main.rs"})).needs_approval());
-        assert!(!pending("git_status", json!({})).needs_approval());
-        assert!(pending("write_file", json!({"path": "a.txt", "content": "x"})).needs_approval());
-        assert!(pending("run_command", json!({"command": "ls"})).needs_approval());
-        // 读敏感文件也要点头
-        assert!(pending("read_file", json!({"path": "~/.ssh/id_rsa"})).needs_approval());
+        let dir = test_dir();
+        let inside = Some(&dir);
+        assert!(!pending("list_directory", json!({"path": "src"})).needs_approval(inside));
+        assert!(!pending("read_file", json!({"path": "src/main.rs"})).needs_approval(inside));
+        assert!(!pending("git_status", json!({})).needs_approval(inside));
+        assert!(pending("write_file", json!({"path": "a.txt", "content": "x"})).needs_approval(inside));
+        assert!(pending("run_command", json!({"command": "ls"})).needs_approval(inside));
+        // 读敏感文件也要点头，哪怕它就在项目目录里
+        assert!(pending("read_file", json!({"path": "~/.ssh/id_rsa"})).needs_approval(inside));
+    }
+
+    #[test]
+    fn paths_outside_the_project_folder_need_approval() {
+        // **这是真正的边界**：以前只有 `is_sensitive_path` 那道防呆，模型换个路径就绕过去了
+        let dir = test_dir();
+        let inside = Some(&dir);
+        let outside = std::env::temp_dir().join("perch-outside.txt");
+        let outside = outside.to_str().expect("临时目录是 UTF-8");
+
+        assert!(
+            !pending("read_file", json!({ "path": "src/main.rs" })).needs_approval(inside),
+            "目录里的普通文件不该问"
+        );
+        assert!(
+            pending("read_file", json!({ "path": outside })).needs_approval(inside),
+            "目录之外的文件该问"
+        );
+        assert!(
+            pending("list_directory", json!({ "path": outside })).needs_approval(inside),
+            "列目录同样是在看你机器上的东西，也要问"
+        );
+    }
+
+    #[test]
+    fn without_a_project_folder_every_path_counts_as_outside() {
+        // 没有工作目录就没有基准，保守方向：一律当成在外
+        assert!(pending("read_file", json!({"path": "src/main.rs"})).needs_approval(None));
+        // `path` 留空表示"就是工作目录自己"，这种情况不算越界
+        assert!(!pending("list_directory", json!({"path": ""})).needs_approval(None));
+    }
+
+    #[test]
+    fn a_project_folder_must_be_absolute() {
+        // 相对路径的基准本身就不确定，拿它当边界等于没有边界
+        assert!(ProjectDir::parse("").is_none());
+        assert!(ProjectDir::parse("   ").is_none());
+        assert!(ProjectDir::parse("proj").is_none());
+        assert!(ProjectDir::parse("./proj").is_none());
+        assert!(ProjectDir::parse("E:/proj").is_some() || ProjectDir::parse("/tmp").is_some());
+    }
+
+    #[test]
+    fn relative_paths_are_resolved_against_the_project_folder() {
+        let dir = ProjectDir::parse(if cfg!(target_os = "windows") {
+            "C:/work"
+        } else {
+            "/work"
+        })
+        .expect("绝对路径");
+        let resolved = dir.resolve("src/main.rs");
+        assert!(resolved.is_absolute());
+        assert!(dir.contains("src/main.rs"));
+        assert!(dir.contains("."), "工作目录自己也算在里面");
+        // `..` 要能爬出去，否则模型写个 `../../x` 就绕过边界了
+        assert!(!dir.contains("../../x"));
+        assert!(!dir.contains(".."));
+    }
+
+    #[test]
+    fn path_containment_compares_whole_components() {
+        // 前缀比字符串会出事：`/work2` 不该被当成 `/work` 里面
+        let dir = ProjectDir::parse(if cfg!(target_os = "windows") {
+            "C:/work"
+        } else {
+            "/work"
+        })
+        .expect("绝对路径");
+        let sibling = if cfg!(target_os = "windows") {
+            "C:/work2/a"
+        } else {
+            "/work2/a"
+        };
+        assert!(!dir.contains(sibling));
+    }
+
+    #[test]
+    fn file_tools_refuse_to_run_without_a_project_folder() {
+        // 兜底：没设项目目录时清单里根本不会有本机工具，正常走不到这里。
+        // 万一被绕进来，宁可回一句"跑不了"，也不要拿程序自己的目录凑数。
+        let control = ExecControl::default();
+        for name in ["list_directory", "read_file", "write_file"] {
+            let args = if name == "write_file" {
+                json!({"path": "a.txt", "content": "x"})
+            } else {
+                json!({"path": "a.txt"})
+            };
+            let result = execute(&pending(name, args), &control);
+            assert!(result.is_error, "{name} 没有工作目录时应当拒绝执行");
+            assert!(
+                result.content.contains("project folder"),
+                "{name} 的说明要提到缺项目目录：{}",
+                result.content
+            );
+        }
+    }
+
+    #[test]
+    fn commands_run_inside_the_project_folder() {
+        // 以前按「程序从哪个目录启动」算，装好的程序就是安装目录——
+        // 模型说「看看这个项目」，它会去翻 Perch 自己的目录
+        let temp = tempfile::tempdir().expect("建临时目录");
+        let dir = ProjectDir::parse(&temp.path().display().to_string()).expect("绝对路径");
+        let control = ExecControl::default().in_workspace(Some(dir));
+        let result = execute(&pending("run_command", json!({"command": "pwd"})), &control);
+        assert!(!result.is_error, "{}", result.content);
+        // 临时目录名是一串随机字符：它出现在输出里，就说明命令确实在那个目录里跑
+        let marker = temp
+            .path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("临时目录名");
+        assert!(
+            result.content.contains(marker),
+            "命令该在项目目录里跑，得到 {}",
+            result.content.trim()
+        );
+    }
+
+    #[test]
+    fn the_environment_preamble_names_the_project_folder() {
+        let dir = ProjectDir::parse(if cfg!(target_os = "windows") {
+            "C:/work"
+        } else {
+            "/work"
+        })
+        .expect("绝对路径");
+        let text = environment_preamble(&dir);
+        // `normalize` 会把分隔符统一成平台的形式，所以比对也用 `root()` 的显示形式
+        assert!(text.contains(&dir.root().display().to_string()));
+        assert!(text.contains("run_command"), "要说明命令走哪个 shell");
+        assert!(text.contains("Operating system"));
     }
 
     #[test]
