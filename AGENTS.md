@@ -26,6 +26,11 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 
 - 技术栈：Rust（edition 2024）+ GPUI（`gpui-kit` 0.6.6，组件来自 gpui-component）。主要平台是 Windows。
 - 产品优先级：普通对话 → 多模态（图片、附件）→ MCP / Agent。
+  **2026-09-27 进度**：前两块已完成；MCP（stdio）已完成，Skills 与 Agent 安全收尾未做。
+  下一步是 **Chat/Agent 重新定义**，方案见 `AGENT_MODE_PLAN.md`（**动手前先读**）。
+- 文档分工：本文件是**权威开发规范**；`ROADMAP.md` 是进度；`TODO.md` 是待办总表；
+  `TECH_DEBT.md` 是技术债工单；`AGENT_MODE_PLAN.md` 是 Chat/Agent 方案（未动工）；
+  `I18N_PLAN.md` 是国际化结项记录。
 - 用户数据在 `%APPDATA%\Perch\`：
 
 | 内容 | 位置 |
@@ -401,6 +406,22 @@ cx.spawn(async move |this, cx| {
 - 模板变量（`{{clipboard}}` 等）只在插入模板时展开，发送消息时不展开，避免剪贴板内容被悄悄发出去。
 - OpenAI 渠道上的推理模型不发送默认温度（会报 400）。
 
+**2026-09-27 新增（Chat/Agent 重新定义，方案见 `AGENT_MODE_PLAN.md`，未动工）：**
+
+- **对话与智能体的区别是「有没有本机文件权限」，不是「带不带工具」。**
+  对话可以带 MCP 和 Skills（用户要能在对话里挂一个搜索 MCP 提高回答质量），
+  但**碰不到本机文件**；智能体才有读 / 写 / 删 / 建本机文件和执行命令的权限。
+  实现上这必须是**结构性保证**——`ToolSource::Local` 只在智能体模式下生效，
+  就算 `sources` 里塞了它也得被忽略，不能只靠界面不显示那个勾选框。
+- **MCP 默认不勾，由用户自己选。**新会话的 `sources` 是空的；加一台服务器不等于用它。
+- **「智能体不是沙盒」，这句话必须出现在界面上和文档里。**
+  Windows 桌面上没有便宜的进程级沙盒（各方案的实际成本见 `AGENT_MODE_PLAN.md` 第七节），
+  第一期只做「工作目录 + 授权 + 审计日志 + 完全权限开关」这套**边界**。
+  ⚠️ 不能让用户以为有沙盒——他会在那个心理预期下让模型跑脚本。
+- **完全权限档位要按"真的完全"来设计和写文案**，不能让用户以为它还留了保护。
+  仅保留两条硬底线：Perch 自己的数据目录仍然拦、工作目录之外放行但记审计日志
+  （**待拍板**，见 `TODO.md` 第十一节）。
+
 > **授权的分级口径（2026-09-26 与用户确认）。**
 > "每次授权"按字面执行会让模型读一个文件都要点一次确认，Agent 就没法用了，
 > 所以按操作的危险程度分两级，实现见 `local_tools.rs::Guard`：
@@ -465,9 +486,9 @@ cx.spawn(async move |this, cx| {
 | 1 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
 | 2 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
 | 3 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
-| 4 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
+| 4 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` **11 个参数**——2026-09-27 核正，原先这里写的是 8） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
 | 5 | 重复的小组件：`section` 和 `form_card`（几乎逐行相同）、`labeled` 和 `row_title`（都是"标题+说明"） | `ui/settings.rs`、`ui/model_editor_dialog.rs`、`ui/params.rs` | 合并到 `ui/widgets.rs`。⚠️ 本条目原先还列了 `filter_chip` 和 `chip`，**2026-09-26 核实为错判**——前者是 `Button`、后者是手绘 `Div`，视觉与交互都不同，不该合并 |
-| 6 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
+| 6 | 全部会话和消息常驻内存 | `model.rs`、`storage.rs` | 见 ROADMAP。⚠️ **"保存时全量比对"是误记**——`storage.rs::save` 比对的是签名（`session_signature` / `message_signature`），只写变化的部分。要改的只是加载侧 |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
 
@@ -501,6 +522,14 @@ cx.spawn(async move |this, cx| {
 > ⚠️ 同一批还改正了一个**文档与代码不符**处：本表原文说 Responses「请求体走 `input`」，
 > 实际 `openai_body()` 对 Responses 渠道发的仍是 `messages`。**请求侧还是不对**，
 > 只是响应侧对了。已记入 `TECH_DEBT.md` 第五节，真正启用该渠道时单独修。
+
+> **2026-09-27 晚核正两处**（都不是代码问题，是这张表本身写错了）：
+> ① #4 里 `token_row` 的参数个数写的是 8，实际是 **11**；
+> ② #6 里"保存时全量比对"是误记——`storage.rs::save` 比对的是签名，只写变化的部分。
+> 另外把 #1/#2/#3 三条与本文件外的表述对齐了一次，编号没动（**6 条不变**）。
+>
+> ⚠️ **教训：这张表和 `TECH_DEBT.md` 里的"具体数字"（参数个数、行数、文件数）
+> 最容易过期，改的时候顺手核一遍，别照抄。**
 
 ---
 

@@ -10,14 +10,23 @@
 
 理由见第四节。简单说：P3 要新建工具调用协议。动工时（P3-1 之前）这 9 条里
 **只有 3 条会被 P3 碰到**，其中 2 条恰好是 P3 的前置条件——提前清反而要改两遍。
-现在 P3-1 / P3-2 做完了，那 3 条里已有 2 条就地结清（`#7 Responses 格式`、
-`#4 本地工具阻塞`），只有"消息常驻内存"那条按计划留到 v2。
+现在 **P3-1 / P3-2 / P3-3（stdio）都做完了**，那 3 条里已有 2 条就地结清
+（`#7 Responses 格式`、`#4 本地工具阻塞`），只有"消息常驻内存"那条按计划留到 v2。
 **另：#3「启动失败直接 panic」也已在 2026-09-27 结清**——与 P3 无关，属顺手做掉。
+
+> **2026-09-27 晚**：P3-3 这一批**没有新增技术债**（MCP 的连接、清单、授权都按
+> 既有的分层写，没绕路）。下面 6 条一条没动。新增的只有"文档脱节"这条
+> 过程性教训，记在第五节。
+> 下一步的大块是 **Chat/Agent 重新定义**（方案见 `AGENT_MODE_PLAN.md`）——
+> 它要重写 `SessionTools` 和 `reply_ops::tool_list_for`，**和 #6（消息常驻内存）无关**，
+> 但会让 `ChatMessageReq` 再多几个字段，所以那条"再往上堆之前先按角色拆枚举"的建议
+> 更要当回事了（第五节）。
 
 ## 二、总览
 
-代码规模：**56 个 rs 文件 / 约 20500 行**（P3-1 拆出 `llm_request.rs` / `llm_stream.rs` / `llm_tools.rs`，
-P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
+代码规模：**63 个 rs 文件 / 26145 行**（2026-09-27 晚实测；`src/` 38 个 + `src/ui/` 25 个）。
+（上一次记的是"56 个 / 约 20500 行"，那之后 P3-3 加了 `mcp.rs` / `mcp_ops.rs` / `tool_ops.rs`、
+`ui/tool_picker.rs` / `ui/settings_mcp.rs`，附件入口加了 `attachment_ops.rs`。）
 下面"规模"是逐条读过代码后估的**净改动量**（不含格式化噪声）。
 
 | # | 问题 | 性质 | 规模 | 阻塞谁 | 建议 |
@@ -127,14 +136,14 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 
 逐对读过源码，AGENTS.md §13 的第 5 条**写错了**：
 
-- `filter_chip`（`ui/sidebar.rs:180`）与 `chip`（`ui/mod.rs:161`）**不是一个东西**：
+- `filter_chip`（`ui/sidebar.rs`）与 `chip`（`ui/mod.rs`）**不是一个东西**：
   前者是 `Button` + xsmall/primary/ghost，后者是 `h_flex` 手绘的 28px 圆角块。
   两者视觉与交互都不同，**不该合并**，这条应从表里删掉。
 - 真正重复的是另外两对半：
-  - `section`（`ui/settings.rs:140`，7 处调用）与 `form_card`（`ui/model_editor_dialog.rs:375`，3 处调用）
+  - `section`（`ui/settings.rs`，7 处调用）与 `form_card`（`ui/model_editor_dialog.rs`，3 处调用）
     —— **几乎逐行相同**，差一个可选的 `status` 副标题。合并成 `ui/widgets.rs::form_card(title, status, p, rows)`，
     `status: Option<&str>` 为 `None` 时就是 `section`。
-  - `labeled`（`ui/params.rs:220`）与 `row_title`（`ui/model_editor_dialog.rs:402`）
+  - `labeled`（`ui/params.rs`）与 `row_title`（`ui/model_editor_dialog.rs`）
     —— 都是"标题 + 说明"，前者横排（说明在右）、后者竖排（说明在下）。
     抽成带 `axis` 参数的一个函数即可。
 
@@ -143,8 +152,8 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 ### #1 远程图片自动加载并落盘 —— 待你拍板
 
 **现状已核实**：
-- `ui/markdown_image.rs:179` 注释明写"远程网络图片：直接发起加载并显示，**不需手动点击**"。
-- 缓存落在 `%APPDATA%\Perch\cache\images\`（`image_http.rs:234`，文件名是 URL 的 hash）。
+- `ui/markdown_image.rs` 里有一行注释明写"远程网络图片：直接发起加载并显示，**不需手动点击**"。
+- 缓存落在 `%APPDATA%\Perch\cache\images\`（`image_http.rs::image_cache_path`，文件名是 URL 的 hash）。
 - **没有任何容量上限，也没有任何清理逻辑**（全项目搜不到 evict/remove/TTL）。
 - 安全侧仍有兜底：`is_blocked_host` 拦本机与局域网地址、`MAX_IMAGE_BYTES` 限制单张大小。
 
@@ -158,9 +167,9 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 ### #2 models.dev 自动同步 —— 待你拍板
 
 **现状已核实**：
-- `main.rs:44` 无条件调用 `sync_cache_background(false)`——**每次启动都访问外网**，用户不知情。
-- `models_dev.rs:157` 自己 `std::thread::spawn` + `new_current_thread` runtime，
-  而 `app.rs:42` 已经有现成的 `runtime()`（AGENTS.md §7 明确要求用后者）。
+- `main.rs::main` 无条件调用 `models_dev::sync_cache_background(false)`——**每次启动都访问外网**，用户不知情。
+- `models_dev.rs::sync_cache_background` 自己 `std::thread::spawn` + `new_current_thread` runtime，
+  而 `app.rs::runtime` 已经有现成的运行时（AGENTS.md §7 明确要求用后者）。
 - `Client::builder()` 不带代理。
 - 失败路径全是 `return` / `let _ =`，**全静默**。
 
@@ -168,7 +177,12 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 
 需要你定：
 - 是否保留自动同步？（保留的话改成 `runtime()` + 走代理 + `AppConfig` 加 `models_dev_enabled` 开关
-  + 失败弹一次 toast，约 30 行；参考 `ui/settings_general.rs:153` 的 `Switch` 范式）
+  + 失败弹一次 toast，约 30 行；参考 `ui/settings_general.rs` 里 `Switch::new("local-tools-enabled")`
+  那个开关的写法）
+
+⚠️ **2026-09-27 补充**：即使保留自动同步，**价格也是拿不到的**——
+  实测缓存里 428 个模型 **`cost` 字段 0 条**。所以这条和 `TODO.md` 第十节
+  「用量看板费用显示 $0.00」是同一个根因，修的时候一起看。
 
 ### ~~#7 OpenAI Responses 渠道格式不对~~ —— ✅ 2026-09-26 已结清
 **结清时的实际情况**（留作记录，别再按这个改）：
@@ -192,7 +206,7 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 
 ### #6 全部会话消息常驻内存 —— 放 v2
 
-`storage.rs:79` 加载时把**所有会话的所有消息** `SELECT ... ORDER BY position` 全部读进内存。
+`storage.rs::load` 把**所有会话的所有消息** `SELECT ... ORDER BY position` 全部读进内存。
 `.messages` 字段散在 **56 处**（`session_ops.rs` 16、`llm.rs` 11、`model.rs` 10、`reply_ops.rs` 5、
 `ui/chat.rs` 4、`app.rs` 4、`session_list_ops.rs` 3…）。
 
@@ -203,8 +217,8 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 它比对的是签名而不是全量重写。
 
 建议：v2 做「按需加载当前会话的消息 + 侧边栏只用摘要列」。
-`storage.rs:44` 的 `SELECT` 其实**已经**没有带消息（`messages: Vec::new()` 占位），
-所以真正要改的是 `storage.rs:79-84` 那段"逐会话把消息塞回内存"的循环，以及调用点的取数方式。
+`storage.rs::load` 里那条列会话的 `SELECT` 其实**已经**没有带消息（`messages: Vec::new()` 占位），
+所以真正要改的是它后面"逐会话把消息塞回内存"的那段循环，以及调用点的取数方式。
 
 ## 四、为什么建议先做 P3/P4
 
@@ -230,6 +244,31 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
 ---
 
 ## 五、新发现
+
+### P3-3 期间（2026-09-27）
+
+- **① 文档与代码脱节本身也是一种债，而且比代码债更难发现。**
+  这一天代码推进了 P3-3 全套 + 附件入口三轮，但 `TODO.md` 的进度表还写着
+  "P3-3 ❌ 没开工、测试 126 个"，`ROADMAP.md` 的 P3 也停在"未开工"。
+  后果是**下一次接手的人（包括我自己）会按过期的文档判断现状**——
+  比如以为 MCP 还没做，或者以为测试数是 126。
+  **约定**：一批功能做完、准备收工时，四份文档一起过一遍；宁可只改数字，也别留假话。
+  这次同步的范围记在 `TODO.md` 第十三节。
+
+- **② 附件入口「选完才被拒」这个毛病改了三轮才彻底解决，值得记一笔。**
+  第一轮做了 `required_capabilities` 闸门，但按钮外观没变、文件对话框里仍留着
+  「所有文件 (\*.\*)」；第二轮改成按类型分菜单，但**接不住的类型仍然灰着摆出来**；
+  第三轮才变成"只摆收得下的项"。
+  教训：**闸门的判据要和界面一致**。摆出来能点的东西，必须真的能用；
+  灰显不算"一致"——用户会以为"点一下也许能行"，而且每多一行就把菜单撑长一点。
+  ⚠️ 顺带记一个 GPUI 事实：`Button::dropdown_menu_with_anchor` **不会自己画下拉箭头**
+  （`DropdownMenuPopover` 里没这段），模型选择器那个 `⌄` 是显式 `.dropdown_caret(true)` 来的。
+  要"看得出点开是菜单"就得自己加。
+
+- **③ models.dev 缓存里 428 个模型，`cost` 字段 0 条**（2026-09-27 重新核实）。
+  这就是用量看板费用显示 `$0.00` 的原因（`TODO.md` 第十节）。
+  写在这里是因为**它看起来像"没数据"，实际更可能是字段改名了**——
+  真要修的时候先查 models.dev 现在的数据格式，别急着补内置价格表。
 
 ### P3-2 期间（2026-09-26）
 
@@ -270,3 +309,8 @@ P3-2 新增 `local_tools.rs` / `agent_loop.rs`）。
   但那样引用会变长，权衡由你定。
 - 新发现的问题记进 AGENTS.md §13（那份是权威），在本文补上排期信息。
 - 本文里**不写行号**，行号必然过期（已经踩过）。只写函数名与文件路径。
+- ⚠️ **数字也要复核，别照抄。**代码规模、测试数、文件数这类"看起来不会变"的数字
+  最容易过期——本文第二节的"56 个文件 / 20500 行"就是这么变成假话的。
+  改文档时顺手跑一下 `find src -name "*.rs" | wc -l` 和 `cargo test --bin perch`。
+- ⚠️ **文档与代码脱节也是债**，见第五节 P3-3 期间第 ① 条。
+  一批功能收工时，四份文档（`ROADMAP.md` / `TODO.md` / `AGENTS.md` / 本文）一起过一遍。
