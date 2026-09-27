@@ -140,7 +140,10 @@ fn migrate_legacy_files(dir: &Path) {
 }
 
 /// 递归复制目录。标准库没有现成的，这里手写一份。
-fn copy_dir_all(from: &Path, to: &Path) -> io::Result<()> {
+///
+/// `pub(crate)` 是因为导入 Skill 也要用它（见 `skill_ops.rs`）——再写一份递归复制，
+/// 两份迟早会在「软链接怎么算」「权限位要不要带」这类细节上走偏。
+pub(crate) fn copy_dir_all(from: &Path, to: &Path) -> io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
@@ -242,6 +245,15 @@ pub fn reveal(path: &Path) -> io::Result<()> {
 pub fn attachments_dir() -> PathBuf {
     let dir = data_dir().join("attachments");
     // 建不出来也无所谓：真往里写文件时 file_store 还会再建一次并报错，不用在这儿打断启动
+    let _ = fs::create_dir_all(&dir);
+    dir
+}
+
+/// Skills 目录：一个子目录一个 skill，入口是里面的 `SKILL.md`。
+///
+/// 和附件一样，建不出来也不打断启动——真读的时候 `skills::reload` 会当成"一个都没装"。
+pub fn skills_dir() -> PathBuf {
+    let dir = data_dir().join("skills");
     let _ = fs::create_dir_all(&dir);
     dir
 }

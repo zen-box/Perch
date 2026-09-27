@@ -115,6 +115,7 @@ fn render_tool_panel(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> 
             let source = group.source.clone();
             let label = match &group.label {
                 SourceLabel::Local => tr(lang, Key::LocalTools).to_string(),
+                SourceLabel::Skill => tr(lang, Key::ToolSourceSkills).to_string(),
                 SourceLabel::McpServer(name) => name.clone(),
             };
             // 有 note 就把「N 个工具」换成原因：这一行现在一个工具都给不出来，
@@ -122,6 +123,7 @@ fn render_tool_panel(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> 
             let trailing = match group.note {
                 Some(SourceNote::LocalToolsOff) => tr(lang, Key::LocalToolsOffNote).to_string(),
                 Some(SourceNote::NeedsWorkspace) => tr(lang, Key::WorkspaceMissing).to_string(),
+                Some(SourceNote::NoSkills) => tr(lang, Key::ToolSourceNoSkills).to_string(),
                 None => tr_args(lang, Key::ToolCount, &[group.tool_count().to_string().as_str()]),
             };
             let trailing_color = if group.note.is_some() {
@@ -166,6 +168,7 @@ fn render_tool_panel(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> 
             let group = &groups[*ix];
             let label = match &group.label {
                 SourceLabel::Local => tr(lang, Key::LocalTools).to_string(),
+                SourceLabel::Skill => tr(lang, Key::ToolSourceSkills).to_string(),
                 SourceLabel::McpServer(name) => name.clone(),
             };
             let mut block = vec![

@@ -19,6 +19,7 @@ use crate::llm_tools::ToolSpec;
 use crate::mcp_ops::McpState;
 use crate::model::{ChatSession, LegacyTools, Permission, SessionMode, SessionTools, ToolSource};
 use crate::model_info::Capability;
+use crate::skills::SkillCatalog;
 
 /// 选择器里的一条来源下挂着的工具（只在「高级」折叠里显示）。
 pub(crate) struct ToolOption {
@@ -29,25 +30,27 @@ pub(crate) struct ToolOption {
 
 /// 来源的显示名。
 ///
-/// 本机那项要跟着界面语言走，所以只在这里留个标记，文案由界面层渲染；
+/// 本机和 Skills 那两项要跟着界面语言走，所以只在这里留个标记，文案由界面层渲染；
 /// 服务器名是用户自己起的，原样显示。
-///
-/// （Skills 那一项等接入之后再加，见 `AGENT_MODE_PLAN.md` 第九节。）
 pub(crate) enum SourceLabel {
     Local,
+    /// 装进数据目录的 Skills。
+    Skill,
     McpServer(String),
 }
 
 /// 这一行来源**为什么现在给不出工具**。
 ///
-/// 只有本机那一行用得上。MCP 服务器给不出工具的原因（没连上、一个工具都没暴露）
-/// 已经显示在服务器名旁边了，不用在这里再说一遍。
+/// 只有本机那一行和 Skills 那一行用得上。MCP 服务器给不出工具的原因（没连上、
+/// 一个工具都没暴露）已经显示在服务器名旁边了，不用在这里再说一遍。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SourceNote {
     /// 设置里的「允许智能体读写本机文件」关着
     LocalToolsOff,
     /// 还没选项目目录——本机工具没有"从哪算"的基准，所以一个都不给
     NeedsWorkspace,
+    /// 装是装了，但全被停用了
+    NoSkills,
 }
 
 /// 选择器里的一行来源。
@@ -71,11 +74,13 @@ impl SourceGroup {
 /// 选择器的计数、按钮角标、真正发出去的清单全从这里取，免得出现
 /// 「选择器里显示 13 个、实际发出去 0 个」这种对不上的情况。
 ///
-/// 顺序固定：本机工具在前，MCP 按 `config.mcp_servers` 的顺序。同一份工具集每次
-/// 序列化出来要逐字节一致，对端才能命中 prompt 缓存——**所以这里只做过滤，绝不重排**。
+/// 顺序固定：本机工具在前，然后是 Skills，MCP 按 `config.mcp_servers` 的顺序。同一份工具集
+/// 每次序列化出来要逐字节一致，对端才能命中 prompt 缓存——**所以这里只做过滤，绝不重排**。
 pub(crate) fn session_tool_specs(
     session: &ChatSession,
     local_tools_enabled: bool,
+    skills: &SkillCatalog,
+    disabled_skills: &[String],
     mcp: &McpState,
     servers: &[McpServerConfig],
 ) -> Vec<ToolSpec> {
@@ -91,6 +96,13 @@ pub(crate) fn session_tool_specs(
     //    这次要消掉的东西，不能留一个隐式兜底（产品决策，见 AGENTS.md §11）。
     if local_tools_enabled && wants(&ToolSource::Local) && session.workspace().is_some() {
         specs.extend(crate::local_tools::specs());
+    }
+
+    // Skills。**对话模式也能用**——它读的只有 Perch 自己的 skills 目录，碰不到用户的文件系统
+    // （见 `AGENT_MODE_PLAN.md` 第九节）。一个都没装、或者全被停用时一个工具都不给：
+    // 模型拿着 `load_skill` 却没有任何 skill 可读，只会白试一轮。
+    if wants(&ToolSource::Skill) && skills.enabled(disabled_skills).next().is_some() {
+        specs.extend(crate::skills::specs());
     }
 
     for (server, tools) in mcp.usable_by_server(servers) {
@@ -277,6 +289,30 @@ impl AppState {
             }
         }
 
+        // Skills：**对话和智能体都出现**。它读的只有 Perch 自己的 skills 目录，碰不到用户的
+        // 文件系统，所以对话模式用它没有风险——这正是它和本机工具的区别（AGENT_MODE_PLAN 第九节）。
+        // 一个都没装时整行不显示：摆一行空的说"还没装"，不如让用户去设置页装。
+        if !self.skills.all().is_empty() {
+            let any_enabled = self.skills.enabled(&self.config.disabled_skills).next().is_some();
+            let note = (!any_enabled).then_some(SourceNote::NoSkills);
+            groups.push(SourceGroup {
+                source: ToolSource::Skill,
+                label: SourceLabel::Skill,
+                note,
+                tools: if note.is_none() {
+                    crate::skills::specs()
+                        .into_iter()
+                        .map(|spec| ToolOption {
+                            name: spec.name,
+                            description: spec.description,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            });
+        }
+
         for (server, tools) in self.mcp.usable_by_server(&self.config.mcp_servers) {
             groups.push(SourceGroup {
                 source: ToolSource::Mcp {
@@ -307,6 +343,8 @@ impl AppState {
                 session_tool_specs(
                     session,
                     self.config.local_tools_enabled,
+                    &self.skills,
+                    &self.config.disabled_skills,
                     &self.mcp,
                     &self.config.mcp_servers,
                 )
@@ -568,7 +606,7 @@ mod tests {
             }),
             ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
         };
-        assert!(session_tool_specs(&chat, false, &mcp, &[]).is_empty());
+        assert!(session_tool_specs(&chat, false, &SkillCatalog::default(), &[], &mcp, &[]).is_empty());
         assert!(
             !chat.tool_sources().is_empty(),
             "对话模式下 MCP 来源是生效的，只有本机被剔掉"
@@ -579,8 +617,48 @@ mod tests {
             tools: Some(agent_tools()),
             ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
         };
-        assert!(session_tool_specs(&agent, false, &mcp, &[]).is_empty());
-        assert!(!session_tool_specs(&agent, true, &mcp, &[]).is_empty());
+        assert!(session_tool_specs(&agent, false, &SkillCatalog::default(), &[], &mcp, &[]).is_empty());
+        assert!(!session_tool_specs(&agent, true, &SkillCatalog::default(), &[], &mcp, &[]).is_empty());
+    }
+
+    /// 测试用的技能快照：装了一个叫 `weekly` 的技能。
+    fn one_skill() -> SkillCatalog {
+        SkillCatalog::for_tests(vec![crate::skills::Skill {
+            id: "weekly".into(),
+            title: "weekly".into(),
+            description: "把流水账整理成周报".into(),
+            body: "先看本周的提交。".into(),
+            dir: std::path::PathBuf::from("/skills/weekly"),
+            files: Vec::new(),
+        }])
+    }
+
+    #[std::prelude::v1::test]
+    fn skills_are_offered_in_chat_mode_too() {
+        // **这条是 Skills 和本机工具的根本区别**：它读的只有 Perch 自己的技能目录，
+        // 碰不到用户的文件系统，所以对话模式也能用（见 AGENT_MODE_PLAN 第九节）。
+        let catalog = one_skill();
+        let chat = ChatSession {
+            tools: Some(SessionTools {
+                sources: Some(vec![ToolSource::Skill]),
+                ..SessionTools::default()
+            }),
+            ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
+        };
+        let specs = session_tool_specs(&chat, false, &catalog, &[], &McpState::default(), &[]);
+        assert!(specs.iter().any(|spec| spec.name == crate::skills::LOAD_SKILL));
+        assert!(
+            !specs.iter().any(|spec| spec.name == "read_file"),
+            "对话模式勾了 Skills 也不该顺带给出本机工具"
+        );
+
+        // 全停用了：一个工具都不给。模型拿着 `load_skill` 却没有东西可读，只会白试一轮。
+        let disabled = vec!["weekly".to_string()];
+        assert!(session_tool_specs(&chat, false, &catalog, &disabled, &McpState::default(), &[]).is_empty());
+
+        // 没勾 Skill 来源：也不给（对话的默认是「什么都不带」）
+        let bare = ChatSession::new("t".into(), "f".into(), "m".into(), "p".into());
+        assert!(session_tool_specs(&bare, false, &catalog, &[], &McpState::default(), &[]).is_empty());
     }
 
     #[std::prelude::v1::test]
@@ -596,7 +674,7 @@ mod tests {
         };
         assert!(session.workspace().is_none());
         assert!(
-            session_tool_specs(&session, true, &mcp, &[]).is_empty(),
+            session_tool_specs(&session, true, &SkillCatalog::default(), &[], &mcp, &[]).is_empty(),
             "没项目目录时本机工具一个都不该给"
         );
     }
@@ -611,7 +689,9 @@ mod tests {
             ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
         };
         assert!(session.workspace().is_none());
-        assert!(session_tool_specs(&session, true, &McpState::default(), &[]).is_empty());
+        assert!(
+            session_tool_specs(&session, true, &SkillCatalog::default(), &[], &McpState::default(), &[]).is_empty()
+        );
     }
 
     #[std::prelude::v1::test]
@@ -659,7 +739,7 @@ mod tests {
             }),
             ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
         };
-        let specs = session_tool_specs(&session, true, &McpState::default(), &[]);
+        let specs = session_tool_specs(&session, true, &SkillCatalog::default(), &[], &McpState::default(), &[]);
         assert!(!specs.is_empty());
         assert!(!specs.iter().any(|spec| spec.name == "run_command"));
         assert!(specs.iter().any(|spec| spec.name == "read_file"));

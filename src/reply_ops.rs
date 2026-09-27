@@ -195,6 +195,8 @@ impl AppState {
                 model,
                 session,
                 self.config.local_tools_enabled,
+                &self.skills,
+                &self.config.disabled_skills,
                 &self.mcp,
                 &self.config.mcp_servers,
             )
@@ -207,6 +209,14 @@ impl AppState {
             && let Some(dir) = session.workspace()
         {
             attach_environment(&mut messages, &dir);
+        }
+        // 带了 Skills 工具才附清单。清单里只有「名字 + 一句描述」，正文要模型自己调
+        // `load_skill` 取——这正是 Skills 平时不占上下文的原因。
+        // 停用过的 skill 不列：列了模型会去调，然后拿到一句「没这个 skill」白跑一轮。
+        if tools.iter().any(|tool| crate::skills::is_skill_tool(&tool.name))
+            && let Some(text) = crate::skills::catalog_prompt(self.skills.enabled(&self.config.disabled_skills))
+        {
+            attach_system_text(&mut messages, &text);
         }
         Some(Job {
             key: stream_key(spec.message_id, spec.variant_id),
@@ -452,13 +462,15 @@ fn tool_list_for(
     model: &ModelConfig,
     session: &ChatSession,
     local_tools_enabled: bool,
+    skills: &crate::skills::SkillCatalog,
+    disabled_skills: &[String],
     mcp: &McpState,
     servers: &[McpServerConfig],
 ) -> Vec<ToolSpec> {
     if !model.effective_capabilities().contains(&Capability::Tools) {
         return Vec::new();
     }
-    crate::tool_ops::session_tool_specs(session, local_tools_enabled, mcp, servers)
+    crate::tool_ops::session_tool_specs(session, local_tools_enabled, skills, disabled_skills, mcp, servers)
 }
 
 /// 把「这次在哪儿干活」拼进 system 消息。
@@ -469,14 +481,21 @@ fn tool_list_for(
 /// 内容对同一份会话是固定的（路径不变就逐字节一致），所以不影响 prompt 缓存；
 /// 换项目目录会改请求体，那是应该的——边界确实变了。
 fn attach_environment(messages: &mut [ChatMessageReq], dir: &crate::local_tools::ProjectDir) {
+    attach_system_text(messages, &crate::local_tools::environment_preamble(dir));
+}
+
+/// 往 system 消息末尾追加一段说明。
+///
+/// 环境说明和 Skills 清单都走这里，追加顺序就是调用顺序（环境在前、Skills 在后）——
+/// 两处各自实现一遍的话，迟早会出现一处塞在开头、一处塞在末尾。
+fn attach_system_text(messages: &mut [ChatMessageReq], text: &str) {
     let Some(system) = messages.iter_mut().find(|message| message.role == "system") else {
         return;
     };
-    let preamble = crate::local_tools::environment_preamble(dir);
     system.content = if system.content.trim().is_empty() {
-        preamble
+        text.to_string()
     } else {
-        format!("{}\n\n{preamble}", system.content)
+        format!("{}\n\n{text}", system.content)
     };
 }
 
@@ -788,7 +807,18 @@ mod tests {
         let (mcp, servers) = mcp_with_fetch();
 
         // 新会话（`tools == None`）＝ 对话、什么都不带
-        assert!(tool_list_for(&model, &session(None), true, &mcp, &servers).is_empty());
+        assert!(
+            tool_list_for(
+                &model,
+                &session(None),
+                true,
+                &crate::skills::SkillCatalog::default(),
+                &[],
+                &mcp,
+                &servers
+            )
+            .is_empty()
+        );
 
         // 对话 + 勾了 fetch：只给 MCP，本机一个都不给
         let chat_with_mcp = SessionTools {
@@ -797,7 +827,15 @@ mod tests {
             }]),
             ..SessionTools::default()
         };
-        let tools = tool_list_for(&model, &session(Some(chat_with_mcp)), true, &mcp, &servers);
+        let tools = tool_list_for(
+            &model,
+            &session(Some(chat_with_mcp)),
+            true,
+            &crate::skills::SkillCatalog::default(),
+            &[],
+            &mcp,
+            &servers,
+        );
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "mcp__fetch__fetch");
 
@@ -807,7 +845,16 @@ mod tests {
             ..SessionTools::default()
         };
         assert!(
-            tool_list_for(&model, &session(Some(sneaky)), true, &mcp, &servers).is_empty(),
+            tool_list_for(
+                &model,
+                &session(Some(sneaky)),
+                true,
+                &crate::skills::SkillCatalog::default(),
+                &[],
+                &mcp,
+                &servers
+            )
+            .is_empty(),
             "对话模式下本机来源是无效的，这条要落在代码里"
         );
     }
@@ -818,7 +865,15 @@ mod tests {
         let (mcp, servers) = mcp_with_fetch();
 
         let agent = agent_tools();
-        let tools = tool_list_for(&model, &session(Some(agent)), true, &mcp, &servers);
+        let tools = tool_list_for(
+            &model,
+            &session(Some(agent)),
+            true,
+            &crate::skills::SkillCatalog::default(),
+            &[],
+            &mcp,
+            &servers,
+        );
         assert_eq!(tools.len(), crate::local_tools::specs().len());
         assert!(
             !tools.iter().any(|tool| tool.name.starts_with("mcp__")),
@@ -835,7 +890,15 @@ mod tests {
             ]),
             ..agent_tools()
         };
-        let tools = tool_list_for(&model, &session(Some(with_mcp)), true, &mcp, &servers);
+        let tools = tool_list_for(
+            &model,
+            &session(Some(with_mcp)),
+            true,
+            &crate::skills::SkillCatalog::default(),
+            &[],
+            &mcp,
+            &servers,
+        );
         assert_eq!(tools.len(), crate::local_tools::specs().len() + 1);
         assert_eq!(tools.last().map(|tool| tool.name.as_str()), Some("mcp__fetch__fetch"));
     }
@@ -851,7 +914,18 @@ mod tests {
             }]),
             ..agent_tools()
         };
-        assert!(tool_list_for(&model, &session(Some(picked)), true, &mcp, &servers).is_empty());
+        assert!(
+            tool_list_for(
+                &model,
+                &session(Some(picked)),
+                true,
+                &crate::skills::SkillCatalog::default(),
+                &[],
+                &mcp,
+                &servers
+            )
+            .is_empty()
+        );
     }
 
     #[std::prelude::v1::test]
@@ -860,7 +934,16 @@ mod tests {
         model.capabilities = Some(vec![Capability::Vision]);
         let (mcp, servers) = mcp_with_fetch();
         assert!(
-            tool_list_for(&model, &session(Some(agent_tools())), true, &mcp, &servers).is_empty(),
+            tool_list_for(
+                &model,
+                &session(Some(agent_tools())),
+                true,
+                &crate::skills::SkillCatalog::default(),
+                &[],
+                &mcp,
+                &servers
+            )
+            .is_empty(),
             "模型不支持工具时，会话开着也不给"
         );
     }

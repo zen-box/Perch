@@ -330,6 +330,12 @@ pub struct AppConfig {
     /// 用户添加的 MCP 服务器。老配置里没有这个字段，读进来是空的。
     #[serde(default)]
     pub mcp_servers: Vec<McpServerConfig>,
+    /// 被停用的 Skill（存目录名）。
+    ///
+    /// 存"停用名单"而不是"启用名单"：skills 目录里的文件夹是用户自己放进去的，
+    /// 装一个新 skill 不该还要先来设置里勾一下。老配置里没有这个字段，读进来是空的。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_skills: Vec<String>,
 }
 
 /// 本地命令的默认超时。取 `local_tools` 里那个常量，
@@ -354,6 +360,7 @@ impl Default for AppConfig {
             command_timeout_secs: default_command_timeout_secs(),
             providers: Vec::new(),
             mcp_servers: Vec::new(),
+            disabled_skills: Vec::new(),
         }
     }
 }

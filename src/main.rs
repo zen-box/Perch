@@ -35,6 +35,8 @@ mod reply_ops;
 mod session_folder_ops;
 mod session_list_ops;
 mod session_ops;
+mod skill_ops;
+mod skills;
 mod storage;
 mod theme;
 mod tool_ops;

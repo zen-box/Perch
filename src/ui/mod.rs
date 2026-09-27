@@ -20,6 +20,7 @@ mod settings_mcp;
 mod settings_misc;
 mod settings_prompts;
 mod settings_providers;
+mod settings_skills;
 mod sidebar;
 mod tool_picker;
 mod workspace_picker;

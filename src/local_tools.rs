@@ -314,7 +314,7 @@ impl PendingTool {
     }
 
     /// 参数里的某个字符串字段。类型不对时返回 `None`，由调用方报成一条错误结果。
-    fn string_arg(&self, key: &str) -> Option<&str> {
+    pub(crate) fn string_arg(&self, key: &str) -> Option<&str> {
         // 模型偶尔会把参数整个发成字符串（`{"_raw": "..."}`），那种情况下参数不是对象，
         // 这里取不到就是取不到，让执行器报一条清楚的错误，别 panic。
         self.arguments.as_object()?.get(key)?.as_str()

@@ -14,6 +14,7 @@ use crate::mcp_ops::McpState;
 use crate::model::{Attachment, ChatMessage, StorageData};
 use crate::model_ops::{ModelEditor, TokenField};
 use crate::prompts::PromptLibrary;
+use crate::skills::SkillCatalog;
 use crate::theme::apply_theme;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -27,6 +28,7 @@ pub enum SettingsTab {
     General,
     Providers,
     Prompts,
+    Skills,
     McpServers,
     About,
 }
@@ -115,6 +117,9 @@ pub struct AppState {
     pub(crate) active_streams: HashMap<String, oneshot::Sender<()>>,
     pending_toasts: Vec<(ToastLevel, String)>,
     pub prompts: PromptLibrary,
+    /// 装进数据目录的 Skills 快照。**启动时扫一次，导入/开关之后再扫**——
+    /// 渲染期间不能做文件 I/O（见 `skills.rs` 的模块注释）。
+    pub skills: SkillCatalog,
     pub folder_filter: String,
     pub favorites_only: bool,
     pub pending_quote: Option<String>,
@@ -358,6 +363,7 @@ impl AppState {
         let folder_name_input = cx.new(|cx| InputState::new(window, cx));
         let model_fetch_search = cx.new(|cx| InputState::new(window, cx));
         let prompts = PromptLibrary::load(lang);
+        let skills = SkillCatalog::reload();
 
         let subscriptions = vec![
             cx.subscribe_in(&chat_input, window, |this, _, event: &InputEvent, window, cx| {
@@ -427,6 +433,7 @@ impl AppState {
             active_streams: HashMap::new(),
             pending_toasts: Vec::new(),
             prompts,
+            skills,
             folder_filter: String::new(),
             favorites_only: false,
             pending_quote: None,

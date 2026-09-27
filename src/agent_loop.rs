@@ -207,6 +207,12 @@ pub(crate) fn next_action(
                 // 注意不能走下面的「不认识的名字当免确认」那条——MCP 工具名在本机
                 // 工具表里当然查不到，那样会被误判成"模型编的名字"直接放行。
                 false
+            } else if crate::skills::is_skill_tool(&tool.name) {
+                // Skills 工具**永远免确认**：它读的只有 Perch 自己的 skills 目录，
+                // 碰不到用户的文件系统——这正是对话模式也能用它的理由。
+                // 显式写这一条而不是靠下面的 else 兜底：那条兜底是给"模型编的名字"用的，
+                // 将来给 skill 工具加参数（比如写回）时，谁也不会想起这里还压着一条放行。
+                true
             } else if local_tools::is_known(&tool.name) {
                 !tool.needs_approval(workspace, permission)
             } else {
@@ -407,6 +413,9 @@ impl AppState {
         let routes: Vec<Route> = tools.iter().map(|tool| self.route_tool(&tool.name)).collect();
         // 「模型调了个用不了的 MCP 工具名」时要拿它列清单。同样得在挪进后台任务之前算好
         let mcp_tools = self.mcp.available_names(&self.config.mcp_servers);
+        // Skills 快照也一样：执行 `load_skill` 要读它，而后台任务拿不到 `AppState`。
+        // 克隆的是 `Arc` 里那份列表的浅拷贝（每个 skill 几 KB 的正文），代价可以忽略。
+        let skills = self.skills.clone();
 
         cx.spawn(async move |this, cx| {
             // 真正干活的在 tokio 运行时里：GPUI 自己的执行器不是 tokio，
@@ -415,7 +424,7 @@ impl AppState {
             // 在 GPUI 这边 await 它没问题。
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             runtime().spawn(async move {
-                let _ = tx.send(run_tool_batch(tools, routes, mcp_tools, control).await);
+                let _ = tx.send(run_tool_batch(tools, routes, mcp_tools, control, skills).await);
             });
             // 后台任务整个没了（panic 之类）时不能就这么算了：占位块会永远停在
             // 「正在执行」，界面也一直卡在"忙"上。这时结果为空，`finish_tool_run`
@@ -502,12 +511,16 @@ impl AppState {
     /// 授权卡片挂在会话上，而设置随时能改：用户可能一边看着卡片一边把本机工具关了、
     /// 或者把会话切回了对话。不复查就等于「界面上关掉的东西其实没生效」。
     ///
-    /// 判据按**来源**走，不是按全局开关一刀切：MCP 工具不受「本机工具」那个开关管。
+    /// 判据按**来源**走，不是按全局开关一刀切：MCP 工具不受「本机工具」那个开关管，
+    /// Skills 工具既不受那个开关管、也不受项目目录管（它读的是 Perch 自己的目录）。
     fn tool_still_allowed(&self, session_id: &str, tool: &PendingTool) -> bool {
         let Some(session) = self.session(session_id) else {
             return false;
         };
         let sources = session.tool_sources();
+        if crate::skills::is_skill_tool(&tool.name) {
+            return sources.contains(&ToolSource::Skill);
+        }
         match mcp::parse_tool_name(&tool.name) {
             Some((server_id, _)) => sources.contains(&ToolSource::Mcp {
                 server_id: server_id.to_string(),
@@ -533,6 +546,8 @@ impl AppState {
             !crate::tool_ops::session_tool_specs(
                 session,
                 self.config.local_tools_enabled,
+                &self.skills,
+                &self.config.disabled_skills,
                 &self.mcp,
                 &self.config.mcp_servers,
             )
@@ -635,18 +650,21 @@ impl AppState {
 
 /// 执行一批调用，返回的顺序和传进来的一致——结果要按顺序回填到占位块上。
 ///
-/// 两条路差别很大，所以分开跑：本机工具是**阻塞**的（读文件、等命令跑完），整批
-/// 丢给后台线程；MCP 调用是异步的，一条条 await——它的瓶颈在对端，占着线程没用。
+/// 三条路差别很大，所以分开跑：本机工具和 Skills 都是**阻塞**的（读文件、等命令跑完），
+/// 整批丢给后台线程；MCP 调用是异步的，一条条 await——它的瓶颈在对端，占着线程没用。
 ///
 /// `mcp_tools` 是当前能用的 MCP 工具名，用来给「模型调了个用不了的 MCP 工具名」回话。
+/// `skills` 是 Skills 快照——`load_skill` 要从它里面取正文（后台任务拿不到 `AppState`）。
 async fn run_tool_batch(
     tools: Vec<PendingTool>,
     routes: Vec<Route>,
     mcp_tools: Vec<String>,
     control: ExecControl,
+    skills: crate::skills::SkillCatalog,
 ) -> Vec<ToolResult> {
     let mut slots: Vec<Option<ToolResult>> = tools.iter().map(|_| None).collect();
     let mut local: Vec<(usize, PendingTool)> = Vec::new();
+    let mut skill_calls: Vec<(usize, PendingTool)> = Vec::new();
     let mut remote: Vec<(usize, PendingTool, Arc<Connection>, String)> = Vec::new();
     for (ix, (tool, route)) in tools.iter().zip(routes).enumerate() {
         match route {
@@ -657,19 +675,29 @@ async fn run_tool_batch(
                 let message = mcp::unknown_tool_message(&tool.name, &mcp_tools);
                 slots[ix] = Some(local_tools::error_result(tool, message));
             }
+            // Skills 工具也走 `Route::Local`（它们不是 MCP 的），但执行器不是本机那一套。
+            // 交给 `local_tools::execute` 的话只会回一句「没有这个工具」——它的清单里
+            // 当然没有 skill 工具，模型会以为 Skills 全没了。
+            Route::Local if crate::skills::is_skill_tool(&tool.name) => skill_calls.push((ix, tool.clone())),
             Route::Local => local.push((ix, tool.clone())),
             Route::Mcp { connection, raw } => remote.push((ix, tool.clone(), connection, raw)),
         }
     }
 
-    if !local.is_empty() {
+    if !local.is_empty() || !skill_calls.is_empty() {
         let blocking_control = control.clone();
         let done = runtime()
             .spawn_blocking(move || {
-                local
+                let mut done: Vec<(usize, ToolResult)> = local
                     .into_iter()
                     .map(|(ix, tool)| (ix, local_tools::execute(&tool, &blocking_control)))
-                    .collect::<Vec<_>>()
+                    .collect();
+                done.extend(
+                    skill_calls
+                        .into_iter()
+                        .map(|(ix, tool)| (ix, crate::skills::execute(&tool, &skills))),
+                );
+                done
             })
             .await
             .unwrap_or_default();
