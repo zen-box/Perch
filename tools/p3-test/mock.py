@@ -5,6 +5,8 @@
 - 回什么由最后一条用户消息里的关键词决定：
     LIST  → 调 list_directory
     RUN   → 调 run_command（echo）
+    PWD   → 调 run_command（pwd，验证命令在项目目录里跑）
+    OUTSIDE → 调 list_directory 列项目目录之外的路径（验证越界要授权）
     SLEEP → 调 run_command（睡 20 秒，测停止）
     PAR   → 一次调两个：run_command + list_directory（测并行调用）
     LOOP  → 每轮都调 list_directory（测轮数上限）
@@ -201,8 +203,18 @@ class Handler(BaseHTTPRequestHandler):
             calls = [("run_command", {"command": "echo parallel-cmd"}), ("list_directory", {"path": "."})]
         elif "SLEEP" in last_user:
             calls = [("run_command", {"command": "Start-Sleep -Seconds 20; echo woke-up"})]
+        elif "OUTSIDE" in last_user:
+            # 项目目录**之外**的一个真实路径（仓库根，`cwd/` 的上一级）。
+            # 用来验证「目录之外的读写每次都要授权」——这条才是真正的边界，
+            # 以前只有 is_sensitive_path 那道防呆，模型换个路径就绕过去了。
+            outside = pathlib.Path(__file__).resolve().parent.parent
+            calls = [("list_directory", {"path": str(outside)})]
         elif "LIST" in last_user:
             calls = [("list_directory", {"path": "."})]
+        elif "PWD" in last_user:
+            # 用来验证「命令在项目目录里跑」：`list_directory "."` 证明相对路径的基准，
+            # 这条证明子进程的 current_dir。两条合起来才是完整的「工作目录生效了」。
+            calls = [("run_command", {"command": "pwd"})]
         elif "RUN" in last_user:
             calls = [("run_command", {"command": "echo hello-from-tool"})]
         else:
