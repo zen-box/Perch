@@ -17,8 +17,10 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
 | `mcp_server.py` | 一个最小的 stdio MCP 服务器，给 MCP 那条路当靶子。工具清单是挑过的（撞名、超长名、中文名、返回图片块、只给 structuredContent……），见文件头注释。收到的调用追加写进 `mcp_calls.jsonl` |
 | `win.ps1` | 用 `PostMessage` 操作测试窗口：改尺寸、截图（`PrintWindow`，被挡住也能截）、点击、悬停、滚轮、打字、回车。**不抢焦点、不动真实鼠标键盘**，所以能一边跑一边干别的 |
 | `t.sh` | 薄封装，`source` 之后用 `send` / `shot` / `nreq` / `reqs` 四个函数 |
-| `findbtn.py` | 不依赖 Pillow 的 PNG 像素扫描器。`win.ps1` 的点击坐标必须是截图里的物理像素，肉眼估误差太大，所以靠扫像素找按钮中心 |
+| `pixel.py` | 截图像素工具，两个子命令：`find` 找某个颜色的连通块（按钮 / 开关的包围盒和中心），`probe` 逐点报颜色并扫出紫色系的 y 带。**点击之前一律先用它问一遍真实坐标**——凭肉眼估的坐标是**显示坐标**，拿去点会全部落空，理由见「坑」里那条。要 Pillow |
 | `zoom.py` | 裁一块截图放大保存，用来看清局部（徽标、一行文字）。要 Pillow |
+| `grid.py` | 在截图上画坐标网格，用来把「目测的位置」翻译成「文件里的像素坐标」。裁小 + 放大有时也会被 Read 再缩一次，画网格是更省事的兜底。要 Pillow |
+| `mouse.py` | 用**真实光标**操作窗口（`screen` / `hover` / `click` / `where`）。`PostMessage` 分不清是「坐标算错了」还是「合成消息被吞了」时，真实光标是绝对的一试就知道。会挪用户的鼠标、也抢焦点，所以只做定性诊断。要 Pillow |
 | `session.py` | 改隔离库里某个会话的 `tools`（模式 / 来源 / 权限档 / 项目目录）和消息。这个字段是 JSON 文本，手写要叠四层引号转义，极易写错。用法见文件头，`show` 会列出可用的服务器 id。`--sources` 认 `local` / `skill` / `none` / 服务器 id |
 | `windows.py` | 列出某个进程的**全部顶层窗口**（句柄 / 可见性 / 矩形 / 类名 / 标题）。窗口"点了没反应"时先用它看一眼——`win.ps1` 是按 `MainWindowHandle` 找窗口的，那个属性会指到错的窗口（见「坑」里的最小化那条） |
 | `skill-fixture/` | Skills 的夹具：`weekly/`（带 `docs/notes.md`）、`deploy/`，以及技能目录**外面**的 `secret.txt`（越界靶子）。复制进 `appdata/Perch/skills/` 即可，见「怎么跑」第 3b 步 |
@@ -26,12 +28,12 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
 | `mock-config.json` | P3-2 那轮的 `perch-config.json`：渠道指向 mock 服务、开了本地工具、超时 600 秒。**故意不叫 `perch-config.json`**——仓库根 `.gitignore` 有一条 `perch-*.json`（防真实配置带密钥被提交），改名是为了不跟那条规则打架 |
 | `mock-config-mcp.json` | P3-3 那轮的配置：在上一份基础上加了 4 台 MCP 服务器（两台能连、一台命令不存在、一台停用），并给演示服务器配了 `disabled_tools: ["spam"]`。后来又补了 `slow`（`slowstart`）和 `slowfail` 两台，用来测重连时的界面表现，以及第二个模型 `mock-vision`（带 `vision`+`files` 能力，用来对照附件闸门） |
 | `mock-config-real-mcp.json` | **给用户照抄的样例**：三台真实可用的 npx 服务器（文件系统 / 顺序思考 / 记忆图谱）。渠道仍然指向 `mock.py`，所以模型侧不真跑，只用来验证「能不能连上、工具清单对不对」 |
-| `shots/` | 实测留下的截图。`A`~`H` 是 P3-2 主流程，`v1`~`v8` 是 P3-2 收尾，`m1`~`m12` 是 P3-3，`m13`~`m15` 是 P3-3 三处界面缺陷的修复验证，`m16`~`m18` 是真实 MCP 服务器接入验证，`m19`~`m23` 是 P3-3 收尾（重连闪动 + 附件能力闸门），`m24`~`m28` 是会话级工具开关与「本次对话的工具」选择器，`m29`~`m31` 是 MCP 表单改弹窗，`m32` 是「编辑停用服务器不会把它打开」，`m33`~`m40` 是附件入口按模型能力分类型（提示改短 + 菜单动态化 + 去掉「所有文件」兜底），`n1`~`n6` 是对话/智能体按「有没有本机文件权限」重新划分，`n7`~`n12` 是智能体的项目目录（相对路径基准 + 越界授权），`n13`~`n18` 是会话级权限档（完全权限 + 二次确认 + 数据目录底线），`s0`~`s18` 是 Skills（对话模式可用 + 免确认 + 越界被拒 + 设置页） |
+| `shots/` | 实测留下的截图。`A`~`H` 是 P3-2 主流程，`v1`~`v8` 是 P3-2 收尾，`m1`~`m12` 是 P3-3，`m13`~`m15` 是 P3-3 三处界面缺陷的修复验证，`m16`~`m18` 是真实 MCP 服务器接入验证，`m19`~`m23` 是 P3-3 收尾（重连闪动 + 附件能力闸门），`m24`~`m28` 是会话级工具开关与「本次对话的工具」选择器，`m29`~`m31` 是 MCP 表单改弹窗，`m32` 是「编辑停用服务器不会把它打开」，`m33`~`m40` 是附件入口按模型能力分类型（提示改短 + 菜单动态化 + 去掉「所有文件」兜底），`n1`~`n6` 是对话/智能体按「有没有本机文件权限」重新划分，`n7`~`n12` 是智能体的项目目录（相对路径基准 + 越界授权），`n13`~`n18` 是会话级权限档（完全权限 + 二次确认 + 数据目录底线），`s0`~`s18` 是 Skills（对话模式可用 + 免确认 + 越界被拒 + 设置页），`a1`~`a9` 是审计日志（五类决策各一条 + 关掉开关后不再写 + 长输出截断） |
 
 ## 怎么跑
 
-需要 Windows + PowerShell + Python 3（`mock.py` / `mcp_server.py` / `findbtn.py` 只用标准库；
-`zoom.py` 和 `t.sh` 的 `shot` 要 Pillow）。
+需要 Windows + PowerShell + Python 3（`mock.py` / `mcp_server.py` / `session.py` / `mouse.py` /
+`windows.py` 只用标准库；`pixel.py` / `zoom.py` / `grid.py` 和 `t.sh` 的 `shot` 要 Pillow）。
 
 1. 编译并把 exe 改名。`win.ps1` 是按**进程名** `perch-p3` 找窗口的，
    所以文件名必须是 `perch-p3.exe`。放在 `target/` 里（那儿已被 gitignore，不会弄脏仓库）：
@@ -151,11 +153,30 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
    结果弹出删除确认框）。用 `zoom.py` 裁出来量，别按整图估。
    换尺寸就得重算。
    ⚠️ 坐标别靠肉眼估：截图会被工具按比例缩过再显示，估出来的位置能差上百像素
-   （踩过：附件按钮估成 `386,1066`，实际在 `522,1105`）。用 `findbtn.py`，
+   （踩过：附件按钮估成 `386,1066`，实际在 `522,1105`）。用 `pixel.py find`，
    或者按上面那套「扫一行里的暗像素列」的办法量。
 
 ## 坑
 
+- ⚠️ **点击坐标必须是截图文件里的像素，不是你在聊天里"看到"的位置。**
+  Read 工具会把 `1756x1163` 的截图缩到 ~1092 宽再显示，目测出来的坐标要乘约 `1.6`
+  才是真实像素。这个坑的表现和下面「窗口被最小化」那条几乎一样（点了没反应、
+  前后两张截图的字节数一模一样），但成因完全不同，白绕过好几轮：
+  - 目测「允许执行一次」在 `(955,635)`，`pixel.py probe` 一看那点是纯白 `(255,255,255)`；
+    真正的紫色块在 `x 488..740`，那是 `Mock Model` 的头像；
+  - 目测设置齿轮在 `(1570,26)`，点下去窗口直接缩成 `219x39`——那一下打在**最小化**上了。
+
+  **规矩**：点击之前先 `python pixel.py find <png> <颜色> [y0] [y1]` 拿包围盒中心，
+  或者 `python pixel.py probe <png> x,y ...` 确认那一点确实是目标颜色；
+  实在拿不准就 `grid.py` 画网格读数。还有一条容易漏的：
+  `pixel.py find purple` 的阈值下界是 `60` 不是 `80`——GPUI 的 primary 色一档是
+  `#4F46E5`(79,70,229)，差 1 个值就会把整个开关漏掉。
+- ⚠️ **`win.ps1 -Action wheel` 会把窗口搞成最小化。** 实测里连着两次：滚轮发完
+  窗口就变成 `219x39`（`windows.py` 看到坐标是 `-21333`）。`WM_MOUSEWHEEL` 的
+  lParam 该是屏幕坐标、wParam 高 16 位该是 delta，脚本里这两处看着都对，原因没查出来。
+  **替代方案**：设置页这类滚动容器**不吃键盘**（`Page Down` 完全没反应；先点一下
+  空白处把焦点从输入框上拿开也只滚一点点），所以要么 `-Action wheel` 之后
+  用 `-Action size` 把窗口捞回来，要么干脆改配置文件 + 重启——后者更省事。
 - ⚠️ **agent 的沙箱会打断 Rust 建匿名管道，MCP 一台都起不来。** 症状是设置页里
   所有服务器都显示 `连接失败：failed to start \`...\python.exe\`: 所有的管道范例都在使用中。(os error 231)`。
   `ERROR_PIPE_BUSY` 来自 Rust std 的 `child_pipe()`——它用 `NtCreateNamedPipeFile` 造
@@ -442,5 +463,34 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
     - weekly: 把一周的流水账整理成周报
     ```
     正文一个字都没进提示词——这正是 Skills 平时不占上下文的理由。
+- **审计日志：模型动过什么、是自动放行还是你点的头**（`a1`~`a9`）。一天一个文件，
+  写在 `%APPDATA%\Perch\logs\audit-YYYY-MM-DD.jsonl`，一行一条 JSON。
+  `a1-audit-log.jsonl` 是**实测导出的原始日志**（20 条，五类决策齐全），
+  下面每条结论都能在它里面找到对应行。
+  - `a2-free-tool-runs-without-a-card.png`：发 `LIST`（`list_directory` 在项目目录里）
+    → **没有授权卡片**，直接执行 → 日志 `"decision":"auto"`。
+  - `a3-approval-card.png` / `a4-denied.png`：发 `RUN` 弹卡片点「允许执行一次」
+    → `"decision":"approved"`、`"exit":0`、`"detail":"hello-from-tool\r\n"`；
+    发 `OUTSIDE` 弹卡片点「拒绝」→ `"decision":"denied"`、`"ok":false`、
+    `"detail":"denied by the user"`。
+  - `a5-stopped.png`：发 `SLEEP`（`Start-Sleep -Seconds 20`）→ 允许之后**中途点停止**
+    → `"decision":"stopped"`、`"ms":0`、`"detail":"stopped by the user."`。
+    这条最难凑：得在 20 秒里点完「允许」再点「停止」，第一遍慢了一步，
+    日志记的是 `approved` + `"ms":20485`（跑满了）。
+  - `a6-limit-reached.png`：发 `LOOP`（mock 每轮都回一个 `list_directory`）
+    → 撞上 `MAX_AGENT_ROUNDS`（12）→ 界面弹「这一轮工具调用太多了，已经停下」，
+    日志里前面是一串 `auto`、最后一条 `"decision":"limit"` +
+    `"detail":"the tool-call limit for this turn was reached."`。
+  - `a7-long-detail-truncated.png`：往 `cwd/` 里塞 60 个文件再发 `LIST`
+    → `detail` 被切成 `...\nf41.txt\nf…`。**`detail` 走 `truncate`（补一个 `…`），
+    `args` 走 `summarize_text`（补 `... (N chars)`）**，两者不一样，别记混。
+    顺手修掉一个观感 bug：`summarize_text` 原来内部调用 `truncate`，
+    于是超长参数会写成 `…... (1000 chars)` 两个省略号，现在只留后面那个。
+  - `a8-switch-off.png` / `a9-logging-off-still-runs.png`：设置页「通用」→
+    「记录工具调用」关掉 → `perch-config.json` 落成 `"audit_log_enabled": false`、
+    开关变灰；再发一条 `LIST` → **工具照常执行、界面照常显示结果，
+    但日志文件一条没涨**（`wc -l` 前后都是 20）。
+  - ⚠️ 「记录工具调用」在设置页最底下，是**滚下去**才看得到的，而滚动这条路当时不通
+    （见「坑」里 `wheel` 那条），所以开关的「关」是点出来的、「开」是改配置 + 重启做的。
 
 本文只讲怎么把环境跑起来。

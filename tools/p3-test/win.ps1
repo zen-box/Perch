@@ -16,6 +16,7 @@ public class U {
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
@@ -63,6 +64,15 @@ switch ($Action) {
     Start-Sleep -Milliseconds 300
     Write-Output "restored"
   }
+  "focus" {
+    # 把窗口拉到前台。`PostMessage` 的点击理论上不看前台状态，但实测里出现过
+    # 「点了没反应、再点一次就好了」，当时窗口确实不在前台，所以留一个显式的前台动作。
+    # ⚠️ 成因**没查实**：后来发现更常见的原因是**坐标算错了**（见 README「坑」里那条），
+    # 那才是「点了没反应」的主因。这个动作留着兜底，也是唯一会抢焦点的一个。
+    [U]::SetForegroundWindow($hwnd) | Out-Null
+    Start-Sleep -Milliseconds 300
+    Write-Output "focused"
+  }
   "shot" {
     $bmp = New-Object System.Drawing.Bitmap $ww, $wh
     $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -101,6 +111,17 @@ switch ($Action) {
     [U]::PostMessage($hwnd, 0x0101, [IntPtr]0x0D, [IntPtr]([int](1 -bor (0x1C -shl 16) -bor (1 -shl 30) -bor (1 -shl 31)))) | Out-Null
     Start-Sleep -Milliseconds 300
     Write-Output "enter"
+  }
+  "key" {
+    # 发一个不带修饰键的按键，虚拟键码走 `-W`（如 0x1B = Esc）。
+    # 有些按钮按坐标点不中（热区小，或者当时算错了坐标），
+    # 有快捷键时走这条路更稳——设置页的「返回对话」就绑了 Esc。
+    $vk = [IntPtr]$W
+    [U]::PostMessage($hwnd, 0x0100, $vk, [IntPtr]1) | Out-Null
+    Start-Sleep -Milliseconds 40
+    [U]::PostMessage($hwnd, 0x0101, $vk, [IntPtr]([int](1 -bor (1 -shl 30) -bor (1 -shl 31)))) | Out-Null
+    Start-Sleep -Milliseconds 400
+    Write-Output "key $W"
   }
   "move" {
     [U]::PostMessage($hwnd, 0x0200, [IntPtr]::Zero, (LParam $X $Y)) | Out-Null
