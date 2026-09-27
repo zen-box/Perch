@@ -3,8 +3,9 @@
 cd "$(dirname "${BASH_SOURCE[0]}")"
 W() { MSYS_NO_PATHCONV=1 powershell -NoProfile -ExecutionPolicy Bypass -File win.ps1 "$@" | tail -1; }
 send() { W -Action click -X 1080 -Y 1188 > /dev/null; W -Action type -Out "$1" > /dev/null; W -Action enter > /dev/null; }
+# 截图。半尺寸副本只是给人肉比对用的，没装 Pillow 就跳过，别让它把整条命令弄成失败。
 shot() { W -Action shot -Out "shots/$1.png" > /dev/null; python -c "
-from PIL import Image; im=Image.open('shots/$1.png'); im.resize((im.width//2, im.height//2)).save('shots/_$1.png')"; }
+from PIL import Image; im=Image.open('shots/$1.png'); im.resize((im.width//2, im.height//2)).save('shots/_$1.png')" 2>/dev/null || true; }
 nreq() { [ -f requests.jsonl ] && wc -l < requests.jsonl || echo 0; }
 # 打印第 $1 条之后的请求：每条列出消息角色、工具数、tool_call_id
 reqs() { python - "$1" <<'EOF'

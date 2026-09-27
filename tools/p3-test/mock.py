@@ -7,6 +7,7 @@
     RUN   → 调 run_command（echo）
     PWD   → 调 run_command（pwd，验证命令在项目目录里跑）
     OUTSIDE → 调 list_directory 列项目目录之外的路径（验证越界要授权）
+    DATA  → 调 read_file 读 Perch 自己的 perch-config.json（验证完全权限下唯一的例外）
     SLEEP → 调 run_command（睡 20 秒，测停止）
     PAR   → 一次调两个：run_command + list_directory（测并行调用）
     LOOP  → 每轮都调 list_directory（测轮数上限）
@@ -203,6 +204,13 @@ class Handler(BaseHTTPRequestHandler):
             calls = [("run_command", {"command": "echo parallel-cmd"}), ("list_directory", {"path": "."})]
         elif "SLEEP" in last_user:
             calls = [("run_command", {"command": "Start-Sleep -Seconds 20; echo woke-up"})]
+        elif "DATA" in last_user:
+            # Perch **自己的数据目录**里的一个文件。用来验证「完全权限下唯一的例外」：
+            # 档位开到 full 之后其它一切放行，但改自己的配置等于让模型控制程序本身。
+            # 走 `read_file` 而不是 `run_command`，是因为这条底线只看 `path` 参数
+            # （见 local_tools::touches_the_data_dir 的注释）。
+            data_dir = pathlib.Path(__file__).resolve().parent / "appdata" / "Perch"
+            calls = [("read_file", {"path": str(data_dir / "perch-config.json")})]
         elif "OUTSIDE" in last_user:
             # 项目目录**之外**的一个真实路径（仓库根，`cwd/` 的上一级）。
             # 用来验证「目录之外的读写每次都要授权」——这条才是真正的边界，
