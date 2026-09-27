@@ -199,8 +199,7 @@ impl AppState {
                 messages,
                 &resolved,
                 explicit_temperature,
-                with_tools,
-                &self.mcp.specs(&self.config.mcp_servers),
+                tool_list_for(model, with_tools, &self.mcp.specs(&self.config.mcp_servers)),
                 self.language(),
             ),
         })
@@ -409,17 +408,33 @@ fn stream_key(message_id: &str, variant_id: Option<&str>) -> String {
     }
 }
 
-/// 组装一次请求。`mcp_tools` 是已连接 MCP 服务器提供的工具，排在本机工具后面；
-/// 顺序由服务器配置顺序决定——同一份工具集每次序列化出来要逐字节一致，
-/// 对端才能命中 prompt 缓存。
+/// 这一轮交给模型的工具清单。空表示不带工具。
+///
+/// 两个条件都满足才带：用户开着「本地工具」总开关，且这个模型确实支持函数调用。
+/// 不支持 tools 的模型（比如部分纯推理模型）收到 `tools` 字段可能直接报错，而
+/// 「用户开了开关但选了个不支持的模型」是很常见的组合，所以这里按模型的
+/// `Capability::Tools` 再挡一道。
+///
+/// MCP 工具排在本机那 5 个后面，顺序由服务器配置顺序决定——同一份工具集每次
+/// 序列化出来要逐字节一致，对端才能命中 prompt 缓存。MCP 工具和本机工具共用
+/// 这一个开关，理由见 `mcp_ops.rs` 的模块说明。
+fn tool_list_for(model: &ModelConfig, enabled: bool, mcp_tools: &[ToolSpec]) -> Vec<ToolSpec> {
+    if !enabled || !model.effective_capabilities().contains(&Capability::Tools) {
+        return Vec::new();
+    }
+    let mut specs = crate::local_tools::specs();
+    specs.extend_from_slice(mcp_tools);
+    specs
+}
+
+/// 组装一次请求。
 fn chat_request(
     provider: &ProviderConfig,
     model: &ModelConfig,
     messages: Vec<ChatMessageReq>,
     params: &ResolvedParams,
     explicit_temperature: bool,
-    tools_enabled: bool,
-    mcp_tools: &[ToolSpec],
+    tools: Vec<ToolSpec>,
     lang: AppLanguage,
 ) -> ChatRequest {
     let levels = model.effective_reasoning_levels();
@@ -457,13 +472,7 @@ fn chat_request(
         // 所以这里按模型的 `Capability::Tools` 再挡一道。
         //
         // MCP 工具和本机工具共用这一个开关（见 `mcp_ops.rs` 的模块说明）。
-        tools: if tools_enabled && model.effective_capabilities().contains(&Capability::Tools) {
-            let mut specs = crate::local_tools::specs();
-            specs.extend_from_slice(mcp_tools);
-            specs
-        } else {
-            Vec::new()
-        },
+        tools,
         extra_headers: provider
             .extra_headers
             .iter()
@@ -583,8 +592,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             false,
-            false,
-            &[],
+            Vec::new(),
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, None);
@@ -595,8 +603,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             true,
-            false,
-            &[],
+            Vec::new(),
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, Some(0.7), "explicit temperature is kept");
@@ -608,8 +615,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             false,
-            false,
-            &[],
+            Vec::new(),
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, Some(0.7));
@@ -621,8 +627,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             false,
-            false,
-            &[],
+            Vec::new(),
             AppLanguage::ZhCn,
         );
         assert_eq!(
@@ -643,8 +648,7 @@ mod tests {
             Vec::new(),
             &params(None, Some(100_000)),
             false,
-            false,
-            &[],
+            Vec::new(),
             AppLanguage::ZhCn,
         );
         assert_eq!(request.reasoning, Some(ReasoningLevel::High));
@@ -656,8 +660,7 @@ mod tests {
             Vec::new(),
             &params(Some(ReasoningLevel::Off), None),
             false,
-            false,
-            &[],
+            Vec::new(),
             AppLanguage::ZhCn,
         );
         assert_eq!(
@@ -674,10 +677,25 @@ mod tests {
             Vec::new(),
             &params(Some(ReasoningLevel::High), None),
             false,
-            false,
-            &[],
+            Vec::new(),
             AppLanguage::ZhCn,
         );
         assert_eq!(request.reasoning, None);
+    }
+
+    #[std::prelude::v1::test]
+    fn tools_are_only_offered_when_the_switch_is_on() {
+        let model = ModelConfig::new("gpt-4o", "GPT-4o");
+        let mcp = vec![ToolSpec::no_args("mcp__files__read_file", "读文件")];
+
+        assert!(tool_list_for(&model, false, &mcp).is_empty(), "开关关着就一个都别给");
+
+        let tools = tool_list_for(&model, true, &mcp);
+        assert_eq!(tools.len(), crate::local_tools::specs().len() + 1);
+        assert_eq!(
+            tools.last().map(|tool| tool.name.as_str()),
+            Some("mcp__files__read_file"),
+            "MCP 工具排在本机工具后面，顺序稳定"
+        );
     }
 }

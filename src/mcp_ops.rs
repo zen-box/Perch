@@ -13,10 +13,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use gpui_kit::component::input::{InputState, TextareaState};
 use gpui_kit::*;
 
-use crate::app::{AppState, runtime, update_state};
-use crate::config::McpServerConfig;
+use crate::app::{AppState, ToastLevel, runtime, update_state};
+use crate::config::{self, McpServerConfig, McpTransport};
+use crate::i18n::{Key, tr, tr_args};
 use crate::llm_tools::ToolSpec;
 use crate::mcp::{self, Connection, ExposedTool};
 
@@ -64,6 +66,22 @@ pub struct McpState {
     tools: HashMap<String, Vec<ExposedTool>>,
     /// 设置页里正在看哪台服务器的详情
     pub selected_server_id: Option<String>,
+    /// 正在编辑的服务器。`None` 表示没在编辑。
+    pub editor: Option<McpEditor>,
+}
+
+/// 编辑中的服务器草稿。
+///
+/// 输入框**懒创建**：只有打开编辑器时才建（建 `Entity` 要窗口），关掉就丢掉。
+/// 放进 `McpState` 而不是 `AppState` 顶层，是因为它只在设置页里活着（§4.1）。
+pub struct McpEditor {
+    /// 正在编辑哪台服务器；`None` 表示新增
+    pub editing_id: Option<String>,
+    pub name: Entity<InputState>,
+    pub command: Entity<InputState>,
+    pub args: Entity<TextareaState>,
+    pub cwd: Entity<InputState>,
+    pub env: Entity<TextareaState>,
 }
 
 impl McpState {
@@ -243,4 +261,226 @@ impl AppState {
 /// 失败原因太长时从中间截掉，和工具结果的截断规则保持一致。
 fn local_tools_truncate(text: &str) -> String {
     crate::local_tools::truncate_middle(text, 2_000)
+}
+
+impl AppState {
+    /// 设置页里选中 / 取消选中一台服务器。
+    pub fn select_mcp_server(&mut self, server_id: Option<&str>, cx: &mut Context<Self>) {
+        self.mcp.selected_server_id = server_id.map(str::to_string);
+        cx.notify();
+    }
+
+    /// 打开编辑器。`server_id` 为 `None` 表示新增。
+    pub fn open_mcp_editor(&mut self, server_id: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+        let existing = server_id
+            .and_then(|id| self.config.mcp_servers.iter().find(|server| server.id == id))
+            .cloned();
+        let (name, command, args, cwd) = match existing.as_ref() {
+            Some(server) => {
+                let McpTransport::Stdio { command, args, cwd } = &server.transport;
+                (
+                    server.name.clone(),
+                    command.clone(),
+                    args.join("\n"),
+                    cwd.clone().unwrap_or_default(),
+                )
+            }
+            None => (String::new(), String::new(), String::new(), String::new()),
+        };
+        // 环境变量的**值**在凭据管理器里，这里只是把它读出来显示
+        let env = existing
+            .as_ref()
+            .map(|server| config::format_header_lines(&server.secrets()))
+            .unwrap_or_default();
+
+        let text_input = |window: &mut Window, cx: &mut Context<Self>, value: &str| {
+            let value = value.to_string();
+            cx.new(|cx| {
+                let mut input = InputState::new(window, cx);
+                input.set_value(&value, window, cx);
+                input
+            })
+        };
+        let text_area = |window: &mut Window, cx: &mut Context<Self>, value: &str| {
+            let value = value.to_string();
+            cx.new(|cx| {
+                let mut input = TextareaState::new(window, cx).auto_grow(2, 6);
+                input.set_value(&value, window, cx);
+                input
+            })
+        };
+        let name_input = text_input(window, cx, &name);
+        let command_input = text_input(window, cx, &command);
+        let args_input = text_area(window, cx, &args);
+        let cwd_input = text_input(window, cx, &cwd);
+        let env_input = text_area(window, cx, &env);
+
+        self.mcp.editor = Some(McpEditor {
+            editing_id: server_id.map(str::to_string),
+            name: name_input,
+            command: command_input,
+            args: args_input,
+            cwd: cwd_input,
+            env: env_input,
+        });
+        cx.notify();
+    }
+
+    pub fn close_mcp_editor(&mut self, cx: &mut Context<Self>) {
+        self.mcp.editor = None;
+        cx.notify();
+    }
+
+    /// 把编辑器里的内容存下来。新增和修改走同一条路。
+    pub fn save_mcp_editor(&mut self, cx: &mut Context<Self>) {
+        let lang = self.language();
+        let Some(editor) = self.mcp.editor.as_ref() else {
+            return;
+        };
+        let name = editor.name.read(cx).value().trim().to_string();
+        let command = editor.command.read(cx).value().trim().to_string();
+        if name.is_empty() || command.is_empty() {
+            self.toast(ToastLevel::Error, tr(lang, Key::McpNameRequired));
+            cx.notify();
+            return;
+        }
+        let args: Vec<String> = editor
+            .args
+            .read(cx)
+            .value()
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect();
+        let cwd = editor.cwd.read(cx).value().trim().to_string();
+        let secrets = config::parse_header_lines(&editor.env.read(cx).value());
+        let editing_id = editor.editing_id.clone();
+
+        // 改的时候 id 不动：工具名里带着 id（`mcp__<id>__<工具>`），
+        // 改一次名字就让历史记录里的调用和用户「停用某个工具」的设置全部失配
+        let id = editing_id.clone().unwrap_or_else(|| new_server_id(&name));
+        let disabled_tools = self
+            .config
+            .mcp_servers
+            .iter()
+            .find(|server| server.id == id)
+            .map(|server| server.disabled_tools.clone())
+            .unwrap_or_default();
+        let server = McpServerConfig {
+            id: id.clone(),
+            name,
+            // 新建出来的默认就是开的：用户刚填完命令，显然想让它跑起来
+            enabled: true,
+            transport: McpTransport::Stdio {
+                command,
+                args,
+                cwd: (!cwd.is_empty()).then_some(cwd),
+            },
+            // 留空即可，`secret_reference()` 会回落到 `mcp/<id>`
+            secret_ref: String::new(),
+            disabled_tools,
+        };
+
+        // 密钥先写。写不进去就别动配置——否则会留下一个配好了但连不上的服务器，
+        // 用户还得自己猜是哪一步没成功。
+        if let Err(error) = server.store_secrets(&secrets) {
+            self.toast(
+                ToastLevel::Error,
+                tr_args(lang, Key::McpSecretFailed, &[&error.to_string()]),
+            );
+            cx.notify();
+            return;
+        }
+        match self.config.mcp_servers.iter_mut().find(|slot| slot.id == server.id) {
+            Some(slot) => *slot = server,
+            None => self.config.mcp_servers.push(server),
+        }
+        // 这里不用 `persist_config`：保存 MCP 服务器失败时提示里带上「MCP」更好定位
+        if let Err(error) = self.config.save() {
+            self.toast(
+                ToastLevel::Error,
+                tr_args(lang, Key::McpSaveFailed, &[&error.to_string()]),
+            );
+        }
+
+        self.mcp.editor = None;
+        self.mcp.selected_server_id = Some(id.clone());
+        // 存完就按新配置连一次：用户改完命令最想看的就是它能不能起来
+        self.connect_mcp_server(&id, cx);
+    }
+
+    /// 启用 / 停用一台服务器。停用会把连接断掉（工具也就不再交给模型）。
+    pub fn set_mcp_server_enabled(&mut self, server_id: &str, enabled: bool, cx: &mut Context<Self>) {
+        let Some(server) = self.config.mcp_servers.iter_mut().find(|server| server.id == server_id) else {
+            return;
+        };
+        server.enabled = enabled;
+        self.persist_config(cx);
+        if enabled {
+            self.connect_mcp_server(server_id, cx);
+        } else {
+            self.disconnect_mcp_server(server_id, cx);
+        }
+    }
+
+    /// 单独停用 / 启用服务器里的某个工具。存的是**服务器给的原始工具名**。
+    pub fn set_mcp_tool_enabled(&mut self, server_id: &str, raw_tool: &str, enabled: bool, cx: &mut Context<Self>) {
+        let Some(server) = self.config.mcp_servers.iter_mut().find(|server| server.id == server_id) else {
+            return;
+        };
+        if enabled {
+            server.disabled_tools.retain(|name| name != raw_tool);
+        } else if !server.disabled_tools.iter().any(|name| name == raw_tool) {
+            server.disabled_tools.push(raw_tool.to_string());
+        }
+        self.persist_config(cx);
+        cx.notify();
+    }
+
+    /// 删除一台服务器：断连接、清凭据、改配置。
+    pub fn remove_mcp_server(&mut self, server_id: &str, cx: &mut Context<Self>) {
+        let Some(index) = self.config.mcp_servers.iter().position(|server| server.id == server_id) else {
+            return;
+        };
+        let server = self.config.mcp_servers.remove(index);
+        // 凭据也要清掉：留着就是一条没人再引用的密钥
+        if let Err(error) = config::store_secret(&server.secret_reference(), "") {
+            self.toast(
+                ToastLevel::Error,
+                tr_args(self.language(), Key::McpSecretFailed, &[&error.to_string()]),
+            );
+        }
+        // 连接在这里被丢掉，`Connection::drop` 会结束整棵进程树
+        self.disconnect_mcp_server(server_id, cx);
+        if self.mcp.selected_server_id.as_deref() == Some(server_id) {
+            self.mcp.selected_server_id = None;
+        }
+        if self
+            .mcp
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.editing_id.as_deref() == Some(server_id))
+        {
+            self.mcp.editor = None;
+        }
+        self.persist_config(cx);
+        cx.notify();
+    }
+}
+
+/// 从名称生成一个服务器 id。
+///
+/// 只用 `[a-z0-9]` 加一段短后缀：id 会进工具名（`mcp__<id>__<工具>`），
+/// 而工具名要满足三个渠道对函数名的字符要求。中文名筛完什么都不剩，退回 `server`。
+fn new_server_id(name: &str) -> String {
+    let slug: String = name
+        .chars()
+        .map(|ch| ch.to_ascii_lowercase())
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(16)
+        .collect();
+    let slug = if slug.is_empty() { "server".to_string() } else { slug };
+    let unique = uuid::Uuid::new_v4().simple().to_string();
+    format!("{slug}-{}", &unique[..6])
 }

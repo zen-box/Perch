@@ -391,11 +391,9 @@ impl AppState {
                 let _ = tx.send(run_tool_batch(tools, routes, control).await);
             });
             // 后台任务整个没了（panic 之类）时不能就这么算了：占位块会永远停在
-            // 「正在执行」，界面也一直卡在"忙"上。补一批"没跑成"的结果收尾。
-            let results = match rx.recv().await {
-                Some(results) => results,
-                None => Vec::new(),
-            };
+            // 「正在执行」，界面也一直卡在"忙"上。这时结果为空，`finish_tool_run`
+            // 会按占位块补一批"没跑成"的结果收尾。
+            let results = rx.recv().await.unwrap_or_default();
             update_state(&this, cx, |state, cx| state.finish_tool_run(run_id, results, cx));
         })
         .detach();

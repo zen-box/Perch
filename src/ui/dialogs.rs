@@ -266,6 +266,30 @@ pub fn confirm_delete_provider(app: Entity<AppState>, provider_name: String, win
     });
 }
 
+/// 删除一台 MCP 服务器。要确认，是因为它连着凭据管理器里的环境变量一起清掉。
+pub fn confirm_delete_mcp_server(
+    app: Entity<AppState>,
+    server_id: String,
+    server_name: String,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let lang = current(cx);
+    let description = tr_args(lang, Key::McpDeleteDesc, &[&server_name]);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let app = app.clone();
+        let server_id = server_id.clone();
+        alert
+            .title(tr(lang, Key::McpDeleteTitle))
+            .description(description.clone())
+            .button_props(danger_props(tr(lang, Key::Delete), lang))
+            .on_ok(move |_, _, cx| {
+                app.update(cx, |this, cx| this.remove_mcp_server(&server_id, cx));
+                true
+            })
+    });
+}
+
 pub fn open_edit_message_dialog(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let p = Palette::new(cx);

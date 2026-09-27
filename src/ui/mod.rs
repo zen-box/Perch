@@ -15,6 +15,7 @@ mod model_picker;
 mod params;
 mod settings;
 mod settings_general;
+mod settings_mcp;
 mod settings_misc;
 mod settings_prompts;
 mod settings_providers;

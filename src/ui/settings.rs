@@ -5,7 +5,7 @@ use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
 use super::Palette;
-use super::{settings_general, settings_misc, settings_prompts, settings_providers};
+use super::{settings_general, settings_mcp, settings_misc, settings_prompts, settings_providers};
 use crate::app::{AppState, SettingsTab};
 use crate::i18n::{Key, tr};
 
@@ -21,7 +21,7 @@ pub fn render_settings(state: &mut AppState, p: &Palette, cx: &mut Context<AppSt
             SettingsTab::General => settings_general::render_general(state, p, cx).into_any_element(),
             SettingsTab::Providers => settings_providers::render_providers(state, p, cx).into_any_element(),
             SettingsTab::Prompts => settings_prompts::render_prompts(state, p, cx).into_any_element(),
-            SettingsTab::McpServers => settings_misc::render_mcp(p, lang).into_any_element(),
+            SettingsTab::McpServers => settings_mcp::render_mcp(state, p, cx).into_any_element(),
             SettingsTab::About => settings_misc::render_about(p, lang).into_any_element(),
         })
 }

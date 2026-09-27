@@ -303,7 +303,8 @@ fn render_tool_result(
     let title = if msg.tool_name.is_empty() {
         tr(lang, Key::ToolResultTitle).to_string()
     } else {
-        msg.tool_name.clone()
+        // MCP 工具名是 `mcp__<服务器>__<工具>`，那是给模型看的；界面上只留工具名
+        crate::mcp::display_name(&msg.tool_name).to_string()
     };
     let body = msg.content.trim_end();
     // 耗时和退出码是给用户看的执行细节：耗时总显示；退出码只在非 0 时显示——

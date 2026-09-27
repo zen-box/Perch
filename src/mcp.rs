@@ -137,7 +137,7 @@ pub fn is_mcp_tool(name: &str) -> bool {
     name.starts_with(TOOL_PREFIX)
 }
 
-/// 从暴露名里反推 (服务器 id, 原始工具名)。
+/// 从暴露名里反推 (服务器 id, 工具名)。
 ///
 /// **只当提示用**：清洗和截断都可能让名字不可逆（原名里有 `.`、或者太长被截过）。
 /// 真正决定「这条调用发给哪台服务器、用哪个原始工具名」的是 `mcp_ops` 里那张清单。
@@ -148,6 +148,18 @@ pub fn parse_tool_name(exposed: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((server, tool))
+}
+
+/// 界面上显示的名字。
+///
+/// 交给模型的名字得带服务器前缀（否则两台服务器各有 `read_file` 就分不清了），
+/// 但界面上不需要——`mcp__filesystem-3f8a21__read_text_file` 又长又难读。
+/// 只留工具名那一段。
+pub fn display_name(exposed: &str) -> &str {
+    match parse_tool_name(exposed) {
+        Some((_, tool)) => tool,
+        None => exposed,
+    }
 }
 
 /// 按 `mcp__<服务器>__<工具>` 组名。
@@ -185,8 +197,7 @@ fn server_part(server_id: &str) -> String {
 /// 清洗成三个渠道都接受的函数名字符。
 ///
 /// 只留 `[A-Za-z0-9_-]`，其余一律换成 `_`；连续下划线压成一个——`__` 是服务器和
-/// 工具之间的分隔符，工具名里再出现就会让 [`parse_tool_name`] 切错位置。
-/// 首尾的下划线也去掉，免得拼出 `mcp__files___read` 这种三个下划线连在一起的名字。
+/// 工具之间的分隔符，工具名里再出现就会让 [`parse_tool_name`] 切错位置。/// 首尾的下划线也去掉，免得拼出 `mcp__files___read` 这种三个下划线连在一起的名字。
 fn sanitize(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut last_underscore = false;
