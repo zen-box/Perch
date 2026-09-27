@@ -64,6 +64,12 @@ pub struct McpState {
     /// 交给模型的顺序由 `config.mcp_servers` 决定，**不靠 HashMap 的遍历顺序**：
     /// 工具清单的顺序一变，同一个会话序列化出来的请求体就变，prompt 缓存全失效。
     tools: HashMap<String, Vec<ExposedTool>>,
+    /// 服务器 id → 最近一次失败的原因。
+    ///
+    /// 和 `ServerStatus::Failed` 里那份的区别是**重连期间这份还在**：失败那一行如果
+    /// 在点「重连」的瞬间消失，整行就矮一截、下面所有服务器跟着往上跳，连上/再失败时
+    /// 又跳回来——看着就是页面在闪。留着上一次的原因，行高就稳了。
+    last_error: HashMap<String, String>,
     /// 设置页里正在看哪台服务器的详情
     pub selected_server_id: Option<String>,
     /// 正在编辑的服务器。`None` 表示没在编辑。
@@ -149,10 +155,35 @@ impl McpState {
             .unwrap_or_default()
     }
 
+    /// 只丢掉连接，工具清单留着。
+    ///
+    /// 重连走这条路：连接一定要换（旧子进程得收掉），但清单没必要跟着一起没。
+    /// 清单一空，设置页的详情区就塌成一行「暂无工具」，连上再撑回来——看着像闪了一下。
+    /// 顺带一个好处：重连期间交给模型的工具清单不变，同一个会话的请求体前缀不变，
+    /// prompt 缓存不会因为用户点了一下「重连」就全失效。
+    fn close_connection(&mut self, server_id: &str) {
+        self.connections.remove(server_id);
+    }
+
+    /// 丢掉某台服务器的工具清单。
+    ///
+    /// 只在**确定这批工具再也用不上**时调：用户断开、停用、删除，或者重连失败。
+    /// 连接没了但清单还在的话，模型会看到一个调不动的清单。
+    fn forget_tools(&mut self, server_id: &str) {
+        self.tools.remove(server_id);
+    }
+
+    /// 最近一次失败的原因。没失败过是 `None`。
+    pub fn last_error_of(&self, server_id: &str) -> Option<&str> {
+        self.last_error.get(server_id).map(String::as_str)
+    }
+
     /// 断开一台服务器并清掉它的工具清单。**配置不动**——用户只是停用，不是删除。
     fn drop_server(&mut self, server_id: &str) {
-        self.connections.remove(server_id);
-        self.tools.remove(server_id);
+        self.close_connection(server_id);
+        self.forget_tools(server_id);
+        // 用户主动断开：上一次的失败原因也该跟着走，不然重新连上之前那行会一直挂着
+        self.last_error.remove(server_id);
         self.status.insert(server_id.to_string(), ServerStatus::Idle);
     }
 }
@@ -190,8 +221,11 @@ impl AppState {
         else {
             return;
         };
-        // 换一台新的：旧连接在这里被丢掉，`Connection::drop` 会把整棵进程树收掉
-        self.mcp.drop_server(server_id);
+        // 换一台新的：旧连接在这里被丢掉，`Connection::drop` 会把整棵进程树收掉。
+        // 工具清单**不清**（见 `close_connection`）：清掉的话设置页的详情区会先塌成
+        // 一行「暂无工具」再撑回来，看着就是闪了一下。状态和清单的改动都在下面这一次
+        // `cx.notify()` 之前做完，界面只渲染一次，中间态不会漏出去。
+        self.mcp.close_connection(server_id);
         self.mcp.status.insert(server_id.to_string(), ServerStatus::Connecting);
         cx.notify();
 
@@ -243,12 +277,18 @@ impl AppState {
         self.mcp.tools.insert(server_id.to_string(), exposed);
         self.mcp.connections.insert(server_id.to_string(), connection);
         self.mcp.status.insert(server_id.to_string(), ServerStatus::Ready);
+        // 连上了，上一次的失败原因就不该再显示
+        self.mcp.last_error.remove(server_id);
         cx.notify();
     }
 
     fn mcp_failed(&mut self, server_id: &str, error: String, cx: &mut Context<Self>) {
+        // 重连失败时清单里是**上一版**的残留，连接已经没了，那些工具一个也调不动；
+        // 留着只会让模型看到一个用不了的清单。首次连接失败时清单本来就是空的。
+        self.mcp.forget_tools(server_id);
         // 失败的原因可能很长（协议错误里带着整帧），留一句够看的
         let error = local_tools_truncate(&error);
+        self.mcp.last_error.insert(server_id.to_string(), error.clone());
         self.mcp
             .status
             .insert(server_id.to_string(), ServerStatus::Failed(error));
@@ -586,5 +626,48 @@ mod tests {
         // `tool_display_name` 会退回去掉前缀的那一段（尽力而为，总比显示全名强）
         assert_eq!(mcp::display_name("mcp__srv__a_b_b2c9276d"), "a_b_b2c9276d");
         assert_eq!(mcp::display_name("read_file"), "read_file");
+    }
+
+    /// 重连只换连接、不清清单——清了界面就闪（详情区塌成一行「暂无工具」再撑回来）。
+    /// 但重连**失败**时必须清：连接已经没了，留着就是给模型看一个调不动的清单。
+    #[std::prelude::v1::test]
+    fn reconnecting_keeps_the_tool_list_until_it_fails() {
+        let mut state = McpState::default();
+        state.tools.insert("srv".to_string(), vec![exposed("mcp__srv__a", "a")]);
+        state.status.insert("srv".to_string(), ServerStatus::Ready);
+
+        state.close_connection("srv");
+        assert_eq!(state.tools_of("srv").len(), 1);
+
+        state.forget_tools("srv");
+        assert!(state.tools_of("srv").is_empty());
+    }
+
+    /// 用户主动断开是另一回事：连接和清单一起走，状态回 `Idle`（按钮文案要变回「连接」）。
+    #[std::prelude::v1::test]
+    fn dropping_a_server_clears_both_the_connection_and_the_tools() {
+        let mut state = McpState::default();
+        state.tools.insert("srv".to_string(), vec![exposed("mcp__srv__a", "a")]);
+        state.status.insert("srv".to_string(), ServerStatus::Ready);
+
+        state.drop_server("srv");
+        assert!(state.tools_of("srv").is_empty());
+        assert_eq!(state.status("srv"), ServerStatus::Idle);
+    }
+
+    /// 重连期间上一次的失败原因要留着。那一行是「点重连页面闪动」的根子：
+    /// 一消失整行就矮一截，下面几台服务器跟着往上跳，连上或者再失败时又跳回来。
+    #[std::prelude::v1::test]
+    fn the_last_error_survives_a_reconnect_but_not_a_disconnect() {
+        let mut state = McpState::default();
+        state.last_error.insert("srv".to_string(), "boom".to_string());
+
+        // 重连只收连接，原因继续挂着
+        state.close_connection("srv");
+        assert_eq!(state.last_error_of("srv"), Some("boom"));
+
+        // 用户主动断开就该清掉，不然重新连上之前那行会一直挂着
+        state.drop_server("srv");
+        assert_eq!(state.last_error_of("srv"), None);
     }
 }

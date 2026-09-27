@@ -206,11 +206,20 @@ fn render_server_row(
                         .text_color(p.muted_foreground)
                         .child(transport_summary(server)),
                 )
-                // 连不上的原因要看得见：用户改完命令第一件事就是想知道它报了什么错
+                // 连不上的原因要看得见：用户改完命令第一件事就是想知道它报了什么错。
+                // **重连期间也留着**（转灰、加「上次失败」前缀）：这一行一消失整行就矮一截，
+                // 下面几台服务器跟着往上跳，连上或者再失败时又跳回来——那就是「点重连页面闪动」。
                 .children(match &status {
                     ServerStatus::Failed(error) => {
                         Some(div().text_xs().text_color(p.danger).child(first_line(error, 160)))
                     }
+                    ServerStatus::Connecting => state.mcp.last_error_of(&server.id).map(|error| {
+                        div().text_xs().text_color(p.muted_foreground).child(tr_args(
+                            lang,
+                            Key::McpLastError,
+                            &[&first_line(error, 140)],
+                        ))
+                    }),
                     _ => None,
                 }),
         )
