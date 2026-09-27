@@ -15,3 +15,5 @@ tools/p3-test/mock.log
 # 实测脚本在仓库里留下的核对用中间文件（需要留档时复制到 shots/ 再提交）
 tools/p3-test/mcp-exposed.txt
 tools/p3-test/mcp_calls.jsonl
+# 下划线开头是实测时的草稿与进程日志（放大裁图、启动日志、mock 的 stderr）
+tools/p3-test/_*
