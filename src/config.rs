@@ -336,6 +336,23 @@ pub struct AppConfig {
     /// 装一个新 skill 不该还要先来设置里勾一下。老配置里没有这个字段，读进来是空的。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub disabled_skills: Vec<String>,
+    /// 审计日志开着吗。**默认开**，`serde` 的默认值跟着 `Default` 走。
+    ///
+    /// 默认开是有意的：`AGENTS.md` §11 已经定了不做进程沙盒，那"事后查得到"
+    /// 就是安全模型里还站得住的那一环。老配置里没有这个字段，
+    /// `serde(default)` 会给出 `false`——所以这里不能只靠 `#[serde(default)]`，
+    /// 见 [`AppConfig::default`] 与 `is_audit_log_enabled`。
+    #[serde(default = "default_audit_log")]
+    pub audit_log_enabled: bool,
+}
+
+/// 老配置里没有这个字段时按**开**处理。
+///
+/// 不能用 `#[serde(default)]`：那给的是 `bool::default()` = `false`，
+/// 于是所有老用户升级上来都会**静默关掉**审计日志——而它恰恰是给
+/// "完全权限"兜底的那一层，静默消失比没有更糟。
+fn default_audit_log() -> bool {
+    true
 }
 
 /// 本地命令的默认超时。取 `local_tools` 里那个常量，
@@ -361,6 +378,7 @@ impl Default for AppConfig {
             providers: Vec::new(),
             mcp_servers: Vec::new(),
             disabled_skills: Vec::new(),
+            audit_log_enabled: default_audit_log(),
         }
     }
 }
@@ -651,6 +669,36 @@ mod tests {
         let config: AppConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.command_timeout_secs, default_command_timeout_secs());
         assert!(config.command_timeout_secs > 0, "默认超时不能是 0");
+    }
+
+    #[test]
+    fn old_configs_get_the_audit_log_turned_on() {
+        // 这条是**静默失效**的典型：写成 `#[serde(default)]` 的话给的是 `false`，
+        // 所有老用户升级上来审计日志就没了——而它正是给"完全权限"兜底的那一层。
+        let json = r#"{
+            "active_provider_id": "",
+            "model": "m",
+            "temperature": 0.7,
+            "system_prompt": "",
+            "is_dark": false,
+            "language": "zh-CN",
+            "providers": []
+        }"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert!(config.audit_log_enabled, "老配置读进来必须是开着的");
+        assert!(AppConfig::default().audit_log_enabled, "新建配置也默认开着");
+    }
+
+    #[test]
+    fn the_audit_log_switch_survives_a_round_trip() {
+        // 关掉之后重启还得是关着的，否则用户关了它、下次启动又自己开了
+        let config = AppConfig {
+            audit_log_enabled: false,
+            ..AppConfig::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: AppConfig = serde_json::from_str(&json).unwrap();
+        assert!(!back.audit_log_enabled);
     }
 
     #[test]

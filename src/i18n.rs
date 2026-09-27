@@ -660,6 +660,13 @@ i18n! {
     SkillOpenFolderFailed => { "打开技能目录失败：{}", "Failed to open the skills folder: {}", "スキルフォルダを開けませんでした：{}", "開啟技能資料夾失敗：{}" },
     ToolSourceSkills => { "技能", "Skills", "スキル", "技能" },
     ToolSourceNoSkills => { "技能都停用了", "All skills off", "スキルはすべて無効", "技能都停用了" },
+    AuditLog => { "审计日志", "Audit log", "監査ログ", "審計日誌" },
+    EnableAuditLog => { "记录工具调用", "Record tool calls", "ツール呼び出しを記録", "記錄工具呼叫" },
+    AuditLogHint => { "每次工具调用记一行：时间、对话、工具、参数摘要、是你点过头的还是自动放行的、耗时、退出码。**被拒绝的调用也会记**——「模型试了几次越界」只有和「你拒了几次」对上号才有意义。", "One line per tool call: time, conversation, tool, an argument summary, whether it ran automatically or after your approval, how long it took, and the exit code. Denied calls are recorded too — \"how often did the model try to go out of bounds\" only means something next to \"how often did you say no\".", "ツール呼び出しごとに 1 行記録します：時刻、会話、ツール、引数の要約、自動で実行されたのかあなたが承認したのか、所要時間、終了コード。**拒否された呼び出しも記録します**——「モデルが何回はみ出そうとしたか」は「何回断ったか」と並べて初めて意味を持ちます。", "每次工具呼叫記一行：時間、對話、工具、參數摘要、是你點過頭的還是自動放行的、耗時、退出碼。**被拒絕的呼叫也會記**——「模型試了幾次越界」只有和「你拒了幾次」對上號才有意義。" },
+    AuditLogFolder => { "日志文件", "Log files", "ログファイル", "日誌檔案" },
+    AuditLogFolderHint => { "一天一个文件，放在数据目录的 logs 里。内容只在本机，不会上传到任何地方。", "One file per day, under logs in the data folder. It never leaves this machine.", "1 日 1 ファイル、データフォルダー内の logs に置かれます。内容はこのパソコンの中だけにあり、どこにも送信されません。", "一天一個檔案，放在資料目錄的 logs 裡。內容只在本機，不會上傳到任何地方。" },
+    AuditLogOpenFolder => { "打开日志目录", "Open log folder", "ログフォルダーを開く", "開啟日誌目錄" },
+    AuditLogOpenFolderFailed => { "打开日志目录失败：{}", "Could not open the log folder: {}", "ログフォルダーを開けませんでした：{}", "開啟日誌目錄失敗：{}" },
 }
 
 /// 按顺序替换文案里的 `{}` 占位符。

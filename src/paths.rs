@@ -250,10 +250,19 @@ pub fn attachments_dir() -> PathBuf {
 }
 
 /// Skills 目录：一个子目录一个 skill，入口是里面的 `SKILL.md`。
-///
 /// 和附件一样，建不出来也不打断启动——真读的时候 `skills::reload` 会当成"一个都没装"。
 pub fn skills_dir() -> PathBuf {
     let dir = data_dir().join("skills");
+    let _ = fs::create_dir_all(&dir);
+    dir
+}
+
+/// 审计日志目录。一天一个文件，见 `audit.rs`。
+///
+/// 和别的目录一样，建不出来也不打断启动：日志写失败只该是"没有日志"，
+/// 不该变成"工具跑不了"（`audit::record` 就是这么用的）。
+pub fn logs_dir() -> PathBuf {
+    let dir = data_dir().join("logs");
     let _ = fs::create_dir_all(&dir);
     dir
 }

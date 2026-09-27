@@ -6,6 +6,8 @@ mod agent_loop;
 mod analytics;
 mod app;
 mod attachment_ops;
+mod audit;
+mod audit_ops;
 mod backup;
 mod backup_ops;
 mod brand;

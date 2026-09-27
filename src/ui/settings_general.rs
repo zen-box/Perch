@@ -174,6 +174,31 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
         ],
     );
 
+    let audit = section(
+        tr(lang, Key::AuditLog),
+        p,
+        vec![
+            setting_row(
+                tr(lang, Key::EnableAuditLog),
+                tr(lang, Key::AuditLogHint),
+                p,
+                Switch::new("audit-log-enabled")
+                    .checked(state.config.audit_log_enabled)
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_audit_log(cx))),
+            ),
+            setting_row(
+                tr(lang, Key::AuditLogFolder),
+                tr(lang, Key::AuditLogFolderHint),
+                p,
+                Button::new("open-audit-log-dir")
+                    .outline()
+                    .small()
+                    .label(tr(lang, Key::AuditLogOpenFolder))
+                    .on_click(cx.listener(|this, _, _, cx| this.open_audit_log_dir(cx))),
+            ),
+        ],
+    );
+
     page(
         "settings-general",
         tr(lang, Key::GeneralSettings),
@@ -183,6 +208,7 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
             .gap_8()
             .child(appearance)
             .child(conversation)
-            .child(local_tools),
+            .child(local_tools)
+            .child(audit),
     )
 }

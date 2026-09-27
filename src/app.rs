@@ -277,6 +277,9 @@ impl AppState {
         let lang = AppLanguage::from_str(&config.language);
         apply_locale(lang);
         set_current(cx, lang);
+        // 审计日志的开关是全局的（理由见 `audit.rs` 里的静态量注释），启动时同步一次；
+        // 用户改设置时由设置页再同步。
+        crate::audit::set_enabled(config.audit_log_enabled);
 
         let selected_provider_id = config.active_provider_id.clone();
         let initial_api_key = config.get_active_api_key();

@@ -410,7 +410,14 @@ impl AppState {
             self.persist_storage(cx);
             cx.notify();
         } else {
-            self.start_tool_run(&session_id, vec![pending], None, false, cx);
+            self.start_tool_run(
+                &session_id,
+                vec![pending],
+                None,
+                false,
+                crate::audit::Decision::Auto,
+                cx,
+            );
         }
         true
     }

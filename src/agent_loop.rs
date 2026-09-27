@@ -32,6 +32,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel, runtime, update_state};
+use crate::audit::{self, Decision};
 use crate::i18n::{Key, tr};
 use crate::llm_tools::{ToolCall, ToolResult};
 use crate::local_tools::{self, ExecControl, PendingTool, ProjectDir};
@@ -101,6 +102,9 @@ pub(crate) struct ToolRun {
     /// 每条调用对应的占位消息 id，执行完按它回填
     placeholders: Vec<(String, PendingTool)>,
     cancel: Arc<AtomicBool>,
+    /// 这批调用是怎么被放行的（免确认 / 用户点了允许 / 手打命令）。
+    /// 审计日志要它——「自动跑的」和「你点过头的」在事后复盘时是两回事。
+    decision: Decision,
     /// 执行完回到哪个循环；`None` 是手打命令，执行完就结束
     then: Option<AgentOrigin>,
 }
@@ -301,6 +305,16 @@ impl AppState {
             RoundAction::HitLimit(waiting) => {
                 for tool in &waiting {
                     let result = local_tools::not_executed_result(tool, LIMIT_REASON);
+                    audit::record(audit::Record {
+                        session_id: &origin.session_id,
+                        tool: &tool.name,
+                        arguments: Some(&tool.arguments),
+                        decision: Decision::Limit,
+                        ok: false,
+                        duration_ms: 0,
+                        exit_code: None,
+                        detail: Some(LIMIT_REASON),
+                    });
                     self.push_to_session(&origin.session_id, ChatMessage::new_tool(&result));
                 }
                 self.agent.end_loop();
@@ -311,6 +325,16 @@ impl AppState {
             RoundAction::Disabled(waiting) => {
                 for tool in &waiting {
                     let result = local_tools::disabled_result(tool);
+                    audit::record(audit::Record {
+                        session_id: &origin.session_id,
+                        tool: &tool.name,
+                        arguments: Some(&tool.arguments),
+                        decision: Decision::Disabled,
+                        ok: false,
+                        duration_ms: 0,
+                        exit_code: None,
+                        detail: Some("the tool source was turned off"),
+                    });
                     self.push_to_session(&origin.session_id, ChatMessage::new_tool(&result));
                 }
                 // 工具没开就不必再发一轮：模型什么都做不了，只会重复要求调用
@@ -320,7 +344,7 @@ impl AppState {
             }
             RoundAction::RunTools(tools) => {
                 let session_id = origin.session_id.clone();
-                self.start_tool_run(&session_id, tools, Some(origin), false, cx);
+                self.start_tool_run(&session_id, tools, Some(origin), false, Decision::Auto, cx);
                 true
             }
             RoundAction::AskApproval(tool) => {
@@ -380,6 +404,7 @@ impl AppState {
         tools: Vec<PendingTool>,
         then: Option<AgentOrigin>,
         local_only: bool,
+        decision: Decision,
         cx: &mut Context<Self>,
     ) {
         let mut placeholders = Vec::new();
@@ -400,6 +425,7 @@ impl AppState {
             session_id: session_id.to_string(),
             placeholders,
             cancel: control.cancel.clone(),
+            decision,
             then,
         });
         // 工具执行期间和生成回答一样算「忙」：输入框换成停止按钮，不能再发新消息
@@ -442,11 +468,26 @@ impl AppState {
             return;
         };
         for (ix, (placeholder_id, tool)) in run.placeholders.iter().enumerate() {
-            // 缺结果时补一条说明，而不是把占位块留在"正在执行"上
-            let result = results
-                .get(ix)
-                .cloned()
-                .unwrap_or_else(|| local_tools::not_executed_result(tool, RUN_LOST_REASON));
+            // 缺结果时补一条说明，而不是把占位块留在"正在执行"上。
+            // 这时**决策也要改成 `Lost`**：调用根本没跑完，记成"自动放行/用户同意"
+            // 会让人以为它执行过——审计日志在这种地方说错话比不记还糟。
+            let (result, decision) = match results.get(ix) {
+                Some(result) => (result.clone(), run.decision),
+                None => (local_tools::not_executed_result(tool, RUN_LOST_REASON), Decision::Lost),
+            };
+            // 审计日志按**每条调用**记：一次批量执行里可能有的成功有的失败，
+            // 合成一条就把"哪个失败了"丢掉了。
+            audit::record(audit::Record {
+                session_id: &run.session_id,
+                tool: &tool.name,
+                arguments: Some(&tool.arguments),
+                decision,
+                ok: !result.is_error,
+                duration_ms: result.duration_ms,
+                exit_code: result.exit_code,
+                // 成功时也留一小段结果开头：复盘时"它到底返回了什么"常常比"跑成功了"有用
+                detail: Some(&result.content),
+            });
             if let Some(message) = self.find_message_mut(placeholder_id) {
                 message.content = result.content;
                 message.tool_is_error = result.is_error;
@@ -481,6 +522,18 @@ impl AppState {
                     message.content = result.content;
                     message.tool_is_error = true;
                     message.is_streaming = false;
+                    // 只记**真的被停掉的那些**：已经跑完的调用上面 `finish_tool_run` 已经记过了，
+                    // 这里再记一条会让同一次调用在日志里出现两次。
+                    audit::record(audit::Record {
+                        session_id: &run.session_id,
+                        tool: &tool.name,
+                        arguments: Some(&tool.arguments),
+                        decision: Decision::Stopped,
+                        ok: false,
+                        duration_ms: 0,
+                        exit_code: None,
+                        detail: Some(STOPPED_REASON),
+                    });
                 }
             }
         }
@@ -567,6 +620,16 @@ impl AppState {
         if !self.tool_still_allowed(&approval.session_id, &approval.tool) {
             // 卡片挂着的时候用户改了设置或者切了模式：按"已停用"处理，别执行。
             // 模型发起的调用还要把结果回传，否则历史里留着一条没回的调用。
+            audit::record(audit::Record {
+                session_id: &approval.session_id,
+                tool: &approval.tool.name,
+                arguments: Some(&approval.tool.arguments),
+                decision: Decision::Disabled,
+                ok: false,
+                duration_ms: 0,
+                exit_code: None,
+                detail: Some("the tool source was turned off while the card was showing"),
+            });
             if matches!(approval.source, ApprovalSource::Agent(_)) {
                 let result = local_tools::disabled_result(&approval.tool);
                 self.push_to_session(&approval.session_id, ChatMessage::new_tool(&result));
@@ -582,7 +645,14 @@ impl AppState {
             ApprovalSource::Manual { .. } => None,
             ApprovalSource::Agent(origin) => Some(origin),
         };
-        self.start_tool_run(&approval.session_id, vec![approval.tool], then, local_only, cx);
+        self.start_tool_run(
+            &approval.session_id,
+            vec![approval.tool],
+            then,
+            local_only,
+            Decision::Approved,
+            cx,
+        );
     }
 
     /// 用户在授权卡片上点了「拒绝」。
@@ -594,6 +664,18 @@ impl AppState {
         let Some(approval) = self.agent.pending.take() else {
             return;
         };
+        // **被拒的也要记**：「用户点了几次拒绝」和「模型试了几次越界」只有在对得上号时
+        // 才有意义，只记执行成功的那部分等于把最有用的信息丢了。
+        audit::record(audit::Record {
+            session_id: &approval.session_id,
+            tool: &approval.tool.name,
+            arguments: Some(&approval.tool.arguments),
+            decision: Decision::Denied,
+            ok: false,
+            duration_ms: 0,
+            exit_code: None,
+            detail: Some("denied by the user"),
+        });
         if let ApprovalSource::Agent(origin) = approval.source {
             let result = local_tools::denial_result(&approval.tool);
             self.push_to_session(&approval.session_id, ChatMessage::new_tool(&result));
