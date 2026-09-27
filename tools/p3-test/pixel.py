@@ -11,6 +11,7 @@
 
 用法：
     python pixel.py find  shots/f12.png purple [y0] [y1]    # 找某颜色的连通块（包围盒 + 中心）
+    python pixel.py bands shots/f12.png dark 40 300         # 在 x 范围内按行找颜色带（量竖向列表）
     python pixel.py probe shots/f12.png 955,635 1470,788    # 逐点报颜色，并扫出紫色系的 y 带
 """
 import sys
@@ -71,6 +72,44 @@ def find(path, name, y0, y1):
         print(f"  x {x0}..{x1}  y {yy0}..{yy1}  中心 ({(x0 + x1) // 2},{(yy0 + yy1) // 2})  {n}px")
 
 
+def bands(path, name, x0, x1):
+    """在 x 范围内按行找某颜色的 y 带。
+
+    和 `find` 的分工：`find` 找的是**一整块**（一个按钮、一个开关），`bands` 找的是
+    **一行行分开的东西**——侧栏导航、列表项、工具清单。这类目标用 `find` 会得到
+    一堆碎块，得自己再拼；`bands` 直接给出每行的 y 范围。
+    """
+    rule = RULES[name]
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    x0, x1 = max(0, x0), min(w, x1)
+    px = im.load()
+    rows = {}
+    for y in range(h):
+        xs = [x for x in range(x0, x1) if rule(*px[x, y])]
+        if xs:
+            rows[y] = (min(xs), max(xs), len(xs))
+    if not rows:
+        print(f"{path}: x {x0}..{x1} 里没找到 {name}")
+        return
+    ys = sorted(rows)
+    groups = []
+    start = prev = ys[0]
+    for y in ys[1:]:
+        # 行内文字上下有空隙，超过 4 行空档就当换了一行
+        if y - prev > 4:
+            groups.append((start, prev))
+            start = y
+        prev = y
+    groups.append((start, prev))
+    print(f"{path} ({w}x{h}) x {x0}..{x1} 找到 {len(groups)} 条 {name} 带:")
+    for a, b in groups:
+        ax = min(rows[y][0] for y in range(a, b + 1) if y in rows)
+        bx = max(rows[y][1] for y in range(a, b + 1) if y in rows)
+        n = sum(rows[y][2] for y in range(a, b + 1) if y in rows)
+        print(f"  y {a}..{b}  中心 y={(a + b) // 2}  x {ax}..{bx}  {n}px")
+
+
 def probe(path, points):
     im = Image.open(path).convert("RGB")
     w, h = im.size
@@ -118,6 +157,11 @@ def main():
         y0 = int(sys.argv[4]) if len(sys.argv) > 5 else 0
         y1 = int(sys.argv[5]) if len(sys.argv) > 5 else 10**9
         find(path, name, y0, y1)
+    elif action == "bands":
+        name = sys.argv[3] if len(sys.argv) > 3 else "dark"
+        x0 = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+        x1 = int(sys.argv[5]) if len(sys.argv) > 5 else 10**9
+        bands(path, name, x0, x1)
     elif action == "probe":
         probe(path, sys.argv[3:])
     else:
