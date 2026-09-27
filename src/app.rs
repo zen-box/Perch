@@ -10,6 +10,7 @@ use crate::agent_loop::AgentState;
 use crate::backup::BackupFile;
 use crate::config::{AppConfig, ChannelType};
 use crate::i18n::{AppLanguage, Key, apply_locale, set_current, tr, tr_args};
+use crate::mcp_ops::McpState;
 use crate::model::{Attachment, ChatMessage, StorageData};
 use crate::model_ops::{ModelEditor, TokenField};
 use crate::prompts::PromptLibrary;
@@ -104,6 +105,9 @@ pub struct AppState {
 
     /// Agent 循环与本地工具：等授权的调用、正在执行的工具、循环进行到哪了（见 `agent_loop.rs`）
     pub agent: AgentState,
+
+    /// MCP 服务器：连接、工具清单、连接状态（见 `mcp_ops.rs`）
+    pub mcp: McpState,
 
     /// 助手正在忙：流式生成回答，或者在后台执行工具。
     /// 忙的时候输入框显示停止按钮，不能发新消息、不能重新生成。
@@ -410,6 +414,7 @@ impl AppState {
             add_channel_type: ChannelType::OpenAiChat,
             rename_target_session_id: None,
             agent: AgentState::default(),
+            mcp: McpState::default(),
             is_streaming: false,
             active_streams: HashMap::new(),
             pending_toasts: Vec::new(),

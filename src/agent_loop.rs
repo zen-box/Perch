@@ -27,6 +27,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use gpui_kit::*;
 
@@ -34,6 +35,8 @@ use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::i18n::{Key, tr};
 use crate::llm_tools::{ToolCall, ToolResult};
 use crate::local_tools::{self, ExecControl, PendingTool};
+use crate::mcp::{self, Connection};
+use crate::mcp_ops::Route;
 use crate::model::{ChatMessage, ChatSession};
 use crate::reply_ops::JobSpec;
 
@@ -48,6 +51,9 @@ pub(crate) const MAX_AGENT_ROUNDS: usize = 12;
 const LIMIT_REASON: &str = "the tool-call limit for this turn was reached.";
 /// 用户点了停止时回传给模型的理由。
 const STOPPED_REASON: &str = "stopped by the user.";
+/// 后台执行任务整个没了（panic 之类）时回传给模型的理由。正常不会出现，
+/// 但没有它的话占位块会永远停在「正在执行」上。
+const RUN_LOST_REASON: &str = "the tool runner stopped unexpectedly.";
 
 /// 一轮流式请求是替哪个对话、哪条消息、哪个模型发的。
 ///
@@ -184,7 +190,19 @@ pub(crate) fn next_action(
     // 可用的有哪些」。为一个不存在的工具弹授权卡片，用户只会莫名其妙。
     let free: Vec<PendingTool> = waiting
         .iter()
-        .filter(|tool| !local_tools::is_known(&tool.name) || !tool.needs_approval())
+        .filter(|tool| {
+            if mcp::is_mcp_tool(&tool.name) {
+                // MCP 工具**一律每次确认**（§11 已确认的决策）：调用跑在别人的服务器上，
+                // 我们既不知道它到底做什么，也没法像本机工具那样按"读/写/执行"分级。
+                // 注意不能走下面的「不认识的名字当免确认」那条——MCP 工具名在本机
+                // 工具表里当然查不到，那样会被误判成"模型编的名字"直接放行。
+                false
+            } else if local_tools::is_known(&tool.name) {
+                !tool.needs_approval()
+            } else {
+                true
+            }
+        })
         .cloned()
         .collect();
     if !free.is_empty() {
@@ -359,33 +377,43 @@ impl AppState {
         self.persist_storage(cx);
         cx.notify();
 
+        // 每条调用走哪条路要在挪进后台任务之前定下来：`route_tool` 要读 `self`，
+        // 而 MCP 的连接句柄也得先克隆出来（后台任务只拿得到 `'static` 的东西）
+        let routes: Vec<Route> = tools.iter().map(|tool| self.route_tool(&tool.name)).collect();
+
         cx.spawn(async move |this, cx| {
-            let results = runtime()
-                .spawn_blocking(move || {
-                    tools
-                        .iter()
-                        .map(|tool| local_tools::execute(tool, &control))
-                        .collect::<Vec<_>>()
-                })
-                .await
-                .map_err(|error| error.to_string());
+            // 真正干活的在 tokio 运行时里：GPUI 自己的执行器不是 tokio，
+            // 在 `cx.spawn` 的 future 里直接跑 tokio 的定时器或子进程会 panic（§7）。
+            // 结果用 channel 递回来——`tokio::sync` 这套不依赖运行时上下文，
+            // 在 GPUI 这边 await 它没问题。
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            runtime().spawn(async move {
+                let _ = tx.send(run_tool_batch(tools, routes, control).await);
+            });
+            // 后台任务整个没了（panic 之类）时不能就这么算了：占位块会永远停在
+            // 「正在执行」，界面也一直卡在"忙"上。补一批"没跑成"的结果收尾。
+            let results = match rx.recv().await {
+                Some(results) => results,
+                None => Vec::new(),
+            };
             update_state(&this, cx, |state, cx| state.finish_tool_run(run_id, results, cx));
         })
         .detach();
     }
 
     /// 后台执行完了：回填结果，然后按来源决定下一步。
-    fn finish_tool_run(&mut self, run_id: u64, results: Result<Vec<ToolResult>, String>, cx: &mut Context<Self>) {
+    fn finish_tool_run(&mut self, run_id: u64, results: Vec<ToolResult>, cx: &mut Context<Self>) {
         // 已经被停止的旧任务：占位块在停止时就写好了「已停止」，这里的结果不要了
         let Some(run) = self.agent.running.take_if(|run| run.id == run_id) else {
             return;
         };
         for (ix, (placeholder_id, tool)) in run.placeholders.iter().enumerate() {
-            let result = match &results {
-                Ok(results) => results.get(ix).cloned(),
-                Err(error) => Some(local_tools::not_executed_result(tool, error)),
-            };
-            if let (Some(result), Some(message)) = (result, self.find_message_mut(placeholder_id)) {
+            // 缺结果时补一条说明，而不是把占位块留在"正在执行"上
+            let result = results
+                .get(ix)
+                .cloned()
+                .unwrap_or_else(|| local_tools::not_executed_result(tool, RUN_LOST_REASON));
+            if let Some(message) = self.find_message_mut(placeholder_id) {
                 message.content = result.content;
                 message.tool_is_error = result.is_error;
                 message.tool_duration_ms = result.duration_ms;
@@ -536,6 +564,101 @@ impl AppState {
     }
 }
 
+/// 执行一批调用，返回的顺序和传进来的一致——结果要按顺序回填到占位块上。
+///
+/// 两条路差别很大，所以分开跑：本机工具是**阻塞**的（读文件、等命令跑完），整批
+/// 丢给后台线程；MCP 调用是异步的，一条条 await——它的瓶颈在对端，占着线程没用。
+async fn run_tool_batch(tools: Vec<PendingTool>, routes: Vec<Route>, control: ExecControl) -> Vec<ToolResult> {
+    let mut slots: Vec<Option<ToolResult>> = tools.iter().map(|_| None).collect();
+    let mut local: Vec<(usize, PendingTool)> = Vec::new();
+    let mut remote: Vec<(usize, PendingTool, Arc<Connection>, String)> = Vec::new();
+    for (ix, (tool, route)) in tools.iter().zip(routes).enumerate() {
+        match route {
+            Route::Local => local.push((ix, tool.clone())),
+            Route::Mcp { connection, raw } => remote.push((ix, tool.clone(), connection, raw)),
+        }
+    }
+
+    if !local.is_empty() {
+        let blocking_control = control.clone();
+        let done = runtime()
+            .spawn_blocking(move || {
+                local
+                    .into_iter()
+                    .map(|(ix, tool)| (ix, local_tools::execute(&tool, &blocking_control)))
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .unwrap_or_default();
+        for (ix, result) in done {
+            if let Some(slot) = slots.get_mut(ix) {
+                *slot = Some(result);
+            }
+        }
+    }
+
+    for (ix, tool, connection, raw) in remote {
+        let result = run_remote_tool(&tool, &connection, &raw, &control).await;
+        if let Some(slot) = slots.get_mut(ix) {
+            *slot = Some(result);
+        }
+    }
+
+    slots
+        .into_iter()
+        .zip(tools)
+        .map(|(slot, tool)| slot.unwrap_or_else(|| local_tools::not_executed_result(&tool, RUN_LOST_REASON)))
+        .collect()
+}
+
+/// 调一次 MCP 工具。三种结束方式：正常返回、用户点「停止」、超时。
+async fn run_remote_tool(
+    tool: &PendingTool,
+    connection: &Arc<Connection>,
+    raw: &str,
+    control: &ExecControl,
+) -> ToolResult {
+    let started = Instant::now();
+    let call = connection.call(raw, tool.arguments.clone());
+    let outcome = tokio::select! {
+        result = tokio::time::timeout(control.command_timeout, call) => match result {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(format!(
+                "timed out after {} seconds",
+                control.command_timeout.as_secs()
+            )),
+        },
+        // 用户点了停止。MCP 协议里没有「取消这一个请求」的约定，能做的是**不再等它**：
+        // 这个 future 被丢掉，服务器那边照旧会跑完，只是结果没人接了。
+        _ = wait_for_stop(control.cancel.clone()) => {
+            return local_tools::not_executed_result(tool, STOPPED_REASON);
+        }
+    };
+    match outcome {
+        Ok(result) => mcp::to_tool_result(&tool.id, &tool.name, &result, started.elapsed().as_millis() as u64),
+        Err(error) => ToolResult {
+            id: tool.id.clone(),
+            name: tool.name.clone(),
+            content: format!("MCP call failed: {error}"),
+            is_error: true,
+            duration_ms: started.elapsed().as_millis() as u64,
+            exit_code: None,
+        },
+    }
+}
+
+/// 等用户点「停止」。
+///
+/// 本机工具靠 [`ExecControl::cancel`] 结束子进程；MCP 调用打断不了对端，只能不再等。
+/// 轮询 100 毫秒一次：比再引入一套通知机制省事，而人对「停止」的感知也到不了
+/// 100 毫秒这个精度。
+async fn wait_for_stop(cancel: Arc<AtomicBool>) {
+    while !cancel.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -674,5 +797,17 @@ mod tests {
             "要告诉模型有哪些工具可用：{}",
             result.content
         );
+    }
+
+    #[std::prelude::v1::test]
+    fn mcp_tools_always_stop_for_approval() {
+        // MCP 工具名在本机工具表里当然查不到，但**不能**因此被当成「模型编的名字」放行——
+        // 调用跑在别人的服务器上，只能每次确认
+        let calls = vec![call("c1", "mcp__files__read_file", json!({"path": "a.rs"}))];
+        assert!(!local_tools::is_known("mcp__files__read_file"));
+        match next_action(&calls, &HashSet::new(), 0, true) {
+            RoundAction::AskApproval(tool) => assert_eq!(tool.name, "mcp__files__read_file"),
+            other => panic!("MCP 工具应当每次都问，得到 {other:?}"),
+        }
     }
 }

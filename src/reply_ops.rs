@@ -8,7 +8,7 @@ use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::config::{ChannelType, ModelConfig, ProviderConfig};
 use crate::i18n::{AppLanguage, Key, tr};
 use crate::llm::{ChatMessageReq, ChatRequest, StreamEvent, stream_chat};
-use crate::llm_tools::tool_call_label;
+use crate::llm_tools::{ToolSpec, tool_call_label};
 use crate::model::{ChatMessage, MessageVariant, ReasoningLevel, ResolvedParams};
 use crate::model_info::Capability;
 
@@ -200,6 +200,7 @@ impl AppState {
                 &resolved,
                 explicit_temperature,
                 with_tools,
+                &self.mcp.specs(&self.config.mcp_servers),
                 self.language(),
             ),
         })
@@ -408,6 +409,9 @@ fn stream_key(message_id: &str, variant_id: Option<&str>) -> String {
     }
 }
 
+/// 组装一次请求。`mcp_tools` 是已连接 MCP 服务器提供的工具，排在本机工具后面；
+/// 顺序由服务器配置顺序决定——同一份工具集每次序列化出来要逐字节一致，
+/// 对端才能命中 prompt 缓存。
 fn chat_request(
     provider: &ProviderConfig,
     model: &ModelConfig,
@@ -415,6 +419,7 @@ fn chat_request(
     params: &ResolvedParams,
     explicit_temperature: bool,
     tools_enabled: bool,
+    mcp_tools: &[ToolSpec],
     lang: AppLanguage,
 ) -> ChatRequest {
     let levels = model.effective_reasoning_levels();
@@ -450,8 +455,12 @@ fn chat_request(
         // 不支持 tools 的模型（比如部分纯推理模型）收到 tools 字段可能直接报错，
         // 而"用户开了开关但选了个不支持的模型"是很常见的组合，
         // 所以这里按模型的 `Capability::Tools` 再挡一道。
+        //
+        // MCP 工具和本机工具共用这一个开关（见 `mcp_ops.rs` 的模块说明）。
         tools: if tools_enabled && model.effective_capabilities().contains(&Capability::Tools) {
-            crate::local_tools::specs()
+            let mut specs = crate::local_tools::specs();
+            specs.extend_from_slice(mcp_tools);
+            specs
         } else {
             Vec::new()
         },
@@ -575,6 +584,7 @@ mod tests {
             &params(None, None),
             false,
             false,
+            &[],
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, None);
@@ -586,6 +596,7 @@ mod tests {
             &params(None, None),
             true,
             false,
+            &[],
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, Some(0.7), "explicit temperature is kept");
@@ -598,6 +609,7 @@ mod tests {
             &params(None, None),
             false,
             false,
+            &[],
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, Some(0.7));
@@ -610,6 +622,7 @@ mod tests {
             &params(None, None),
             false,
             false,
+            &[],
             AppLanguage::ZhCn,
         );
         assert_eq!(
@@ -631,6 +644,7 @@ mod tests {
             &params(None, Some(100_000)),
             false,
             false,
+            &[],
             AppLanguage::ZhCn,
         );
         assert_eq!(request.reasoning, Some(ReasoningLevel::High));
@@ -643,6 +657,7 @@ mod tests {
             &params(Some(ReasoningLevel::Off), None),
             false,
             false,
+            &[],
             AppLanguage::ZhCn,
         );
         assert_eq!(
@@ -660,6 +675,7 @@ mod tests {
             &params(Some(ReasoningLevel::High), None),
             false,
             false,
+            &[],
             AppLanguage::ZhCn,
         );
         assert_eq!(request.reasoning, None);

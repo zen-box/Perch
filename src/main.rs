@@ -20,6 +20,7 @@ mod llm_stream;
 mod llm_tools;
 mod local_tools;
 mod mcp;
+mod mcp_ops;
 mod model;
 mod model_info;
 mod model_ops;
@@ -94,6 +95,9 @@ fn main() {
                 match AppState::bootstrap() {
                     Ok(bootstrap) => {
                         let app = cx.new(|cx| AppState::new(bootstrap, window, cx));
+                        // 后台连接启用的 MCP 服务器。放在这里而不是 `AppState::new`
+                        // 里：`new` 执行期间实体还没挂到 app 上，那时候起后台任务不合适。
+                        app.update(cx, |state, cx| state.connect_mcp_servers(cx));
                         let workspace = cx.new(|_| Workspace::new(app));
                         cx.new(|cx| Root::new(workspace, window, cx))
                     }
