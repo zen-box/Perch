@@ -21,9 +21,9 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
 | `zoom.py` | 裁一块截图放大保存，用来看清局部（徽标、一行文字）。要 Pillow |
 | `cwd/` | 隔离的工作目录（一个带 `.env` 的假项目），给工具调用当靶子。`.env` 是特意放的——用来验证敏感路径会不会被拦 |
 | `mock-config.json` | P3-2 那轮的 `perch-config.json`：渠道指向 mock 服务、开了本地工具、超时 600 秒。**故意不叫 `perch-config.json`**——仓库根 `.gitignore` 有一条 `perch-*.json`（防真实配置带密钥被提交），改名是为了不跟那条规则打架 |
-| `mock-config-mcp.json` | P3-3 那轮的配置：在上一份基础上加了 4 台 MCP 服务器（两台能连、一台命令不存在、一台停用），并给演示服务器配了 `disabled_tools: ["spam"]` |
+| `mock-config-mcp.json` | P3-3 那轮的配置：在上一份基础上加了 4 台 MCP 服务器（两台能连、一台命令不存在、一台停用），并给演示服务器配了 `disabled_tools: ["spam"]`。后来又补了 `slow`（`slowstart`）和 `slowfail` 两台，用来测重连时的界面表现，以及第二个模型 `mock-vision`（带 `vision`+`files` 能力，用来对照附件闸门） |
 | `mock-config-real-mcp.json` | **给用户照抄的样例**：三台真实可用的 npx 服务器（文件系统 / 顺序思考 / 记忆图谱）。渠道仍然指向 `mock.py`，所以模型侧不真跑，只用来验证「能不能连上、工具清单对不对」 |
-| `shots/` | 实测留下的截图。`A`~`H` 是 P3-2 主流程，`v1`~`v8` 是 P3-2 收尾，`m1`~`m12` 是 P3-3，`m13`~`m15` 是 P3-3 三处界面缺陷的修复验证，`m16`~`m18` 是真实 MCP 服务器接入验证 |
+| `shots/` | 实测留下的截图。`A`~`H` 是 P3-2 主流程，`v1`~`v8` 是 P3-2 收尾，`m1`~`m12` 是 P3-3，`m13`~`m15` 是 P3-3 三处界面缺陷的修复验证，`m16`~`m18` 是真实 MCP 服务器接入验证，`m19`~`m23` 是 P3-3 收尾（重连闪动 + 附件能力闸门） |
 
 ## 怎么跑
 
@@ -79,7 +79,11 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
    窗口 1756x1163（截图实际尺寸；`-W 1774 -H 1172` 会被窗口管理器收掉一圈边框）时的
    常用坐标（截图物理像素）：设置齿轮 `1570,26`、设置页「MCP 服务器」导航 `150,376`、
    输入框 `1074,1079`、授权卡片「允许执行一次」`1525,955`、服务器行的「断开/连接」`1357,325`、
-   删除 `1467,765`。换尺寸就得重算。
+   删除 `1467,765`。**P3-3 收尾时补的**：输入框左下角附件按钮 `522,1105`、
+   服务器行的「重连」按钮（失败态那一行）`1369,654`。换尺寸就得重算。
+   ⚠️ 坐标别靠肉眼估：截图会被工具按比例缩过再显示，估出来的位置能差上百像素
+   （踩过：附件按钮估成 `386,1066`，实际在 `522,1105`）。用 `findbtn.py`，
+   或者按上面那套「扫一行里的暗像素列」的办法量。
 
 ## 坑
 
@@ -135,6 +139,21 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
   运行时的目录（`~/.workbuddy-ai/binaries/...`），跟用户真实启动进程时的 PATH 不一样。
   验证「用户会看到什么」时要用 `Win32_ProcessStartup.EnvironmentVariables` 把 `Path`
   显式设成 `机器级 PATH + ";" + 用户级 PATH`。
+- **点设置齿轮只点一次。** 它是「切换」：点两下等于进去又出来，现象是「怎么点都不进设置页」。
+  （旧笔记写「第一次点不生效要补点一次」，其实是当时多点了。）
+- **PostMessage 合成不了带修饰键的快捷键。** GPUI 的 Windows 后端用
+  `GetKeyState`（`gpui/src/platform/windows/events.rs::current_modifiers`）取 Ctrl / Shift / Alt，
+  读的是**真实键盘状态**，不是消息里带的。所以 `Ctrl+V` 这种组合发 WM_KEYDOWN 没用。
+  后果：**剪贴板粘贴这条路实测不了**（附件只能从文件对话框进，而文件对话框是原生模态窗，
+  `win.ps1` 按进程名找 `MainWindowHandle` 也拿不到它）。要测这条得先给 `win.ps1` 加
+  「按窗口类枚举 + 往对话框发消息」的能力。
+- ⚠️ **正在跑的 exe 复制不过去，而且 `Copy-Item -Force` 会静默失败**（PowerShell 工具不回显
+  错误）。踩过一次：改了代码、`cargo build` 成功、`cp` 报 `Device or resource busy`，
+  于是**用旧 exe 又测了一遍**，白测一轮还以为是修复没生效。杀进程后要 `Start-Sleep` 两三秒，
+  再用 `Get-FileHash` 核对两份 exe 的哈希一致才继续。
+- ⚠️ **别用 PowerShell 的 `Set-Content -Encoding utf8` 改配置文件**：Windows PowerShell 5.1
+  的 `utf8` 会写 BOM，Perch 读配置时直接报 `读取配置失败: expected value at line 1 column 1`
+  进「启动失败」页（截图见 `shots/err-config.png`）。用 Python 以 `utf-8` 无 BOM 写。
 - **`python` 在 PATH 上可能解析到 Microsoft Store 的别名**
   （`AppData\Local\Microsoft\WindowsApps\python.exe`），它会再起一层真正的 python。
   所以 MCP 服务器的进程树是两层——正好用来验证按 pid 收整棵树有没有做对。
@@ -152,5 +171,18 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
 - 真实 MCP 服务器接入：`m16-npx-not-win32.png`（修复前的报错）、
   `m17-real-mcp-connected.png`（三台全连上：文件系统 14 / 顺序思考 1 / 记忆图谱 9 个工具）、
   `m18-real-mcp-tools.png`（文件系统的工具清单）。
+- **点「重连」页面闪动**（P3-3 收尾修的）：根子是**行高变化**，不是状态闪烁——
+  失败那一行是 3 行（名字 / 命令 / 红色失败原因），一点重连状态变 `Connecting`，
+  失败原因那行消失 → 整行矮一截、下面几台服务器跟着往上跳，连上或者再失败时又跳回来。
+  证据：`m19-mcp-retry-before.png`（失败态，3 行）、`m20-mcp-retry-flicker-1~5.png` 和
+  `m20-mcp-retry-flicker-compare.png`（修复前，行位置在跳）、`m21-mcp-retry-fixed-1~5.png`
+  和 `m21-mcp-retry-fixed-compare.png`（修复后，5 帧里行高和行位置一动不动）。
+  修法：`McpState::last_error` 记住最近一次失败原因，重连期间继续显示（转灰 + 「上次失败：」前缀）。
+  靶子是 `slowfail` 模式（睡 6 秒再失败），有这几秒才截得到 `Connecting` 那一帧。
+- **附件入口按模型能力闸门**：`m22-attach-tooltip-limited.png`（模型只有 `tools` →
+  提示「添加附件 (当前模型不支持部分格式)」）、`m23-attach-tooltip-full.png`
+  （模型带 `vision`+`files` → 提示「添加附件 (图片/文档/表格/代码)」）。两张各带一份 `-zoom` 放大图。
+  ⚠️ 输入框上方的提示条和点发送时的拦截**没实测到**（要真加一个附件才触发，
+  而这条路只能靠粘贴，见上面那条坑），只有单测覆盖。
 
 本文只讲怎么把环境跑起来。

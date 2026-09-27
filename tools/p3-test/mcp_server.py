@@ -9,6 +9,10 @@
     (无) / serve   正常服务，暴露下面整张工具表
     small          只暴露 echo / add 两个（用来测两台服务器并存）
     paged          工具分页返回，每页 2 个（用来测 list_all_tools 的翻页）
+    slowstart      和 serve 一样，但**握手前先睡 6 秒**（用来测「重连时界面闪不闪」：
+                   有这几秒的窗口才截得到 Connecting 那一帧，否则连接一闪而过）
+    slowfail       睡 6 秒再往 stderr 报一句错退出（测「点重连时失败原因那一行
+                   消失又出现，整行高度跟着跳」）
     crash          往 stderr 打一行就退出（测「进程起不来」）
     garbage        往 stdout 吐非 JSON（测「握手时协议被脏数据打断」）
     mute           起得来但从不回应（测握手超时，要等满 60 秒）
@@ -220,6 +224,19 @@ def serve():
 
 
 if __name__ == "__main__":
+    if MODE == "slowstart":
+        # 起得来，但握手前先磨蹭几秒。用来测「重连时界面会不会闪」：
+        # 工具清单如果被清掉，这几秒里详情区会塌成一行「暂无工具」再撑回来。
+        time.sleep(6)
+        serve()
+        raise SystemExit(0)
+    if MODE == "slowfail":
+        # 磨蹭几秒再失败。用来复现「点重连时页面闪动」：这几秒里状态是 Connecting，
+        # 行内那条红色失败原因会消失（整行矮一截），失败后又长回来。
+        time.sleep(6)
+        sys.stderr.write("故意失败：这个服务器就是起不来\n")
+        sys.stderr.flush()
+        raise SystemExit(4)
     if MODE == "crash":
         log("这个服务器故意起不来")
         raise SystemExit(3)

@@ -11,6 +11,7 @@ __pycache__/
 tools/p3-test/appdata/
 tools/p3-test/appdata-keep/
 tools/p3-test/requests.jsonl
+tools/p3-test/mock.log
 # 实测脚本在仓库里留下的核对用中间文件（需要留档时复制到 shots/ 再提交）
 tools/p3-test/mcp-exposed.txt
 tools/p3-test/mcp_calls.jsonl

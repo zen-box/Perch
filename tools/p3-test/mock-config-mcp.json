@@ -26,6 +26,18 @@
           "capabilities": [
             "tools"
           ]
+        },
+        {
+          "id": "mock-vision",
+          "name": "Mock Vision",
+          "tags": "",
+          "is_pinned": false,
+          "enabled": true,
+          "capabilities": [
+            "vision",
+            "files",
+            "tools"
+          ]
         }
       ],
       "timeout_secs": 30,
@@ -58,6 +70,28 @@
           "E:\\Personal control\\pc\\tools\\p3-test\\mcp_server.py",
           "paged"
         ]
+      }
+    },
+    {
+      "id": "slow",
+      "name": "慢启动服务器",
+      "enabled": true,
+      "transport": {
+        "kind": "stdio",
+        "command": "python",
+        "args": ["mcp_server.py", "slowstart"],
+        "cwd": "E:\\Personal control\\pc\\tools\\p3-test"
+      }
+    },
+    {
+      "id": "slowfail",
+      "name": "慢失败服务器",
+      "enabled": true,
+      "transport": {
+        "kind": "stdio",
+        "command": "python",
+        "args": ["mcp_server.py", "slowfail"],
+        "cwd": "E:\\Personal control\\pc\\tools\\p3-test"
       }
     },
     {
