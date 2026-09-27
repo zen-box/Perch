@@ -249,7 +249,15 @@ impl AppState {
         preflight_runtime().map_err(StartupFailure::Runtime)?;
         let mut storage = StorageData::try_load_or_init().map_err(StartupFailure::Storage)?;
         let config = AppConfig::try_load().map_err(StartupFailure::Config)?;
-        if backfill_session_providers(&mut storage, &config) {
+        // 两处一次性回填，都是「老数据要跟上新模型」：
+        // ① 会话没记渠道 id 的，按当前默认渠道补上；
+        // ② 老格式的会话工具状态（`enabled` + `picked`）展开成「模式 + 来源」。
+        //    这一步**必须在配置读完之后**：老数据里 `picked: null` 表示「当时能用的全带」，
+        //    要知道配置里有哪些服务器才展开得出来，所以只能放在这里，不能塞进反序列化。
+        // 用 `|` 而不是 `||`：两处都要跑，不能短路。
+        let migrated = backfill_session_providers(&mut storage, &config)
+            | crate::tool_ops::migrate_legacy_tool_state(&mut storage.sessions, &config);
+        if migrated {
             storage
                 .save()
                 .map_err(|error| StartupFailure::Storage(error.to_string()))?;

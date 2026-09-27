@@ -353,7 +353,10 @@ impl AppState {
     /// （见 `model.rs::api_message`）。读敏感文件的命令和结果都标成只在本机显示：
     /// 用户同意读取是想自己看，不代表同意把 `.env`、私钥交给模型服务商。
     fn handle_local_tool(&mut self, user_prompt: &str, cx: &mut Context<Self>) -> bool {
-        if !self.config.local_tools_enabled {
+        // 斜杠命令走的也是本机工具，所以和模型发起时守同一套闸门：全局开关关着不认，
+        // **对话模式也不认**——「对话碰不到你的硬盘」是给用户的承诺，手打的命令
+        // 不该是例外（否则用户切到对话、随手打一个 /read，读到的还是真文件）。
+        if !self.config.local_tools_enabled || !self.session_is_agent() {
             return false;
         }
         let (tool, arguments, needs_confirm, sensitive) =

@@ -19,7 +19,6 @@ use gpui_kit::*;
 use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::config::{self, McpServerConfig, McpTransport};
 use crate::i18n::{Key, tr, tr_args};
-use crate::llm_tools::ToolSpec;
 use crate::mcp::{self, Connection, ExposedTool};
 
 /// 一台服务器当前的连接状态。设置页照它渲染。
@@ -91,9 +90,17 @@ pub struct McpEditor {
 }
 
 impl McpState {
-    /// 交给模型的工具清单：按配置里的服务器顺序排，跳过停用的服务器和单独停用的工具。
-    pub fn specs(&self, servers: &[McpServerConfig]) -> Vec<ToolSpec> {
-        self.usable(servers).into_iter().map(ExposedTool::spec).collect()
+    /// 仅供测试：不连服务器，直接塞一份工具清单。
+    ///
+    /// 真实路径是连接成功后把 `tools/list` 的结果填进来。测试没必要为了一份清单
+    /// 去起一个子进程，也不该依赖真的能跑起来某个 MCP 服务器。
+    #[cfg(test)]
+    pub(crate) fn with_tools(entries: Vec<(&str, Vec<ExposedTool>)>) -> Self {
+        let mut state = Self::default();
+        for (server_id, tools) in entries {
+            state.tools.insert(server_id.to_string(), tools);
+        }
+        state
     }
 
     /// 当前能交给模型的工具**名字**。
@@ -624,9 +631,17 @@ mod tests {
         let servers = vec![server("on", true, &["b"]), server("off", false, &[])];
 
         let names = state.available_names(&servers);
-        let specs: Vec<String> = state.specs(&servers).into_iter().map(|spec| spec.name).collect();
+        // 选择器按来源分组拿到的工具（`usable_by_server`）和「提示里列的名字」
+        // （`available_names`）必须过同一道过滤，否则会出现「选择器里勾得上、
+        // 模型却调不动」或者反过来的情况。
+        let grouped: Vec<String> = state
+            .usable_by_server(&servers)
+            .into_iter()
+            .flat_map(|(_, tools)| tools)
+            .map(|tool| tool.exposed.clone())
+            .collect();
         assert_eq!(names, vec!["mcp__on__a".to_string()]);
-        assert_eq!(specs, names);
+        assert_eq!(grouped, names);
     }
 
     /// 界面要的是**服务器给的原始名**：暴露名里的哈希是给模型区分撞名用的，

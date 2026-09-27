@@ -350,9 +350,10 @@ mod tests {
         assert_eq!(sessions[0].id, "session-1");
         assert!(sessions[0].provider_id.is_empty());
         assert!(!sessions[0].pinned);
-        // 老库升级上来的会话没设过工具，一律按 chat 处理（不会突然自己调工具）
+        // 老库升级上来的会话没设过工具，一律按对话处理（不会突然自己调工具）
         assert!(sessions[0].tools.is_none());
-        assert!(!sessions[0].tools_enabled());
+        assert!(!sessions[0].is_agent());
+        assert!(sessions[0].tool_sources().is_empty());
         let version: i64 = database
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))

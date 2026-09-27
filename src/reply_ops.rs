@@ -5,10 +5,11 @@ use tokio::sync::oneshot;
 
 use crate::agent_loop::AgentOrigin;
 use crate::app::{AppState, ToastLevel, runtime, update_state};
-use crate::config::{ChannelType, ModelConfig, ProviderConfig};
+use crate::config::{ChannelType, McpServerConfig, ModelConfig, ProviderConfig};
 use crate::i18n::{AppLanguage, Key, tr};
 use crate::llm::{ChatMessageReq, ChatRequest, StreamEvent, stream_chat};
 use crate::llm_tools::{ToolSpec, tool_call_label};
+use crate::mcp_ops::McpState;
 use crate::model::{ChatMessage, ChatSession, MessageVariant, ReasoningLevel, ResolvedParams};
 use crate::model_info::Capability;
 
@@ -186,10 +187,17 @@ impl AppState {
             .params
             .as_ref()
             .is_some_and(|params| params.temperature.is_some());
-        // 前两道闸：这次调用要不要带工具，以及全局的「本地工具」总开关。
-        // 后两道（模型的 Capability::Tools、会话里勾了哪些）在 `tool_list_for` 里。
-        let tools = if spec.with_tools && self.config.local_tools_enabled {
-            tool_list_for(model, session, &self.mcp.specs(&self.config.mcp_servers))
+        // 第一道闸：这次调用要不要带工具（多模型对比、起标题、「继续生成」都不带）。
+        // 剩下的（模型的 `Capability::Tools`、会话的模式与来源、全局的本机开关）
+        // 全在 `tool_list_for` 里，只有那一份实现——选择器的计数也走它。
+        let tools = if spec.with_tools {
+            tool_list_for(
+                model,
+                session,
+                self.config.local_tools_enabled,
+                &self.mcp,
+                &self.config.mcp_servers,
+            )
         } else {
             Vec::new()
         };
@@ -418,28 +426,32 @@ fn stream_key(message_id: &str, variant_id: Option<&str>) -> String {
 
 /// 这一轮交给模型的工具清单。空表示不带工具。
 ///
-/// 调用方（`make_job`）已经过了两道闸：这次调用要不要带工具（多模型对比、起标题、
-/// 「继续生成」都不带），以及全局的「本地工具」总开关。这里再管两道：
+/// 调用方（`make_job`）已经过了第一道闸：这次调用要不要带工具（多模型对比、起标题、
+/// 「继续生成」都不带）。这里管剩下的：
 ///
 /// 1. **模型的 `Capability::Tools`**：不支持函数调用的模型（比如部分纯推理模型）收到
-///    `tools` 字段可能直接报错，而「用户开了开关但选了个不支持的模型」是很常见的组合。
-/// 2. **会话级的选择**：chat 模式一个都不带；agent 模式下按 `SessionTools::picked` 收窄
-///    （`None` = 当前能用的全带）。白名单里那些查不到的名字（服务器被删了）自然就被
-///    过滤掉了——清单里本来就没有它们。
+///    `tools` 字段可能直接报错，而「用户开了工具但选了个不支持的模型」是很常见的组合。
+/// 2. **会话的模式与来源**：对话模式不带本机工具（这条是结构性的，见
+///    `model::SessionTools::effective_sources`），MCP 按服务器粒度勾。
+/// 3. **全局的本机开关**：只管本机工具，**不管 MCP**。
 ///
 /// MCP 工具排在本机那 5 个后面，顺序由服务器配置顺序决定——同一份工具集每次序列化出来
 /// 要逐字节一致，对端才能命中 prompt 缓存。**所以这里只做过滤，绝不重排**，
 /// 更不能按用户勾选的先后顺序排。
-fn tool_list_for(model: &ModelConfig, session: &ChatSession, mcp_tools: &[ToolSpec]) -> Vec<ToolSpec> {
+///
+/// 具体怎么收，全在 `tool_ops::session_tool_specs` 里——选择器的计数和角标走的是
+/// 同一个函数，这样界面上显示的数字和真正发出去的清单不会对不上。
+fn tool_list_for(
+    model: &ModelConfig,
+    session: &ChatSession,
+    local_tools_enabled: bool,
+    mcp: &McpState,
+    servers: &[McpServerConfig],
+) -> Vec<ToolSpec> {
     if !model.effective_capabilities().contains(&Capability::Tools) {
         return Vec::new();
     }
-    let mut specs: Vec<ToolSpec> = crate::local_tools::specs()
-        .into_iter()
-        .filter(|spec| session.wants_tool(&spec.name))
-        .collect();
-    specs.extend(mcp_tools.iter().filter(|spec| session.wants_tool(&spec.name)).cloned());
-    specs
+    crate::tool_ops::session_tool_specs(session, local_tools_enabled, mcp, servers)
 }
 
 /// 组装一次请求。
@@ -564,13 +576,21 @@ fn apply_to_variant(variant: &mut MessageVariant, event: &StreamEvent) {
 mod tests {
     use super::*;
     use crate::config::HeaderPair;
-    use crate::model::SessionTools;
+    use crate::model::{SessionMode, SessionTools, ToolSource};
 
     /// 造一个只关心「带哪些工具」的会话。
     fn session(tools: Option<SessionTools>) -> ChatSession {
         let mut session = ChatSession::new("t".into(), "f".into(), "gpt-4o".into(), "p".into());
         session.tools = tools;
         session
+    }
+
+    /// 智能体的默认工具状态：没动过选择器 = 只带本机工具。
+    fn agent_tools() -> SessionTools {
+        SessionTools {
+            mode: SessionMode::Agent,
+            ..Default::default()
+        }
     }
 
     fn provider(channel_type: ChannelType) -> ProviderConfig {
@@ -706,71 +726,112 @@ mod tests {
         assert_eq!(request.reasoning, None);
     }
 
+    /// 造一台「有工具可给」的服务器状态，省得起子进程。
+    fn mcp_with_fetch() -> (McpState, Vec<McpServerConfig>) {
+        let tool = crate::mcp::ExposedTool {
+            exposed: "mcp__fetch__fetch".into(),
+            raw: "fetch".into(),
+            description: "抓网页".into(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        (
+            McpState::with_tools(vec![("fetch", vec![tool])]),
+            vec![McpServerConfig {
+                id: "fetch".into(),
+                name: "fetch".into(),
+                enabled: true,
+                transport: crate::config::McpTransport::Stdio {
+                    command: "npx".into(),
+                    args: Vec::new(),
+                    cwd: None,
+                },
+                secret_ref: String::new(),
+                disabled_tools: Vec::new(),
+            }],
+        )
+    }
+
     #[std::prelude::v1::test]
-    fn tools_are_only_offered_when_the_switch_is_on() {
+    fn chat_mode_gets_no_local_tools_but_mcp_still_works() {
+        // 这次改动的核心：对话模式**能用 MCP**，只是碰不到本机文件。
+        // 以前想用 MCP 必须切智能体，而那同时就把本机文件权限也打开了。
         let model = ModelConfig::new("gpt-4o", "GPT-4o");
-        let mcp = vec![ToolSpec::no_args("mcp__files__read_file", "读文件")];
+        let (mcp, servers) = mcp_with_fetch();
 
-        // 新会话（`tools == None`）是 chat 模式，一个都不给。
+        // 新会话（`tools == None`）＝ 对话、什么都不带
+        assert!(tool_list_for(&model, &session(None), true, &mcp, &servers).is_empty());
+
+        // 对话 + 勾了 fetch：只给 MCP，本机一个都不给
+        let chat_with_mcp = SessionTools {
+            sources: Some(vec![ToolSource::Mcp {
+                server_id: "fetch".into(),
+            }]),
+            ..SessionTools::default()
+        };
+        let tools = tool_list_for(&model, &session(Some(chat_with_mcp)), true, &mcp, &servers);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "mcp__fetch__fetch");
+
+        // 就算存档里塞了本机来源，对话模式也必须把它剔掉
+        let sneaky = SessionTools {
+            sources: Some(vec![ToolSource::Local]),
+            ..SessionTools::default()
+        };
         assert!(
-            tool_list_for(&model, &session(None), &mcp).is_empty(),
-            "没开过就是 chat，一个都别给"
+            tool_list_for(&model, &session(Some(sneaky)), true, &mcp, &servers).is_empty(),
+            "对话模式下本机来源是无效的，这条要落在代码里"
         );
+    }
+
+    #[std::prelude::v1::test]
+    fn the_agent_gets_local_tools_and_no_mcp_by_default() {
+        let model = ModelConfig::new("gpt-4o", "GPT-4o");
+        let (mcp, servers) = mcp_with_fetch();
+
+        let agent = agent_tools();
+        let tools = tool_list_for(&model, &session(Some(agent)), true, &mcp, &servers);
+        assert_eq!(tools.len(), crate::local_tools::specs().len());
         assert!(
-            tool_list_for(
-                &model,
-                &session(Some(SessionTools {
-                    enabled: false,
-                    picked: None
-                })),
-                &mcp
-            )
-            .is_empty(),
-            "显式关掉也给空"
+            !tools.iter().any(|tool| tool.name.starts_with("mcp__")),
+            "新装的 MCP 服务器不该自己进到会话里——要用得用户自己勾"
         );
 
-        let tools = tool_list_for(&model, &session(Some(SessionTools::all())), &mcp);
+        // 勾上之后 MCP 工具排在本机后面，顺序稳定（prompt 缓存要靠它）
+        let with_mcp = SessionTools {
+            sources: Some(vec![
+                ToolSource::Local,
+                ToolSource::Mcp {
+                    server_id: "fetch".into(),
+                },
+            ]),
+            ..agent_tools()
+        };
+        let tools = tool_list_for(&model, &session(Some(with_mcp)), true, &mcp, &servers);
         assert_eq!(tools.len(), crate::local_tools::specs().len() + 1);
-        assert_eq!(
-            tools.last().map(|tool| tool.name.as_str()),
-            Some("mcp__files__read_file"),
-            "MCP 工具排在本机工具后面，顺序稳定"
-        );
+        assert_eq!(tools.last().map(|tool| tool.name.as_str()), Some("mcp__fetch__fetch"));
     }
 
     #[std::prelude::v1::test]
-    fn the_session_whitelist_narrows_the_tool_list() {
+    fn an_unchecked_server_contributes_nothing() {
+        // 服务器被删掉之后，来源表里还留着它的 id——不该报错，也不该凭空冒出来。
         let model = ModelConfig::new("gpt-4o", "GPT-4o");
-        let mcp = vec![ToolSpec::no_args("mcp__files__read_file", "读文件")];
-        let local = crate::local_tools::specs()[0].name.clone();
-
+        let (mcp, servers) = mcp_with_fetch();
         let picked = SessionTools {
-            enabled: true,
-            picked: Some(vec![local.clone()]),
+            sources: Some(vec![ToolSource::Mcp {
+                server_id: "gone".into(),
+            }]),
+            ..agent_tools()
         };
-        let tools = tool_list_for(&model, &session(Some(picked)), &mcp);
-        assert_eq!(tools.len(), 1, "只勾了一个就只带一个");
-        assert_eq!(tools[0].name, local);
-    }
-
-    #[std::prelude::v1::test]
-    fn whitelisted_names_that_no_longer_exist_are_dropped() {
-        // 服务器被删掉之后，白名单里还留着它的工具名——不该报错，也不该凭空冒出来。
-        let model = ModelConfig::new("gpt-4o", "GPT-4o");
-        let picked = SessionTools {
-            enabled: true,
-            picked: Some(vec!["mcp__gone__read_file".into()]),
-        };
-        assert!(tool_list_for(&model, &session(Some(picked)), &[]).is_empty());
+        assert!(tool_list_for(&model, &session(Some(picked)), true, &mcp, &servers).is_empty());
     }
 
     #[std::prelude::v1::test]
     fn a_model_without_the_tools_capability_gets_nothing() {
         let mut model = ModelConfig::new("plain", "Plain");
         model.capabilities = Some(vec![Capability::Vision]);
-        let mcp = vec![ToolSpec::no_args("mcp__files__read_file", "读文件")];
+        let (mcp, servers) = mcp_with_fetch();
         assert!(
-            tool_list_for(&model, &session(Some(SessionTools::all())), &mcp).is_empty(),
+            tool_list_for(&model, &session(Some(agent_tools())), true, &mcp, &servers).is_empty(),
             "模型不支持工具时，会话开着也不给"
         );
     }

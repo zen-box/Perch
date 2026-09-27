@@ -37,7 +37,7 @@ use crate::llm_tools::{ToolCall, ToolResult};
 use crate::local_tools::{self, ExecControl, PendingTool};
 use crate::mcp::{self, Connection};
 use crate::mcp_ops::Route;
-use crate::model::{ChatMessage, ChatSession};
+use crate::model::{ChatMessage, ChatSession, ToolSource};
 use crate::reply_ops::JobSpec;
 
 /// 一轮用户提问最多允许模型连着续跑几次。
@@ -260,7 +260,8 @@ impl AppState {
             return false;
         };
 
-        match next_action(&calls, &answered, self.agent.round, self.config.local_tools_enabled) {
+        let tools_live = self.session_tools_live(&origin.session_id);
+        match next_action(&calls, &answered, self.agent.round, tools_live) {
             RoundAction::Finish => {
                 self.agent.end_loop();
                 false
@@ -472,6 +473,47 @@ impl AppState {
         }
     }
 
+    /// 这条待授权的调用现在还允许执行吗。
+    ///
+    /// 授权卡片挂在会话上，而设置随时能改：用户可能一边看着卡片一边把本机工具关了、
+    /// 或者把会话切回了对话。不复查就等于「界面上关掉的东西其实没生效」。
+    ///
+    /// 判据按**来源**走，不是按全局开关一刀切：MCP 工具不受「本机工具」那个开关管。
+    fn tool_still_allowed(&self, session_id: &str, tool: &PendingTool) -> bool {
+        let Some(session) = self.session(session_id) else {
+            return false;
+        };
+        let sources = session.tool_sources();
+        match mcp::parse_tool_name(&tool.name) {
+            Some((server_id, _)) => sources.contains(&ToolSource::Mcp {
+                server_id: server_id.to_string(),
+            }),
+            // 本机工具：既要会话还勾着本机来源（对话模式会被 `tool_sources` 剔掉），
+            // 也要全局开关还开着
+            None => self.config.local_tools_enabled && sources.contains(&ToolSource::Local),
+        }
+    }
+
+    /// 这个会话现在还有没有「活的」工具来源。
+    ///
+    /// `next_action` 靠它区分「模型调了工具、去执行」和「工具已经被用户关掉了、
+    /// 只回一句已停用」。**不能只看全局的本机开关**：那个开关只管本机，
+    /// 关着它的时候 MCP 工具照样该能跑。
+    ///
+    /// 用「真正会发出去的清单是不是空的」来判，和请求体走同一份实现，
+    /// 不会出现「界面显示有工具、循环却认为工具被关了」。
+    fn session_tools_live(&self, session_id: &str) -> bool {
+        self.session(session_id).is_some_and(|session| {
+            !crate::tool_ops::session_tool_specs(
+                session,
+                self.config.local_tools_enabled,
+                &self.mcp,
+                &self.config.mcp_servers,
+            )
+            .is_empty()
+        })
+    }
+
     /// 用户在授权卡片上点了「允许一次」。
     pub fn approve_pending_tool(&mut self, cx: &mut Context<Self>) {
         let Some(approval) = self.agent.pending.take() else {
@@ -481,15 +523,16 @@ impl AppState {
             cx.notify();
             return;
         }
-        if !self.config.local_tools_enabled {
-            // 卡片挂着的时候用户把本地工具关了：按"已停用"处理，别执行
+        if !self.tool_still_allowed(&approval.session_id, &approval.tool) {
+            // 卡片挂着的时候用户改了设置或者切了模式：按"已停用"处理，别执行。
+            // 模型发起的调用还要把结果回传，否则历史里留着一条没回的调用。
             if matches!(approval.source, ApprovalSource::Agent(_)) {
                 let result = local_tools::disabled_result(&approval.tool);
                 self.push_to_session(&approval.session_id, ChatMessage::new_tool(&result));
                 self.agent.end_loop();
                 self.persist_storage(cx);
             }
-            self.toast(ToastLevel::Error, tr(self.language(), Key::LocalToolsDisabled));
+            self.toast(ToastLevel::Error, tr(self.language(), Key::ToolNoLongerAllowed));
             cx.notify();
             return;
         }

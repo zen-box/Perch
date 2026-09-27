@@ -23,38 +23,10 @@ use crate::mcp_ops::ServerStatus;
 
 pub(super) fn render_mcp(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
     let lang = state.language();
-    let app = cx.entity();
     let mut content = v_flex().gap_8();
 
-    // 总开关关着的时候必须说出来：不然「已连接 · 12 个工具」看着像能用，
-    // 实际一个都不会交给模型
-    if !state.config.local_tools_enabled {
-        let enable_app = app.clone();
-        content = content.child(
-            h_flex()
-                .gap_3()
-                .px_4()
-                .py_3()
-                .rounded_lg()
-                .border_1()
-                .border_color(p.warning.opacity(0.45))
-                .bg(p.warning.opacity(0.1))
-                .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(16.))
-                        .flex_none()
-                        .text_color(p.warning),
-                )
-                .child(div().flex_1().text_sm().child(tr(lang, Key::McpDisabledByMaster)))
-                .child(
-                    Button::new("mcp-enable-master")
-                        .outline()
-                        .small()
-                        .label(tr(lang, Key::McpEnableMaster))
-                        .on_click(move |_, _, cx| enable_app.update(cx, |this, cx| this.toggle_local_tools(cx))),
-                ),
-        );
-    }
+    // 这里**不该**再提示「本地工具总开关关着」——2026-09-27 起那个开关只管本机工具，
+    // MCP 不受它管。原来的提示会把用户引去开一个和 MCP 无关的开关，开了也没用。
 
     content = content.child(render_server_list(state, p, lang, cx));
 
