@@ -12,7 +12,7 @@ Perch 把「这次带哪些工具、有没有项目目录、权限档」存在 `
     python session.py set --clear                 # 只清消息
     python session.py set --mode agent --sources local,demo,pages
 
-- `--sources` 给 `local` / `none` / 逗号分隔的服务器 **id**（`show` 会列出可用 id）。
+- `--sources` 给 `local` / `skill` / `none` / 逗号分隔的服务器 **id**（`show` 会列出可用 id）。
   不给就沿用当前值。
 - `--workspace` 给 `cwd`（本目录下的隔离靶子）、`none`（清掉）、或一个绝对路径。
 - 会话 id 默认取第一条；多条时用 `--session <id>` 指定。
@@ -62,7 +62,12 @@ def parse_sources(raw):
         name = name.strip()
         if not name:
             continue
-        out.append({"kind": "local"} if name == "local" else {"kind": "mcp", "server_id": name})
+        if name == "local":
+            out.append({"kind": "local"})
+        elif name == "skill":
+            out.append({"kind": "skill"})
+        else:
+            out.append({"kind": "mcp", "server_id": name})
     return out
 
 
@@ -85,7 +90,7 @@ def main():
     setter.add_argument("--session")
     setter.add_argument("--mode", choices=["agent", "chat"])
     setter.add_argument("--permission", choices=["default", "full"])
-    setter.add_argument("--sources", help="local / none / 逗号分隔的服务器 id")
+    setter.add_argument("--sources", help="local / skill / none / 逗号分隔的服务器 id")
     setter.add_argument("--workspace", help="cwd / none / 绝对路径")
     setter.add_argument("--clear", action="store_true", help="清空消息")
 

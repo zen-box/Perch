@@ -19,12 +19,14 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
 | `t.sh` | 薄封装，`source` 之后用 `send` / `shot` / `nreq` / `reqs` 四个函数 |
 | `findbtn.py` | 不依赖 Pillow 的 PNG 像素扫描器。`win.ps1` 的点击坐标必须是截图里的物理像素，肉眼估误差太大，所以靠扫像素找按钮中心 |
 | `zoom.py` | 裁一块截图放大保存，用来看清局部（徽标、一行文字）。要 Pillow |
-| `session.py` | 改隔离库里某个会话的 `tools`（模式 / 来源 / 权限档 / 项目目录）和消息。这个字段是 JSON 文本，手写要叠四层引号转义，极易写错。用法见文件头，`show` 会列出可用的服务器 id |
+| `session.py` | 改隔离库里某个会话的 `tools`（模式 / 来源 / 权限档 / 项目目录）和消息。这个字段是 JSON 文本，手写要叠四层引号转义，极易写错。用法见文件头，`show` 会列出可用的服务器 id。`--sources` 认 `local` / `skill` / `none` / 服务器 id |
+| `windows.py` | 列出某个进程的**全部顶层窗口**（句柄 / 可见性 / 矩形 / 类名 / 标题）。窗口"点了没反应"时先用它看一眼——`win.ps1` 是按 `MainWindowHandle` 找窗口的，那个属性会指到错的窗口（见「坑」里的最小化那条） |
+| `skill-fixture/` | Skills 的夹具：`weekly/`（带 `docs/notes.md`）、`deploy/`，以及技能目录**外面**的 `secret.txt`（越界靶子）。复制进 `appdata/Perch/skills/` 即可，见「怎么跑」第 3b 步 |
 | `cwd/` | 隔离的工作目录（一个带 `.env` 的假项目），给工具调用当靶子。`.env` 是特意放的——用来验证敏感路径会不会被拦 |
 | `mock-config.json` | P3-2 那轮的 `perch-config.json`：渠道指向 mock 服务、开了本地工具、超时 600 秒。**故意不叫 `perch-config.json`**——仓库根 `.gitignore` 有一条 `perch-*.json`（防真实配置带密钥被提交），改名是为了不跟那条规则打架 |
 | `mock-config-mcp.json` | P3-3 那轮的配置：在上一份基础上加了 4 台 MCP 服务器（两台能连、一台命令不存在、一台停用），并给演示服务器配了 `disabled_tools: ["spam"]`。后来又补了 `slow`（`slowstart`）和 `slowfail` 两台，用来测重连时的界面表现，以及第二个模型 `mock-vision`（带 `vision`+`files` 能力，用来对照附件闸门） |
 | `mock-config-real-mcp.json` | **给用户照抄的样例**：三台真实可用的 npx 服务器（文件系统 / 顺序思考 / 记忆图谱）。渠道仍然指向 `mock.py`，所以模型侧不真跑，只用来验证「能不能连上、工具清单对不对」 |
-| `shots/` | 实测留下的截图。`A`~`H` 是 P3-2 主流程，`v1`~`v8` 是 P3-2 收尾，`m1`~`m12` 是 P3-3，`m13`~`m15` 是 P3-3 三处界面缺陷的修复验证，`m16`~`m18` 是真实 MCP 服务器接入验证，`m19`~`m23` 是 P3-3 收尾（重连闪动 + 附件能力闸门），`m24`~`m28` 是会话级工具开关与「本次对话的工具」选择器，`m29`~`m31` 是 MCP 表单改弹窗，`m32` 是「编辑停用服务器不会把它打开」，`m33`~`m40` 是附件入口按模型能力分类型（提示改短 + 菜单动态化 + 去掉「所有文件」兜底），`n1`~`n6` 是对话/智能体按「有没有本机文件权限」重新划分，`n7`~`n12` 是智能体的项目目录（相对路径基准 + 越界授权），`n13`~`n18` 是会话级权限档（完全权限 + 二次确认 + 数据目录底线） |
+| `shots/` | 实测留下的截图。`A`~`H` 是 P3-2 主流程，`v1`~`v8` 是 P3-2 收尾，`m1`~`m12` 是 P3-3，`m13`~`m15` 是 P3-3 三处界面缺陷的修复验证，`m16`~`m18` 是真实 MCP 服务器接入验证，`m19`~`m23` 是 P3-3 收尾（重连闪动 + 附件能力闸门），`m24`~`m28` 是会话级工具开关与「本次对话的工具」选择器，`m29`~`m31` 是 MCP 表单改弹窗，`m32` 是「编辑停用服务器不会把它打开」，`m33`~`m40` 是附件入口按模型能力分类型（提示改短 + 菜单动态化 + 去掉「所有文件」兜底），`n1`~`n6` 是对话/智能体按「有没有本机文件权限」重新划分，`n7`~`n12` 是智能体的项目目录（相对路径基准 + 越界授权），`n13`~`n18` 是会话级权限档（完全权限 + 二次确认 + 数据目录底线），`s0`~`s18` 是 Skills（对话模式可用 + 免确认 + 越界被拒 + 设置页） |
 
 ## 怎么跑
 
@@ -51,6 +53,17 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
    mkdir -p tools/p3-test/appdata/Perch
    cp tools/p3-test/mock-config-mcp.json tools/p3-test/appdata/Perch/perch-config.json
    ```
+
+3b. （要测 Skills 才做）把夹具复制进技能目录。技能目录是 `appdata/Perch/skills/`，
+   一个子目录一个技能，入口是里面的 `SKILL.md`：
+
+   ```bash
+   mkdir -p tools/p3-test/appdata/Perch/skills
+   cp -r tools/p3-test/skill-fixture/. tools/p3-test/appdata/Perch/skills/
+   ```
+
+   复制完应该是 `skills/{weekly,deploy}/SKILL.md` + `skills/weekly/docs/notes.md`
+   + `skills/secret.txt`（最后这个是**越界靶子**，故意放在技能目录外面）。
 
 4. **启动 Perch 必须绕开 agent 的进程树**——见下面「坑」里的第一条。从 agent 的
    shell 里直接跑，MCP 服务器一台都起不来：
@@ -120,6 +133,15 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
    ⚠️ **`perch-config.json` 里的 `model` 改不动界面上显示的模型**——活动模型存在
    会话里（`perch.db`），配置里那个只是新建会话的默认值。实测要换模型，得点界面上的
    模型选择器。
+   **Skills 那一批补的**：设置页导航第 4 项「技能」`102,376`（导航自上而下
+   通用设置 / 模型渠道 / 提示词 / 技能 / MCP 服务器 / 关于，行距约 52）、
+   技能页两行开关 `1540,361` / `1540,468`、「导入技能」`347,482`、「重新扫描」`441,482`、
+   「打开目录」`537,482`、「返回对话」`94,93`。
+   ⚠️ **工具选择器面板是从下往上长的**（`Anchor::BottomRight`），所以**行数一变，
+   所有行的纵向位置全变**——记坐标要连着"当时面板里有几行"一起记。
+   实测「对话模式 + 只装了技能」时（面板 1 行 + 一行提示）：技能行中心 `1300,1047`；
+   「智能体 + 本机 + 技能 + 3 台服务器」时（面板 5 行）：技能行中心 `1073,470`。
+   **两个数都对，差别只在行数。**
    ⚠️ 附件菜单在按钮**上方**展开，最上面一行贴着消息区；消息底部的「Token 与费用明细」
    悬停卡片一旦被鼠标唤起就会**一直挂着**（`PostMessage` 发不出 `WM_MOUSELEAVE`），
    正好压住菜单第一行。**先开菜单、再把鼠标挪到空白处**（如 `1250,180`）——卡片消失、
@@ -141,6 +163,19 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
   （`([wmiclass]"Win32_Process").Create(...)`），五种 stdio 组合全部成功；从 agent 的
   shell 里跑就全失败。**结论是环境问题，不是产品缺陷**（真实用户不会遇到），
   但实测时必须按上面第 4 步启动。
+- ⚠️ **窗口被最小化之后，所有点击和截图都会静默作用在"错的东西"上。**
+  症状：截图变成一张 `219x39` 的小图、点击完全没反应、库里一条消息都没多——
+  很容易误判成"功能坏了"。原因是 `win.ps1` 按 `MainWindowHandle` 找窗口，
+  而窗口最小化时那个属性指向的就是这个被 Windows 停到 `(-21333,-21333)` 的小窗口。
+  这是**真实桌面**上的窗口，任何外部操作（包括人自己把它最小化）都能造成。
+  判别：`python windows.py perch-p3` —— 正常时应该只有一条
+  `class='Zed::Window' title='Perch'` 且尺寸是 `1756x1163`；
+  看到 `-21333` 或 `-32000` 的坐标就是被最小化了。
+  修法：`win.ps1 -Action restore`（或直接再跑一次 `-Action size`，
+  它现在会先 `SW_RESTORE` 再调尺寸——以前不会，于是把 `-21333` 那个位置原样写回去，
+  尺寸看着对了但窗口还是最小化的）。
+  留了一张现场图：`shots/s9-minimized.png`（219x39 的"截图"，正是踩坑时的样子）。
+  对照 `shots/s10-restored.png`（同一次会话，`-Action size` 之后恢复正常）。
 - ⚠️ **Windows 上 `SO_REUSEADDR` 允许两个 mock 同时绑同一个端口**（Linux 不允许）。
   所以"第二个 mock 启动成功"不代表它接得到请求——请求会落到先绑的那个上，
   `requests.jsonl` 也就写在它那边，你这边永远是空的。实测踩过一次：
@@ -228,8 +263,9 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
 - **`python` 在 PATH 上可能解析到 Microsoft Store 的别名**
   （`AppData\Local\Microsoft\WindowsApps\python.exe`），它会再起一层真正的 python。
   所以 MCP 服务器的进程树是两层——正好用来验证按 pid 收整棵树有没有做对。
-- 关键词场景（`LIST` / `RUN` / `PWD` / `OUTSIDE` / `DATA` / `SLEEP` / `PAR` / `LOOP` / `SLOW`，
-  以及 MCP 那一组）见 `mock.py` 文件头，改场景直接改那里。
+- 关键词场景（`LIST` / `RUN` / `PWD` / `OUTSIDE` / `DATA` / `SKILL` / `SKILLFILE` / `SKILLBAD` /
+  `SLEEP` / `PAR` / `LOOP` / `SLOW`，以及 MCP 那一组）见 `mock.py` 文件头，改场景直接改那里。
+  ⚠️ `SKILL` 是 `SKILLFILE` / `SKILLBAD` 的子串，**判断顺序不能反**——反了后面两个永远走不到。
 
 ## 实测结论记在哪
 
@@ -369,5 +405,42 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
   - 顺带修掉一个自己造出来的毛病：确认态原本会**跨面板开关残留**——拨开开关、
     关掉面板再打开，看到的还是警告和两个按钮，得先点一次「取消」。
     改成面板关闭时清掉（`Popover::on_open_change` → `dismiss_full_permission`，幂等）。
+- **Skills：装进数据目录的技能包**（`s0`~`s18`）。技能目录 `%APPDATA%\Perch\skills\`，
+  一个子目录一个技能，入口 `SKILL.md`。系统提示词里只列「名字 + 一句描述」，
+  正文等模型调 `load_skill` 自己取。新增关键词：`SKILL` / `SKILLFILE` / `SKILLBAD`
+  （按顺序判断，因为后两个都含 `SKILL` 子串）。
+  - `s1-picker.png` / `s2-skill-picked.png`：工具选择器里多出一行 **「技能」**，
+    右边写「2 个工具」；勾上之后按钮角标从 `5` 变 `7`。这一行**对话和智能体都出现**
+    （它读的只有 Perch 自己的目录，碰不到用户的文件系统）。
+  - `s3-chat-mode.png`：切到**对话模式**之后，角标从 `7` 掉到 **`2`**，
+    项目目录按钮消失——本机工具全被剔掉，只剩两个技能工具。
+    这是「对话也能用 Skills、但碰不到硬盘」最直接的证据。
+  - `s7-skill-result.png`：**对话模式下**发 `SKILL` → 模型调 `load_skill(name=deploy)`
+    → **没有授权卡片**，直接执行，结果卡片里是 `SKILL.md` 的正文。两个技能工具永远免确认。
+  - `s8-skillfile.png`：发 `SKILLFILE` → `read_skill_file` 指到一个**这个技能里没有的**
+    文件 → 红卡片 `skill \`deploy\` 里没有 \`docs/notes.md\``。
+    （夹具里 `deploy` 没有附带文件，mock 按名字取第一个技能，所以撞上了这条错误分支——
+    顺手证明了「文件不存在」的错误路径也通。后来把 mock 改成按**哪个技能带这个文件**挑。）
+  - `s12-skillfile-ok.png`：发 `SKILLFILE` → `read_skill_file(name=weekly, path=docs/notes.md)`
+    → 绿卡片，内容正是夹具里那份 `docs/notes.md`。
+  - `s13-skillbad.png`：发 `SKILLBAD` → `read_skill_file(name=deploy, path=../secret.txt)`
+    → 红卡片 `路径 \`../secret.txt\` 不合法：只能读这个 skill 目录里的文件。`
+    **`secret.txt` 的内容一个字都没出来**——`safe_join` 只接受普通路径组件，`..` 直接拒。
+    这个靶子特意放在技能目录**外面**：要是越界判断失效，读出来的会是那段说明文字，
+    和"文件不存在"一眼就能区分开。
+  - `s14-settings.png` / `s15-skills-page.png`：设置页导航多出「技能」；页面列出两个技能，
+    左边是 front matter 里的 `name`（发布检查 / 写周报）+ 目录名 + 附带文件数，
+    右边一个开关。
+  - `s16-skills-off.png` / `s17-all-skills-off-note.png`：把两个开关都关掉 →
+    `perch-config.json` 里落成 `disabled_skills: ["deploy","weekly"]`；
+    选择器里那一行的「2 个工具」变成黄字 **「技能都停用了」**，角标掉到 `0`。
+    （停用**一个**不会出提示——只有全停用才给不出工具。）
+  - 请求体侧（`requests.jsonl`）：`tools` 恰好 `['load_skill','read_skill_file']`；
+    system 消息末尾多出 `# Skills` 一节，**只有名字和一句话**：
+    ```
+    - deploy: 按检查清单过一遍再发布
+    - weekly: 把一周的流水账整理成周报
+    ```
+    正文一个字都没进提示词——这正是 Skills 平时不占上下文的理由。
 
 本文只讲怎么把环境跑起来。

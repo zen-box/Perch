@@ -8,6 +8,9 @@
     PWD   → 调 run_command（pwd，验证命令在项目目录里跑）
     OUTSIDE → 调 list_directory 列项目目录之外的路径（验证越界要授权）
     DATA  → 调 read_file 读 Perch 自己的 perch-config.json（验证完全权限下唯一的例外）
+    SKILL → 调 load_skill 读一个技能（验证对话模式下也能用、且不弹授权卡片）
+    SKILLFILE → 调 read_skill_file 读技能里的 docs/notes.md
+    SKILLBAD  → 调 read_skill_file 读 `../secret.txt`（验证越界路径被拒）
     SLEEP → 调 run_command（睡 20 秒，测停止）
     PAR   → 一次调两个：run_command + list_directory（测并行调用）
     LOOP  → 每轮都调 list_directory（测轮数上限）
@@ -39,6 +42,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = pathlib.Path(__file__).parent / "requests.jsonl"
 MCP_LOG = pathlib.Path(__file__).parent / "mcp-exposed.txt"
+SKILLS_DIR = pathlib.Path(__file__).parent / "appdata" / "Perch" / "skills"
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 18766
 
 
@@ -62,6 +66,34 @@ def validate(messages):
     if expected:
         return "An assistant message with 'tool_calls' must be followed by tool messages: " + ", ".join(sorted(expected))
     return None
+
+
+def skill_containing(rel):
+    """装了 `rel` 这个附带文件的第一个技能名。
+
+    不按名字挑：夹具里哪个技能带 `docs/notes.md` 是会变的，按名字写死的话，
+    换一个技能当靶子就会退化成"文件不存在"那条错误分支——看着像功能坏了。
+    """
+    root = SKILLS_DIR
+    if root.is_dir():
+        for path in sorted(root.iterdir()):
+            if (path / rel).is_file():
+                return path.name
+    return first_skill_id()
+
+
+def first_skill_id():
+    """隔离数据目录里装着的第一个技能名。
+
+    不写死：夹具改名之后写死的那份会静默失效，而失效的样子是"技能没装"，
+    看起来跟功能坏了没区别。
+    """
+    names = (
+        sorted(p.name for p in SKILLS_DIR.iterdir() if (p / "SKILL.md").is_file())
+        if SKILLS_DIR.is_dir()
+        else []
+    )
+    return names[0] if names else "weekly"
 
 
 def text_of(msg):
@@ -200,6 +232,16 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 results.append(text_of(m)[:30])
             reply = f"收到 {len(results)} 个工具结果：{list(reversed(results))!r}。结论：完成。"
+        elif "SKILLBAD" in last_user:
+            # 越界路径：`..` 必须被拒（`skills::safe_join` 只接受普通组件）。
+            # 放在 SKILLFILE / SKILL 前面：这两个词都是 "SKILL" 的子串，顺序反了就永远走不到。
+            calls = [("read_skill_file", {"name": first_skill_id(), "path": "../secret.txt"})]
+        elif "SKILLFILE" in last_user:
+            calls = [("read_skill_file", {"name": skill_containing("docs/notes.md"), "path": "docs/notes.md"})]
+        elif "SKILL" in last_user:
+            # Skills 的两个工具读的只有 Perch 自己的技能目录，所以**永远免确认**——
+            # 这三条用例跑完不该出现任何授权卡片。
+            calls = [("load_skill", {"name": first_skill_id()})]
         elif "PAR" in last_user:
             calls = [("run_command", {"command": "echo parallel-cmd"}), ("list_directory", {"path": "."})]
         elif "SLEEP" in last_user:

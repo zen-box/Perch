@@ -15,6 +15,7 @@ public class U {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
@@ -44,10 +45,23 @@ switch ($Action) {
     Write-Output "window $($r.Left),$($r.Top) ${ww}x${wh} client $($c.Right)x$($c.Bottom) dpi $([U]::GetDpiForWindow($hwnd))"
   }
   "size" {
+    # 先还原再调尺寸。窗口被最小化时 `GetWindowRect` 给的是 (-21333,-21333)，
+    # 直接按它 `SetWindowPos` 会把这个位置原样写回去——尺寸对了但窗口还"最小化着"，
+    # 后面所有点击都落到空气里，症状是"点了没反应"，很容易误判成功能坏了。
+    [U]::ShowWindow($hwnd, 9) | Out-Null   # SW_RESTORE
+    Start-Sleep -Milliseconds 200
+    [U]::GetWindowRect($hwnd, [ref]$r) | Out-Null
+    $r.Left = [Math]::Max($r.Left, 0)
+    $r.Top = [Math]::Max($r.Top, 0)
     # SWP_NOZORDER | SWP_NOACTIVATE
     [U]::SetWindowPos($hwnd, [IntPtr]::Zero, $r.Left, $r.Top, $W, $H, 0x0014) | Out-Null
     Start-Sleep -Milliseconds 800
     Write-Output "resized to ${W}x${H}"
+  }
+  "restore" {
+    [U]::ShowWindow($hwnd, 9) | Out-Null
+    Start-Sleep -Milliseconds 300
+    Write-Output "restored"
   }
   "shot" {
     $bmp = New-Object System.Drawing.Bitmap $ww, $wh
