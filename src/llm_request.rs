@@ -731,6 +731,7 @@ mod tests {
             name: "read_file".into(),
             content: "fn main() {}".into(),
             is_error: false,
+            ..Default::default()
         };
         let messages = vec![
             ChatMessageReq::new("system", "be brief"),

@@ -146,14 +146,32 @@ pub(super) fn render_general(state: &AppState, p: &Palette, cx: &mut Context<App
     let local_tools = section(
         tr(lang, Key::LocalTools),
         p,
-        vec![setting_row(
-            tr(lang, Key::EnableLocalTools),
-            tr(lang, Key::LocalToolsHint),
-            p,
-            Switch::new("local-tools-enabled")
-                .checked(state.config.local_tools_enabled)
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_local_tools(cx))),
-        )],
+        vec![
+            setting_row(
+                tr(lang, Key::EnableLocalTools),
+                tr(lang, Key::LocalToolsHint),
+                p,
+                Switch::new("local-tools-enabled")
+                    .checked(state.config.local_tools_enabled)
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_local_tools(cx))),
+            ),
+            setting_row(tr(lang, Key::ToolTimeout), tr(lang, Key::ToolTimeoutHint), p, {
+                let app = app.clone();
+                segmented(
+                    "command-timeout",
+                    // 档位之外的值（手改过配置）不高亮任何一档，和温度一致
+                    vec![
+                        (60_u64, tr_args(lang, Key::ToolTimeoutMinutes, &["1"]).into()),
+                        (300, tr_args(lang, Key::ToolTimeoutMinutes, &["5"]).into()),
+                        (600, tr_args(lang, Key::ToolTimeoutMinutes, &["10"]).into()),
+                        (1800, tr_args(lang, Key::ToolTimeoutMinutes, &["30"]).into()),
+                    ],
+                    state.config.command_timeout_secs,
+                    p,
+                    move |secs, _, cx| app.update(cx, |this, cx| this.set_command_timeout(secs, cx)),
+                )
+            }),
+        ],
     );
 
     page(

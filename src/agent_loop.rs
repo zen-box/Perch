@@ -341,7 +341,9 @@ impl AppState {
             placeholders.push((message.id.clone(), tool.clone()));
             self.push_to_session(session_id, message);
         }
-        let control = ExecControl::default();
+        // 超时跟着设置走：编译、装依赖这类命令要多久因项目而异，
+        // 写死在代码里总有人不够用（也总有人嫌久）
+        let control = ExecControl::with_timeout_secs(self.config.command_timeout_secs);
         self.agent.next_run_id += 1;
         let run_id = self.agent.next_run_id;
         self.agent.running = Some(ToolRun {
@@ -386,6 +388,8 @@ impl AppState {
             if let (Some(result), Some(message)) = (result, self.find_message_mut(placeholder_id)) {
                 message.content = result.content;
                 message.tool_is_error = result.is_error;
+                message.tool_duration_ms = result.duration_ms;
+                message.tool_exit_code = result.exit_code;
                 message.is_streaming = false;
             }
         }

@@ -243,7 +243,17 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default)]
     pub local_tools_enabled: bool,
+    /// 单条本地命令最多跑多久（秒）。写进配置而不是写死，
+    /// 因为"多久算卡住"因项目和机器而异。
+    #[serde(default = "default_command_timeout_secs")]
+    pub command_timeout_secs: u64,
     pub providers: Vec<ProviderConfig>,
+}
+
+/// 本地命令的默认超时。取 `local_tools` 里那个常量，
+/// 免得同一个数字在两处各写一遍、改了一处忘了另一处。
+fn default_command_timeout_secs() -> u64 {
+    crate::local_tools::COMMAND_TIMEOUT.as_secs()
 }
 
 impl Default for AppConfig {
@@ -259,6 +269,7 @@ impl Default for AppConfig {
             is_dark: false, // 默认清爽浅色
             language: "zh-CN".to_string(),
             local_tools_enabled: false,
+            command_timeout_secs: default_command_timeout_secs(),
             providers: Vec::new(),
         }
     }
@@ -510,6 +521,23 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_configs_get_the_default_command_timeout() {
+        // 老配置里没有这个字段。给 0 会让每条命令刚启动就被判超时，必须回落到默认值
+        let json = r#"{
+            "active_provider_id": "",
+            "model": "m",
+            "temperature": 0.7,
+            "system_prompt": "",
+            "is_dark": false,
+            "language": "zh-CN",
+            "providers": []
+        }"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.command_timeout_secs, default_command_timeout_secs());
+        assert!(config.command_timeout_secs > 0, "默认超时不能是 0");
+    }
 
     #[test]
     fn provider_api_key_is_never_serialized() {

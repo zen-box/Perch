@@ -639,6 +639,13 @@ impl AppState {
         cx.notify();
     }
 
+    /// 改本地命令的超时。正在跑的命令不受影响——它拿到的是开始执行那一刻的快照。
+    pub fn set_command_timeout(&mut self, secs: u64, cx: &mut Context<Self>) {
+        self.config.command_timeout_secs = secs;
+        self.persist_config(cx);
+        cx.notify();
+    }
+
     pub fn save_system_prompt(&mut self, cx: &mut Context<Self>) {
         let lang = self.language();
         let prompt = self.cfg_system_prompt_input.read(cx).value().trim().to_string();

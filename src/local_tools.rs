@@ -63,6 +63,16 @@ impl Default for ExecControl {
     }
 }
 
+impl ExecControl {
+    /// 按设置里的秒数构造。下限一秒——写成 0 会让每条命令刚启动就被判超时。
+    pub fn with_timeout_secs(secs: u64) -> Self {
+        Self {
+            command_timeout: Duration::from_secs(secs.max(1)),
+            ..Self::default()
+        }
+    }
+}
+
 /// 工具执行前需要用户点头的程度。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Guard {
@@ -295,19 +305,32 @@ fn normalize(path: &Path) -> PathBuf {
 ///
 /// 会阻塞，必须在后台线程调用（见模块说明）。
 pub fn execute(pending: &PendingTool, control: &ExecControl) -> ToolResult {
-    let (content, is_error) = match pending.name.as_str() {
-        "list_directory" => list_directory(pending),
-        "read_file" => read_file(pending),
+    let started = Instant::now();
+    // 文件操作不产生进程，退出码一律 `None`；只有 `git_status` / `run_command` 会给。
+    let (content, is_error, exit_code) = match pending.name.as_str() {
+        "list_directory" => {
+            let (content, is_error) = list_directory(pending);
+            (content, is_error, None)
+        }
+        "read_file" => {
+            let (content, is_error) = read_file(pending);
+            (content, is_error, None)
+        }
         "git_status" => git_status(control),
-        "write_file" => write_file(pending),
+        "write_file" => {
+            let (content, is_error) = write_file(pending);
+            (content, is_error, None)
+        }
         "run_command" => run_command(pending, control),
-        other => (unknown_tool_message(other), true),
+        other => (unknown_tool_message(other), true, None),
     };
     ToolResult {
         id: pending.id.clone(),
         name: pending.name.clone(),
         content: truncate_middle(&content, MAX_RESULT_CHARS),
         is_error,
+        duration_ms: started.elapsed().as_millis() as u64,
+        exit_code,
     }
 }
 
@@ -332,6 +355,9 @@ pub fn not_executed_result(pending: &PendingTool, reason: &str) -> ToolResult {
         name: pending.name.clone(),
         content: format!("Not executed: {reason}"),
         is_error: true,
+        // 没跑过，谈不上耗时和退出码
+        duration_ms: 0,
+        exit_code: None,
     }
 }
 
@@ -345,6 +371,8 @@ pub fn denial_result(pending: &PendingTool) -> ToolResult {
         name: pending.name.clone(),
         content: format!("User denied permission to run `{}`.", pending.name),
         is_error: true,
+        duration_ms: 0,
+        exit_code: None,
     }
 }
 
@@ -359,6 +387,8 @@ pub fn disabled_result(pending: &PendingTool) -> ToolResult {
             pending.name
         ),
         is_error: true,
+        duration_ms: 0,
+        exit_code: None,
     }
 }
 
@@ -432,22 +462,26 @@ fn read_file(pending: &PendingTool) -> (String, bool) {
     (text, false)
 }
 
-fn git_status(control: &ExecControl) -> (String, bool) {
+fn git_status(control: &ExecControl) -> (String, bool, Option<i32>) {
     let mut command = Command::new("git");
     command.args(["status", "--short"]);
     match run_process(command, control, GIT_TIMEOUT) {
-        Ok(output) if output.outcome == Outcome::Exited(true) => {
+        Ok(output) if output.exit_code() == Some(0) => {
             let text = String::from_utf8_lossy(&output.stdout);
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                ("工作区干净，没有改动。".to_string(), false)
+                ("工作区干净，没有改动。".to_string(), false, Some(0))
             } else {
-                (trimmed.to_string(), false)
+                (trimmed.to_string(), false, Some(0))
             }
         }
         // 不在仓库里、超时、被停止：把 git 自己的说法原样交出去，别当成"干净"
-        Ok(output) => describe_process_output(output, GIT_TIMEOUT),
-        Err(error) => (format!("无法执行 git：{error}"), true),
+        Ok(output) => {
+            let code = output.exit_code();
+            let (content, is_error) = describe_process_output(output, GIT_TIMEOUT);
+            (content, is_error, code)
+        }
+        Err(error) => (format!("无法执行 git：{error}"), true, None),
     }
 }
 
@@ -464,9 +498,9 @@ fn write_file(pending: &PendingTool) -> (String, bool) {
     }
 }
 
-fn run_command(pending: &PendingTool, control: &ExecControl) -> (String, bool) {
+fn run_command(pending: &PendingTool, control: &ExecControl) -> (String, bool, Option<i32>) {
     let Some(command) = pending.string_arg("command") else {
-        return ("缺少参数 command，或者它不是字符串。".to_string(), true);
+        return ("缺少参数 command，或者它不是字符串。".to_string(), true, None);
     };
 
     #[cfg(target_os = "windows")]
@@ -485,16 +519,20 @@ fn run_command(pending: &PendingTool, control: &ExecControl) -> (String, bool) {
     };
 
     match run_process(process, control, control.command_timeout) {
-        Ok(output) => describe_process_output(output, control.command_timeout),
-        Err(error) => (format!("无法执行命令：{error}"), true),
+        Ok(output) => {
+            let code = output.exit_code();
+            let (content, is_error) = describe_process_output(output, control.command_timeout);
+            (content, is_error, code)
+        }
+        Err(error) => (format!("无法执行命令：{error}"), true, None),
     }
 }
 
 /// 子进程是怎么结束的。
 #[derive(Debug, PartialEq)]
 enum Outcome {
-    /// 自己跑完了，值是退出码是否为 0
-    Exited(bool),
+    /// 自己跑完了。值是退出码——Windows 上进程被强制结束时拿不到，所以是 `Option`。
+    Exited(Option<i32>),
     TimedOut,
     Cancelled,
 }
@@ -503,6 +541,17 @@ struct ProcessOutput {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     outcome: Outcome,
+}
+
+impl ProcessOutput {
+    /// 进程自己的退出码。超时、被停止、拿不到退出码时都是 `None`——
+    /// 界面据此决定要不要显示「退出码」这一项。
+    fn exit_code(&self) -> Option<i32> {
+        match self.outcome {
+            Outcome::Exited(code) => code,
+            Outcome::TimedOut | Outcome::Cancelled => None,
+        }
+    }
 }
 
 /// 跑一个子进程，同时盯着超时和「停止」。到点或被停止就结束整个进程树。
@@ -522,7 +571,7 @@ fn run_process(mut command: Command, control: &ExecControl, timeout: Duration) -
     let started = Instant::now();
     let outcome = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break Outcome::Exited(status.success()),
+            Ok(Some(status)) => break Outcome::Exited(status.code()),
             Ok(None) => {}
             Err(error) => {
                 kill_process_tree(&mut child);
@@ -620,7 +669,7 @@ fn describe_process_output(output: ProcessOutput, timeout: Duration) -> (String,
         (false, false) => format!("{stdout}\n{stderr}"),
     };
     let is_error = match output.outcome {
-        Outcome::Exited(ok) => !ok,
+        Outcome::Exited(code) => code != Some(0),
         Outcome::TimedOut => {
             combined.push_str(&format!(
                 "\n\n[Stopped: the command did not finish within {} seconds.]",
@@ -666,6 +715,56 @@ mod tests {
 
     fn execute_default(pending: &PendingTool) -> ToolResult {
         execute(pending, &ExecControl::default())
+    }
+
+    #[test]
+    fn commands_report_their_exit_code() {
+        // 非零退出码要原样带出来：界面显示「退出码 3」比笼统一个"失败"有用得多
+        let failed = execute_default(&pending("run_command", json!({"command": "exit 3"})));
+        assert!(failed.is_error, "非零退出码要标成错误");
+        assert_eq!(failed.exit_code, Some(3));
+
+        let ok = execute_default(&pending("run_command", json!({"command": "exit 0"})));
+        assert!(!ok.is_error);
+        assert_eq!(ok.exit_code, Some(0));
+    }
+
+    #[test]
+    fn file_tools_have_a_duration_but_no_exit_code() {
+        // 文件操作不产生进程，没有退出码可报；耗时则每条都记
+        let result = execute_default(&pending("list_directory", json!({"path": "."})));
+        assert_eq!(result.exit_code, None);
+        assert!(
+            result.duration_ms < 10_000,
+            "耗时不该是个荒唐的值：{}",
+            result.duration_ms
+        );
+    }
+
+    #[test]
+    fn calls_that_never_ran_carry_no_timing() {
+        // 停止 / 拒绝：没执行过就不该有耗时和退出码，否则界面会显示一个假的「0ms」
+        let call = pending("run_command", json!({"command": "echo hi"}));
+        let stopped = not_executed_result(&call, "stopped by the user.");
+        assert_eq!(stopped.duration_ms, 0);
+        assert_eq!(stopped.exit_code, None);
+
+        let denied = denial_result(&call);
+        assert_eq!(denied.duration_ms, 0);
+        assert_eq!(denied.exit_code, None);
+    }
+
+    #[test]
+    fn command_timeout_never_drops_below_a_second() {
+        // 配置里写成 0 会让每条命令刚启动就被判超时
+        assert_eq!(
+            ExecControl::with_timeout_secs(0).command_timeout,
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            ExecControl::with_timeout_secs(120).command_timeout,
+            Duration::from_secs(120)
+        );
     }
 
     #[test]

@@ -306,6 +306,14 @@ fn render_tool_result(
         msg.tool_name.clone()
     };
     let body = msg.content.trim_end();
+    // 耗时和退出码是给用户看的执行细节：耗时总显示；退出码只在非 0 时显示——
+    // 0 就是成功，绿框已经表达了，再写一行是噪音。
+    let duration = if running { 0 } else { msg.tool_duration_ms };
+    let failed_code = if running {
+        None
+    } else {
+        msg.tool_exit_code.filter(|code| *code != 0)
+    };
     let total_lines = body.lines().count();
     let long = total_lines > TOOL_RESULT_COLLAPSED_LINES || body.chars().count() > TOOL_RESULT_COLLAPSED_CHARS;
     let lines = if long && !expanded {
@@ -352,7 +360,22 @@ fn render_tool_result(
                         .text_xs()
                         .text_color(p.muted_foreground)
                         .child(format_msg_time(&msg.created_at).to_string()),
-                ),
+                )
+                .when(duration > 0, |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(p.muted_foreground)
+                            .child(format_tool_duration(duration)),
+                    )
+                })
+                .when(failed_code.is_some(), |this| {
+                    this.child(div().text_xs().text_color(p.danger).child(tr_args(
+                        lang,
+                        Key::ToolExitCode,
+                        &[&failed_code.unwrap_or_default().to_string()],
+                    )))
+                }),
         )
         .when(running, |this| {
             this.child(
@@ -410,6 +433,21 @@ fn render_tool_result(
             )
         })
         .into_any_element()
+}
+
+/// 工具执行耗时的显示写法。
+///
+/// 用通用单位（ms / s / m）而不是本地化词：这串字符在所有语言下都看得懂，
+/// 不必为它维护四份译文。
+fn format_tool_duration(ms: u64) -> String {
+    if ms < 1_000 {
+        format!("{ms}ms")
+    } else if ms < 60_000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        let seconds = ms / 1000;
+        format!("{}m{}s", seconds / 60, seconds % 60)
+    }
 }
 
 /// 折叠状态下显示的开头几行：行数和总字数都有上限（一行压缩过的 JSON 就能有几万字）。
@@ -695,4 +733,19 @@ pub(super) fn preview(text: &str, limit: usize) -> String {
         out.push('…');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_tool_duration;
+
+    #[test]
+    fn durations_read_naturally() {
+        assert_eq!(format_tool_duration(0), "0ms");
+        assert_eq!(format_tool_duration(320), "320ms");
+        assert_eq!(format_tool_duration(1_200), "1.2s");
+        assert_eq!(format_tool_duration(59_900), "59.9s");
+        // 满一分钟换成 m+s，别让界面出现「125.4s」这种数
+        assert_eq!(format_tool_duration(65_000), "1m5s");
+    }
 }

@@ -257,12 +257,23 @@ pub struct ChatMessage {
     /// 这条工具结果是不是失败的结果，界面据此把块标成错误色。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tool_is_error: bool,
+    /// 这条工具结果执行了多久（毫秒）。`0` 表示没测到（旧数据、没执行）。
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tool_duration_ms: u64,
+    /// 这条工具结果的进程退出码。文件操作、没执行过的调用都是 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_exit_code: Option<i32>,
     /// 只在本机显示、**永远不发给模型**的消息。
     ///
     /// 目前用在手打 `/read` 读敏感文件（`.env`、私钥之类）：用户点了同意是想自己看一眼，
     /// 不代表同意把内容交给模型服务商。命令那一条和结果那一条都会标上。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub local_only: bool,
+}
+
+/// `skip_serializing_if` 用：0 表示「没测到」，不写进数据。
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// 没有执行的工具调用在请求里补上的结果。
@@ -298,6 +309,9 @@ fn api_message(message: &ChatMessage) -> Option<ChatMessageReq> {
             name: message.tool_name.clone(),
             content,
             is_error: message.tool_is_error,
+            // 耗时和退出码只给界面看，`tool_result` 不读它们
+            duration_ms: 0,
+            exit_code: None,
         }));
     }
 
@@ -369,6 +383,9 @@ fn pair_tool_results(items: Vec<ChatMessageReq>) -> Vec<ChatMessageReq> {
                     name: call.name.clone(),
                     content: CALL_NOT_EXECUTED.to_string(),
                     is_error: true,
+                    // 这条是补出来的占位结果，没有真的执行过
+                    duration_ms: 0,
+                    exit_code: None,
                 })),
             }
         }
@@ -417,6 +434,8 @@ impl ChatMessage {
             tool_call_id: String::new(),
             tool_name: String::new(),
             tool_is_error: false,
+            tool_duration_ms: 0,
+            tool_exit_code: None,
             local_only: false,
         }
     }
@@ -439,6 +458,8 @@ impl ChatMessage {
             tool_name: result.name.clone(),
             tool_call_id: result.id.clone(),
             tool_is_error: result.is_error,
+            tool_duration_ms: result.duration_ms,
+            tool_exit_code: result.exit_code,
             ..Self::blank("tool", result.content.clone())
         }
     }
@@ -715,6 +736,7 @@ mod tests {
             name: "read_file".into(),
             content: "fn main() {}".into(),
             is_error: false,
+            ..Default::default()
         };
 
         let mut assistant = ChatMessage::new_assistant();
@@ -748,6 +770,7 @@ mod tests {
             name: "read_file".into(),
             content: "fn main() {}".into(),
             is_error: false,
+            ..Default::default()
         };
         let mut assistant = ChatMessage::new_assistant();
         assistant.is_streaming = false;
@@ -784,6 +807,48 @@ mod tests {
         assert_eq!(turns[2].content, "");
     }
 
+    #[test]
+    fn tool_messages_keep_their_timing() {
+        // 耗时和退出码要跟着消息走，界面才显示得出来
+        let result = ToolResult {
+            id: "call_1".into(),
+            name: "run_command".into(),
+            content: "ok".into(),
+            is_error: false,
+            duration_ms: 1234,
+            exit_code: Some(0),
+        };
+        let message = ChatMessage::new_tool(&result);
+        assert_eq!(message.tool_duration_ms, 1234);
+        assert_eq!(message.tool_exit_code, Some(0));
+    }
+
+    #[test]
+    fn tool_placeholders_start_without_timing() {
+        // 占位块还没执行，界面不该显示耗时
+        let placeholder = ChatMessage::tool_placeholder("call_1", "run_command", false);
+        assert_eq!(placeholder.tool_duration_ms, 0);
+        assert_eq!(placeholder.tool_exit_code, None);
+    }
+
+    #[test]
+    fn timing_never_reaches_the_request_body() {
+        // 它们是给界面看的：掺进发给模型的内容只会白占上下文，
+        // 还会让同一段历史随执行时刻不同而序列化出不同结果（prompt 缓存失效）
+        let mut message = tool_message("call_1", "run_command", "ok");
+        message.tool_duration_ms = 1234;
+        message.tool_exit_code = Some(0);
+        let session = session_with(vec![
+            ChatMessage::new_user("跑一下".into()),
+            assistant_calling(&[("call_1", "run_command")]),
+            message,
+        ]);
+        let json = serde_json::to_string(&session.api_turns(None)).unwrap();
+        assert!(!json.contains("1234"), "耗时不该出现在请求体里：{json}");
+        assert!(!json.contains("duration"), "请求体里不该有 duration 字段：{json}");
+        assert!(!json.contains("exit_code"), "请求体里不该有 exit_code 字段：{json}");
+    }
+
     fn call(id: &str, name: &str) -> ToolCall {
         ToolCall {
             id: id.into(),
@@ -805,6 +870,7 @@ mod tests {
             name: name.into(),
             content: content.into(),
             is_error: false,
+            ..Default::default()
         })
     }
 

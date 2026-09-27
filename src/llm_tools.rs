@@ -28,7 +28,10 @@ pub struct ToolCall {
 }
 
 /// 工具执行结果，回传时按渠道转成对应格式。
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// 带 `Default` 是为了让构造点只写关心的字段（测试、以及只想传正文的转换路径），
+/// 将来再加执行细节字段时不必回来改每一处。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ToolResult {
     /// 对应 `ToolCall::id`；Gemini 用不到，回传时忽略。
     #[serde(default)]
@@ -37,6 +40,15 @@ pub struct ToolResult {
     pub content: String,
     #[serde(default)]
     pub is_error: bool,
+    /// 执行花了多久（毫秒）。**只给界面看，不掺进 `content`**——
+    /// content 是要发给模型的内容，混进耗时和退出码既占上下文，
+    /// 又会让同一段历史在不同时刻序列化出不同结果。
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// 子进程的退出码。只有 `run_command` / `git_status` 有；
+    /// 文件操作不是进程，是 `None`。
+    #[serde(default)]
+    pub exit_code: Option<i32>,
 }
 
 /// 一个可供模型调用的工具。`parameters` 是 JSON Schema。
