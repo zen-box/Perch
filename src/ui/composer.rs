@@ -2,6 +2,7 @@
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{Disableable as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -10,7 +11,7 @@ use gpui_kit_assets::IconName;
 use super::chat::{attachment_badge, preview};
 use super::{CONTENT_MAX_WIDTH, Palette, model_picker};
 use crate::app::AppState;
-use crate::attachment_ops::AttachmentObstacle;
+use crate::attachment_ops::{ATTACHMENT_FILTERS, AttachmentObstacle};
 use crate::i18n::{AppLanguage, Key, tr, tr_args};
 use crate::model::Attachment;
 use crate::model_info::Capability;
@@ -130,14 +131,21 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
     // 这批附件发给这次要用的模型，有没有接不住的。对比模式下每个模型各查一遍——
     // 三个模型里可能只有两个能看图
     let obstacle = state.attachment_obstacle();
-    // 入口本身也要说清楚：模型只接得住一部分格式时，别让用户以为想传什么都能传
-    let capabilities = state.common_capabilities();
-    let attachment_tooltip = if capabilities.contains(&Capability::Vision) && capabilities.contains(&Capability::Files)
-    {
-        tr(lang, Key::AddAttachment)
-    } else {
-        tr(lang, Key::AddAttachmentLimited)
-    };
+    // 入口本身也要说清楚能加什么。按钮不能因为模型看不懂图片就整个藏掉：
+    // 文本和代码会拼进正文，任何模型都读得了
+    let gate = state.attachment_gate();
+    let attachment_tooltip = tr(
+        lang,
+        match (
+            gate.missing(Capability::Vision).is_none(),
+            gate.missing(Capability::Files).is_none(),
+        ) {
+            (true, true) => Key::AddAttachment,
+            (true, false) => Key::AddAttachmentNoFiles,
+            (false, true) => Key::AddAttachmentNoVision,
+            (false, false) => Key::AddAttachmentTextOnly,
+        },
+    );
     let input_empty = draft.trim().is_empty() && !has_attachments;
     let slash = slash_matches(state, &draft);
     let quote = state.pending_quote.clone();
@@ -181,51 +189,105 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                 .child(
                     h_flex()
                         .justify_between()
+                        .items_center()
                         .gap_2()
                         .px_2()
                         .pb_2()
+                        // 左边管「这一问怎么问」：附件、模型、参数、对比
                         .child(
                             h_flex()
                                 .min_w_0()
+                                // 窗口太窄时左边自己裁掉，不能压到右边的模式开关和发送按钮上
+                                .overflow_hidden()
+                                .items_center()
                                 .gap_0p5()
-                                .child(
+                                .child({
+                                    let app = cx.entity();
+                                    // 附件入口按类型拆成菜单，而不是一个按钮直接开文件对话框：
+                                    // 模型接不住哪一类，菜单里那一项就灰掉并写明原因。只摆一个
+                                    // 「所有文件」的话，纯文本模型下照样能选到图片，**选完才在
+                                    // 导入时被拒**——白跑一趟，用户还不知道自己错在哪。
                                     Button::new("composer-pick-attachment")
                                         .ghost()
                                         .small()
                                         .icon(IconName::Paperclip)
                                         .tooltip(attachment_tooltip)
-                                        .on_click(cx.listener(|this, _, _, cx| this.pick_attachments(cx))),
-                                )
+                                        // 这排按钮贴着窗口底边，菜单往上开（跟旁边的模型、参数一致）
+                                        .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                                            ATTACHMENT_FILTERS.iter().fold(menu, |menu, &filter| {
+                                                let app = app.clone();
+                                                // 缺能力时把模型名和缺的那一项一起写在菜单项上，
+                                                // 用户才知道该换成谁，而不是猜为什么点不动
+                                                let reason = filter
+                                                    .requires()
+                                                    .and_then(|capability| gate.missing(capability))
+                                                    .and_then(|model| filter.unavailable_label(model, lang));
+                                                let label = match &reason {
+                                                    Some(reason) => format!("{} · {}", filter.label(lang), reason),
+                                                    None => filter.label(lang).to_string(),
+                                                };
+                                                menu.item(
+                                                    PopupMenuItem::new(label)
+                                                        .icon(filter.icon())
+                                                        .disabled(reason.is_some())
+                                                        .on_click(move |_, _, cx| {
+                                                            app.update(cx, |this, cx| {
+                                                                this.pick_attachments(filter, cx)
+                                                            });
+                                                        }),
+                                                )
+                                            })
+                                        })
+                                })
                                 .child(model_picker::render_model_picker(state, p, cx))
                                 .child(super::params::render_params_button(lang, cx))
-                                .child(super::params::render_compare_button(state, cx))
-                                .child(super::tool_picker::render_mode_switch(state, p, cx))
-                                .child(super::tool_picker::render_tool_picker(state, cx)),
+                                .child(super::params::render_compare_button(state, cx)),
                         )
-                        .child(if is_streaming {
-                            Button::new("stop")
-                                .primary()
-                                .small()
-                                .rounded(px(999.))
-                                .icon(IconName::Square)
-                                .tooltip(tr(lang, Key::StopGenerating))
-                                .on_click(cx.listener(|this, _, _, cx| this.cancel_streaming(cx)))
-                        } else {
-                            Button::new("send")
-                                .primary()
-                                .small()
-                                .rounded(px(999.))
-                                .icon(IconName::ArrowUp)
-                                .tooltip(if state.compare_selection.is_empty() {
-                                    tr(lang, Key::SendEnter)
-                                } else {
-                                    tr(lang, Key::SendCompareEnter)
-                                })
-                                .disabled(input_empty)
-                                .on_click(cx.listener(|this, _, window, cx| this.send_message(window, cx)))
-                        }),
+                        // 右边管「怎么答」：对话还是智能体、带哪些工具，最后是发送。
+                        // 模式和工具挨着发送按钮，发之前扫一眼就知道这一轮会不会动用工具
+                        .child(
+                            h_flex()
+                                .flex_none()
+                                .items_center()
+                                .gap_1()
+                                .child(super::tool_picker::render_mode_switch(state, p, cx))
+                                .child(super::tool_picker::render_tool_picker(state, p, cx))
+                                .child(render_send_button(state, is_streaming, input_empty, lang, cx)),
+                        ),
                 ),
         )
+}
+
+/// 发送 / 停止按钮。
+fn render_send_button(
+    state: &AppState,
+    is_streaming: bool,
+    input_empty: bool,
+    lang: AppLanguage,
+    cx: &mut Context<AppState>,
+) -> impl IntoElement {
+    if is_streaming {
+        Button::new("stop")
+            .primary()
+            .small()
+            .rounded(px(999.))
+            .icon(IconName::Square)
+            .tooltip(tr(lang, Key::StopGenerating))
+            .on_click(cx.listener(|this, _, _, cx| this.cancel_streaming(cx)))
+    } else {
+        Button::new("send")
+            .primary()
+            .small()
+            .rounded(px(999.))
+            .icon(IconName::ArrowUp)
+            .tooltip(if state.compare_selection.is_empty() {
+                tr(lang, Key::SendEnter)
+            } else {
+                tr(lang, Key::SendCompareEnter)
+            })
+            .disabled(input_empty)
+            .on_click(cx.listener(|this, _, window, cx| this.send_message(window, cx)))
+    }
 }
 
 fn render_quote_chip(quote: &str, p: &Palette, lang: AppLanguage, cx: &mut Context<AppState>) -> impl IntoElement {

@@ -16,44 +16,55 @@ use gpui_kit_assets::IconName;
 
 use super::Palette;
 use super::chat::preview;
-use super::settings::segmented;
+use super::settings::{SegmentedSize, segmented_sized};
 use crate::app::AppState;
-use crate::i18n::{Key, tr, tr_args};
+use crate::i18n::{Key, tr};
 use crate::tool_ops::ToolGroupLabel;
 
 /// 「对话 / 智能体」分段开关。
+///
+/// 用紧凑尺寸：它和模型、参数这些 xsmall 按钮排在同一行，设置页那种 28px 高、
+/// 14px 字的分段块放进来会比旁边所有控件都重，一眼看过去全是它。
 pub(super) fn render_mode_switch(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
     let lang = state.language();
     let app = cx.entity();
-    segmented(
+    segmented_sized(
         "session-mode",
         vec![
-            (false, tr(lang, Key::Chat).into()),
-            (true, tr(lang, Key::AgentMode).into()),
+            (false, Some(IconName::MessageSquare), tr(lang, Key::Chat).into()),
+            (true, Some(IconName::Bot), tr(lang, Key::AgentMode).into()),
         ],
         state.session_tools_enabled(),
+        SegmentedSize::Compact,
         p,
         move |enabled, _, cx| app.update(cx, |this, cx| this.set_session_tools_enabled(enabled, cx)),
     )
 }
 
 /// 「本次对话的工具」选择器。
-pub(super) fn render_tool_picker(state: &AppState, cx: &mut Context<AppState>) -> impl IntoElement {
+pub(super) fn render_tool_picker(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
     let lang = state.language();
     let app = cx.entity();
     let enabled = state.session_tools_enabled();
     let count = state.picked_tool_count();
     Popover::new("session-tools")
-        .anchor(Anchor::BottomLeft)
+        .anchor(Anchor::BottomRight)
         .trigger(
             Button::new("session-tools-trigger")
                 .ghost()
                 .xsmall()
                 .icon(IconName::Wrench)
-                // 角标只在智能体模式下出现：对话模式下显示「3 个工具」会让人以为已经生效了
+                // 数量只在智能体模式下出现：对话模式下显示「3」会让人以为已经生效了。
+                // 用主色的数字而不是把整个按钮涂成主色——旁边就是发送按钮，
+                // 两个实心的主色块挨着，哪个才是主操作就分不清了
                 .when(enabled, |this| {
-                    this.primary()
-                        .label(tr_args(lang, Key::McpToolCount, &[&count.to_string()]))
+                    this.child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(p.primary)
+                            .child(count.to_string()),
+                    )
                 })
                 .tooltip(tr(lang, Key::SessionTools)),
         )

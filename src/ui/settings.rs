@@ -186,24 +186,53 @@ pub(super) fn segmented<T: Copy + PartialEq + 'static>(
     p: &Palette,
     on_select: impl Fn(T, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let options = options.into_iter().map(|(value, label)| (value, None, label)).collect();
+    segmented_sized(id, options, selected, SegmentedSize::Regular, p, on_select)
+}
+
+/// 分段选择器的尺寸。
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum SegmentedSize {
+    /// 设置页里单独占一行的选择
+    Regular,
+    /// 夹在一排 xsmall 按钮中间（输入框工具栏）：和按钮一样高、字号一样小，
+    /// 否则 28px 高的灰底块会压过旁边所有控件
+    Compact,
+}
+
+/// 分段选择器，可以给每一段配图标。
+pub(super) fn segmented_sized<T: Copy + PartialEq + 'static>(
+    id: &'static str,
+    options: Vec<(T, Option<IconName>, SharedString)>,
+    selected: T,
+    size: SegmentedSize,
+    p: &Palette,
+    on_select: impl Fn(T, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
     let on_select = std::rc::Rc::new(on_select);
+    let compact = size == SegmentedSize::Compact;
     h_flex()
         .gap_0p5()
         .p_0p5()
         .rounded_lg()
         .bg(p.muted)
-        .children(options.into_iter().enumerate().map(|(ix, (value, label))| {
+        .children(options.into_iter().enumerate().map(|(ix, (value, icon, label))| {
             let is_selected = value == selected;
             let on_select = on_select.clone();
-            div()
+            h_flex()
                 .id((id, ix))
-                .h(px(28.))
-                .px_3()
-                .flex()
+                .h(px(if compact { 22. } else { 28. }))
+                .map(|this| {
+                    if compact {
+                        this.px_2().text_xs()
+                    } else {
+                        this.px_3().text_sm()
+                    }
+                })
+                .gap_1()
                 .items_center()
                 .rounded_md()
                 .cursor_pointer()
-                .text_sm()
                 .map(|this| {
                     if is_selected {
                         this.bg(p.background)
@@ -216,6 +245,7 @@ pub(super) fn segmented<T: Copy + PartialEq + 'static>(
                     }
                 })
                 .on_click(move |_, window, cx| on_select(value, window, cx))
+                .when_some(icon, |this, icon| this.child(Icon::new(icon).size(px(12.))))
                 .child(label)
         }))
 }

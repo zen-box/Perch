@@ -73,7 +73,9 @@ pub fn detect_kind_and_mime(path_or_name: &str) -> (AttachmentKind, &'static str
         "webp" => (AttachmentKind::Image, "image/webp"),
         "gif" => (AttachmentKind::Image, "image/gif"),
         "bmp" => (AttachmentKind::Image, "image/bmp"),
-        "svg" => (AttachmentKind::Image, "image/svg+xml"),
+        // SVG 按源码文本发：几家服务商的图片接口都不收 SVG，当图片发只会换回报错；
+        // 当文本拼进正文，哪个模型都读得了。MIME 不能写 `image/…`，否则会被当成图片
+        "svg" => (AttachmentKind::Text, "text/xml"),
 
         // PDF 与办公文档
         "pdf" => (AttachmentKind::Document, "application/pdf"),
@@ -168,13 +170,19 @@ fn save_bytes_in(base_dir: &Path, data: &[u8], original_name: &str, mime_type: &
     })
 }
 
-/// 从外部物理文件路径读取并导入到 attachments 存储库（去重）
-pub fn save_file_from_path(src: &Path, lang: AppLanguage) -> std::io::Result<SavedFile> {
+/// 读取要导入的外部文件。先查大小再读，超限的文件不会整个读进内存。
+pub fn read_file(src: &Path, lang: AppLanguage) -> std::io::Result<Vec<u8>> {
     check_attachment_size(fs::metadata(src)?.len(), lang)?;
-    let data = fs::read(src)?;
-    let name = src.file_name().and_then(|n| n.to_str()).unwrap_or("attachment");
-    let (_, mime) = detect_kind_and_mime(name);
-    save_bytes(&data, name, mime)
+    fs::read(src)
+}
+
+/// 内容能不能当文本拼进消息正文：UTF-8，且不含 NUL。
+///
+/// UTF-8 是发送时 [`read_text`] 的要求：读不出来的文本附件在请求里会被**悄悄跳过**——
+/// 界面上附件还在，模型却什么都没收到，所以入口就得按这条标准把关。
+/// 含 NUL 的基本是碰巧能按 UTF-8 解开的二进制文件（UTF-16 文本也会带 NUL）。
+pub fn is_plain_text(data: &[u8]) -> bool {
+    !data.contains(&0) && std::str::from_utf8(data).is_ok()
 }
 
 fn check_attachment_size(size: u64, lang: AppLanguage) -> std::io::Result<()> {
@@ -276,5 +284,26 @@ mod tests {
 
         let (k_py, _) = detect_kind_and_mime("script.py");
         assert_eq!(k_py, AttachmentKind::Text);
+    }
+
+    /// SVG 当源码文本发：各家的图片接口都不收 SVG。MIME 也不能是 `image/…`，
+    /// 否则 `Attachment::is_image` 会把它认回图片，又去要「图片理解」
+    #[test]
+    fn svg_is_sent_as_text() {
+        let (kind, mime) = detect_kind_and_mime("logo.svg");
+        assert_eq!(kind, AttachmentKind::Text);
+        assert!(!mime.starts_with("image/"));
+    }
+
+    #[test]
+    fn plain_text_must_be_utf8_without_nul() {
+        assert!(is_plain_text("日志 log\nline 2".as_bytes()));
+        assert!(is_plain_text(b""));
+        // GBK 编码的「中文」：发送时读不出来，会被悄悄跳过
+        assert!(!is_plain_text(&[0xD6, 0xD0, 0xCE, 0xC4]));
+        // UTF-16 LE 的 "ab"：每个字符后面跟一个 NUL
+        assert!(!is_plain_text(&[0xFF, 0xFE, b'a', 0, b'b', 0]));
+        // 压缩包之类的二进制
+        assert!(!is_plain_text(b"PK\x03\x04\x14\x00\x00\x00"));
     }
 }

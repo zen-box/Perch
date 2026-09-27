@@ -47,6 +47,10 @@ pub fn current_model_label(state: &AppState) -> String {
     config.map(|model| model.name).unwrap_or(model_id)
 }
 
+/// 工具栏上模型名的最大宽度。模型 ID 可以很长（`claude-sonnet-4-5-20250929-thinking`），
+/// 不限宽会把同一行的参数、对比挤到右边的模式开关底下
+const MODEL_LABEL_MAX_WIDTH: f32 = 160.;
+
 /// 输入框工具栏上的模型选择器
 pub fn render_model_picker(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
     let app = cx.entity();
@@ -55,6 +59,7 @@ pub fn render_model_picker(state: &AppState, p: &Palette, cx: &mut Context<AppSt
         (model_id, None) if !state.config.providers.is_empty() => model_id_avatar(&model_id, px(16.), p),
         _ => Icon::new(IconName::Sparkles).size(px(14.)).into_any_element(),
     };
+    let label = current_model_label(state);
 
     Popover::new("model-picker")
         .anchor(Anchor::BottomLeft)
@@ -64,8 +69,10 @@ pub fn render_model_picker(state: &AppState, p: &Palette, cx: &mut Context<AppSt
                 .ghost()
                 .xsmall()
                 .child(avatar)
-                .child(div().whitespace_nowrap().child(current_model_label(state)))
-                .dropdown_caret(true),
+                .child(div().max_w(px(MODEL_LABEL_MAX_WIDTH)).truncate().child(label.clone()))
+                .dropdown_caret(true)
+                // 名字被截断时悬停能看到全名
+                .tooltip(label),
         )
         .content(move |popover, window, cx| render_model_list(&app, popover, window, cx))
 }
