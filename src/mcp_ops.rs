@@ -458,18 +458,16 @@ impl AppState {
         // 改的时候 id 不动：工具名里带着 id（`mcp__<id>__<工具>`），
         // 改一次名字就让历史记录里的调用和用户「停用某个工具」的设置全部失配
         let id = editing_id.clone().unwrap_or_else(|| new_server_id(&name));
-        let disabled_tools = self
-            .config
-            .mcp_servers
-            .iter()
-            .find(|server| server.id == id)
-            .map(|server| server.disabled_tools.clone())
-            .unwrap_or_default();
+        let previous = self.config.mcp_servers.iter().find(|server| server.id == id);
+        // 编辑时保留原来的启用状态。用户明明把它停用了，进来改个参数、点保存，
+        // 不该顺手又给它打开——那是个会让人莫名其妙多出一台在跑的服务器。
+        let enabled = previous.map(|server| server.enabled).unwrap_or(true);
+        let disabled_tools = previous.map(|server| server.disabled_tools.clone()).unwrap_or_default();
         let server = McpServerConfig {
             id: id.clone(),
             name,
             // 新建出来的默认就是开的：用户刚填完命令，显然想让它跑起来
-            enabled: true,
+            enabled,
             transport: McpTransport::Stdio {
                 command,
                 args,
