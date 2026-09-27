@@ -247,9 +247,15 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
     let content = if msg.role == "user" {
         message_user::render_user_message(app, ix, msg, streaming, lang, &p).into_any_element()
     } else if msg.role == "tool" {
-        let expanded = app.read(cx).agent.expanded_results.contains(&msg.id);
+        let (expanded, tool_label) = {
+            let state = app.read(cx);
+            (
+                state.agent.expanded_results.contains(&msg.id),
+                state.tool_display_name(&msg.tool_name),
+            )
+        };
         let mono_font = cx.theme().mono_font_family.clone();
-        render_tool_result(app, &msg, expanded, mono_font, &p, lang)
+        render_tool_result(app, &msg, tool_label, expanded, mono_font, &p, lang)
     } else {
         let (avatar, model_label) = match owner {
             Some(model) => (model_avatar(&model, px(28.), &p), model.name.clone()),
@@ -284,9 +290,14 @@ const TOOL_RESULT_COLLAPSED_CHARS: usize = 1500;
 /// 挂在同一条消息上会挤成一堆，也看不出哪个结果对应哪次调用。
 ///
 /// 正文按行显示：命令输出、目录列表、文件内容的换行都有意义，压成一行就没法看了。
+///
+/// `tool_label` 是调用方查好的显示名。**不在这里查**：MCP 工具要拿服务器给的原始
+/// 工具名（暴露名里的哈希是给模型区分撞名用的，给人看是噪音），而查它需要 `AppState`，
+/// 这里只有 `Entity`。
 fn render_tool_result(
     app: &Entity<AppState>,
     msg: &ChatMessage,
+    tool_label: String,
     expanded: bool,
     mono_font: SharedString,
     p: &Palette,
@@ -303,8 +314,7 @@ fn render_tool_result(
     let title = if msg.tool_name.is_empty() {
         tr(lang, Key::ToolResultTitle).to_string()
     } else {
-        // MCP 工具名是 `mcp__<服务器>__<工具>`，那是给模型看的；界面上只留工具名
-        crate::mcp::display_name(&msg.tool_name).to_string()
+        tool_label
     };
     let body = msg.content.trim_end();
     // 耗时和退出码是给用户看的执行细节：耗时总显示；退出码只在非 0 时显示——
@@ -581,6 +591,9 @@ fn render_tool_permission(
     let tool_name = approval.tool.name.clone();
     let tool_detail = approval_detail(&approval.tool, lang);
     let local_only = approval.is_local_only();
+    // MCP 调用既不在本机、也不一定是「命令」，说成「即将在本机执行下面的命令」是错的。
+    // 卡片上的 Tag 仍然打完整名（`mcp__<服务器>__<工具>`）——用户得看出是哪台服务器。
+    let is_mcp = crate::mcp::is_mcp_tool(&tool_name);
     let mono_font = cx.theme().mono_font_family.clone();
 
     v_flex()
@@ -604,12 +617,14 @@ fn render_tool_permission(
                 )
                 .child(Tag::warning().small().child(tool_name)),
         )
-        .child(
-            div()
-                .text_xs()
-                .text_color(p.muted_foreground)
-                .child(tr(lang, Key::ToolAuthHint)),
-        )
+        .child(div().text_xs().text_color(p.muted_foreground).child(tr(
+            lang,
+            if is_mcp {
+                Key::ToolAuthHintMcp
+            } else {
+                Key::ToolAuthHint
+            },
+        )))
         .child(
             v_flex()
                 .w_full()

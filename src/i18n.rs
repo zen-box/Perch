@@ -257,6 +257,7 @@ i18n! {
     FileTypeFile => { "文件", "File", "ファイル", "檔案" },
     ToolAuthRequired => { "需要你的授权", "Permission required", "許可が必要です", "需要你的授權" },
     ToolAuthHint => { "即将在本机执行下面的命令，请确认内容安全：", "The command below is about to run on this machine. Make sure it is safe:", "次のコマンドを本機で実行します。内容が安全か確認してください：", "即將在本機執行下面的指令，請確認內容安全：" },
+    ToolAuthHintMcp => { "即将通过 MCP 服务器调用下面的工具，请确认参数安全：", "The MCP server below is about to be called. Make sure the arguments are safe:", "次のツールを MCP サーバー経由で呼び出します。引数が安全か確認してください：", "即將透過 MCP 伺服器呼叫下面的工具，請確認參數安全：" },
     Deny => { "拒绝", "Deny", "拒否", "拒絕" },
     AllowOnce => { "允许执行一次", "Allow once", "一度だけ許可", "允許執行一次" },
     CompareNeedInput => { "请在输入框输入问题或添加图片后再开始对比", "Type a question or add an image before starting a comparison", "比較を始める前に、質問を入力するか画像を追加してください", "請在輸入框輸入問題或新增圖片後再開始對比" },

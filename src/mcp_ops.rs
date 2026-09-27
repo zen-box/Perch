@@ -87,17 +87,36 @@ pub struct McpEditor {
 impl McpState {
     /// 交给模型的工具清单：按配置里的服务器顺序排，跳过停用的服务器和单独停用的工具。
     pub fn specs(&self, servers: &[McpServerConfig]) -> Vec<ToolSpec> {
-        servers
-            .iter()
-            .filter(|server| server.enabled)
-            .filter_map(|server| self.tools.get(&server.id).map(|tools| (server, tools)))
-            .flat_map(|(server, tools)| {
-                tools
-                    .iter()
-                    .filter(|tool| !server.disabled_tools.contains(&tool.raw))
-                    .map(ExposedTool::spec)
-            })
+        self.usable(servers).into_iter().map(ExposedTool::spec).collect()
+    }
+
+    /// 当前能交给模型的工具**名字**。
+    ///
+    /// 只给「模型调了一个不存在的 MCP 工具名」那条提示用——只要名字，没必要把整套
+    /// JSON Schema 也建出来。
+    pub fn available_names(&self, servers: &[McpServerConfig]) -> Vec<String> {
+        self.usable(servers)
+            .into_iter()
+            .map(|tool| tool.exposed.clone())
             .collect()
+    }
+
+    /// 真正能交给模型的工具：跳过停用的服务器和单独停用的工具。
+    ///
+    /// 顺序由 `config.mcp_servers` 决定，**不靠 HashMap 的遍历顺序**：工具清单的顺序
+    /// 一变，同一个会话序列化出来的请求体就变，prompt 缓存全失效。
+    ///
+    /// 两个出口（`specs` / `available_names`）共用这一处过滤，免得哪天改了过滤条件
+    /// 只改了其中一个——那样「交给模型的清单」和「提示里列的清单」就对不上了。
+    fn usable<'a>(&'a self, servers: &'a [McpServerConfig]) -> Vec<&'a ExposedTool> {
+        let mut out = Vec::new();
+        for server in servers.iter().filter(|server| server.enabled) {
+            let Some(tools) = self.tools.get(&server.id) else {
+                continue;
+            };
+            out.extend(tools.iter().filter(|tool| !server.disabled_tools.contains(&tool.raw)));
+        }
+        out
     }
 
     /// 按暴露名找工具：它属于哪台服务器、服务器给的原始定义是什么。
@@ -254,6 +273,21 @@ impl AppState {
                 raw: tool.raw.clone(),
             },
             _ => Route::Local,
+        }
+    }
+
+    /// 工具在界面上显示的名字。
+    ///
+    /// 本地工具就是它自己。MCP 工具返回**服务器给的原始工具名**：暴露名里的清洗和
+    /// 哈希是给模型区分撞名用的（`a_b_b2c9276d`），拿去给用户看是纯噪音；而且设置页
+    /// 里列的就是原始名，两边显示成不一样的东西会让人以为调错了工具。
+    ///
+    /// 服务器已经断开或删掉时查不到，退回暴露名去掉前缀的那一段——历史消息还得显示，
+    /// 而那时清单已经没了，只能尽力而为。
+    pub fn tool_display_name(&self, exposed: &str) -> String {
+        match self.mcp.locate(exposed) {
+            Some((_, tool)) => tool.raw.clone(),
+            None => mcp::display_name(exposed).to_string(),
         }
     }
 }
@@ -483,4 +517,74 @@ fn new_server_id(name: &str) -> String {
     let slug = if slug.is_empty() { "server".to_string() } else { slug };
     let unique = uuid::Uuid::new_v4().simple().to_string();
     format!("{slug}-{}", &unique[..6])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn exposed(exposed: &str, raw: &str) -> ExposedTool {
+        ExposedTool {
+            exposed: exposed.to_string(),
+            raw: raw.to_string(),
+            description: String::new(),
+            parameters: json!({"type": "object"}),
+        }
+    }
+
+    fn server(id: &str, enabled: bool, disabled_tools: &[&str]) -> McpServerConfig {
+        McpServerConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            enabled,
+            transport: McpTransport::Stdio {
+                command: "noop".to_string(),
+                args: Vec::new(),
+                cwd: None,
+            },
+            secret_ref: String::new(),
+            disabled_tools: disabled_tools.iter().map(|name| name.to_string()).collect(),
+        }
+    }
+
+    /// 两个出口必须用同一套过滤：`specs` 是交给模型的清单，`available_names` 是
+    /// 「这个工具名不认识」提示里列的清单。对不上就等于告诉模型一套、实际给它另一套。
+    #[std::prelude::v1::test]
+    fn specs_and_names_share_the_same_filter() {
+        let mut state = McpState::default();
+        state.tools.insert(
+            "on".to_string(),
+            vec![exposed("mcp__on__a", "a"), exposed("mcp__on__b", "b")],
+        );
+        state.tools.insert("off".to_string(), vec![exposed("mcp__off__c", "c")]);
+        let servers = vec![server("on", true, &["b"]), server("off", false, &[])];
+
+        let names = state.available_names(&servers);
+        let specs: Vec<String> = state.specs(&servers).into_iter().map(|spec| spec.name).collect();
+        assert_eq!(names, vec!["mcp__on__a".to_string()]);
+        assert_eq!(specs, names);
+    }
+
+    /// 界面要的是**服务器给的原始名**：暴露名里的哈希是给模型区分撞名用的，
+    /// 设置页里列的是原始名，两边显示成不一样的东西会让人以为调错了工具。
+    #[std::prelude::v1::test]
+    fn locate_recovers_the_raw_name_behind_an_exposed_one() {
+        let mut state = McpState::default();
+        state
+            .tools
+            .insert("srv".to_string(), vec![exposed("mcp__srv__a_b_b2c9276d", "a.b")]);
+
+        let located = state.locate("mcp__srv__a_b_b2c9276d");
+        assert_eq!(
+            located.map(|(server, tool)| (server, tool.raw.as_str())),
+            Some(("srv", "a.b"))
+        );
+        assert!(state.locate("mcp__srv__gone").is_none());
+
+        // 服务器断开或删掉之后再看历史消息：清单里已经查不到了，
+        // `tool_display_name` 会退回去掉前缀的那一段（尽力而为，总比显示全名强）
+        assert_eq!(mcp::display_name("mcp__srv__a_b_b2c9276d"), "a_b_b2c9276d");
+        assert_eq!(mcp::display_name("read_file"), "read_file");
+    }
 }

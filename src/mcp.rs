@@ -162,6 +162,29 @@ pub fn display_name(exposed: &str) -> &str {
     }
 }
 
+/// 模型调了一个 MCP 工具名、但它现在用不了时，回给它的话。
+///
+/// 这是**写给模型看的**，不跟着界面语言走：它要进请求体，跟着变会让同一个会话
+/// 在不同语言下产生不同的请求体，prompt 缓存全失效。
+///
+/// 为什么不能交给本机执行器去回话：那边只列得出本机那 5 个工具，模型拿着那份
+/// 清单会以为 MCP 工具全没了，下一轮就不敢再调了。
+///
+/// 末尾那句「服务器可能被停用或没连上」是必要的：名字拼错和服务器不可用都会走到
+/// 这里，光说「没有这个工具」会让模型一直换名字重试。
+pub fn unknown_tool_message(name: &str, available: &[String]) -> String {
+    let mut message = if available.is_empty() {
+        format!("There is no MCP tool named `{name}`, and no MCP tools are available right now.")
+    } else {
+        format!(
+            "There is no MCP tool named `{name}`. Available MCP tools: {}.",
+            available.join(", ")
+        )
+    };
+    message.push_str(" If the tool you expected is missing, its server may be disabled or not connected.");
+    message
+}
+
 /// 按 `mcp__<服务器>__<工具>` 组名。
 ///
 /// `attempt` 为 0 就是朴素拼接；需要区分开（撞名、或者太长被截过）时用 1、2、3…
@@ -697,5 +720,20 @@ mod tests {
         assert_eq!(strip_ansi("plain"), "plain");
         // 半个序列（被行尾截断）也不能把后面的内容吃掉
         assert_eq!(strip_ansi("\u{1b}[32"), "");
+    }
+
+    #[std::prelude::v1::test]
+    fn an_unknown_mcp_tool_is_told_what_is_available() {
+        let message = unknown_tool_message("mcp__srv__nope", &["mcp__srv__ping".to_string()]);
+        assert!(message.contains("mcp__srv__nope"), "得到 {message}");
+        assert!(message.contains("mcp__srv__ping"), "得到 {message}");
+        // 名字拼错和「服务器被停用/没连上」都会走到这里。不提示后一种可能，
+        // 模型会以为是自己拼错了，然后一直换名字重试
+        assert!(message.contains("disabled or not connected"), "得到 {message}");
+
+        let bare = unknown_tool_message("mcp__srv__nope", &[]);
+        assert!(bare.contains("no MCP tools are available"), "得到 {bare}");
+        // 回给模型的话不跟着界面语言走（它要进请求体，跟着变会让 prompt 缓存失效）
+        assert!(bare.is_ascii());
     }
 }

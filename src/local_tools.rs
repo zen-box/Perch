@@ -361,6 +361,23 @@ pub fn not_executed_result(pending: &PendingTool, reason: &str) -> ToolResult {
     }
 }
 
+/// 上层判定「这条调用不该执行」时，用一句现成的说明包成失败结果。
+///
+/// 和 [`not_executed_result`] 的区别：那条是「本来要跑、但没跑成」（用户点了停止、
+/// 到了轮数上限），内容自带 `Not executed:` 前缀；这条是「压根不认识这个工具名」，
+/// 说明由上层给全（只有上层知道该列本机的清单还是 MCP 的清单）。
+pub fn error_result(pending: &PendingTool, message: String) -> ToolResult {
+    ToolResult {
+        id: pending.id.clone(),
+        name: pending.name.clone(),
+        content: truncate_middle(&message, MAX_RESULT_CHARS),
+        is_error: true,
+        // 没执行过，谈不上耗时和退出码
+        duration_ms: 0,
+        exit_code: None,
+    }
+}
+
 /// 用户拒绝时回传给模型的收尾话术。
 /// 用一句固定的英文而不是界面译文：**它是给模型看的内容，不是给用户看的**，
 /// 和 `llm_request::effective_message_text` 的取向一致；跟着界面语言变反而会让
@@ -972,6 +989,19 @@ mod tests {
         let disabled = disabled_result(&target);
         assert!(disabled.is_error);
         assert!(disabled.content.contains("run_command"));
+    }
+
+    #[test]
+    fn error_results_keep_the_message_and_the_tool_name() {
+        // 上层判定「不该执行」时走这条：说明是上层给全的，这里只负责装配
+        let target = pending("mcp__srv__nope", json!({}));
+        let result = error_result(&target, "There is no MCP tool named `mcp__srv__nope`.".to_string());
+        assert!(result.is_error);
+        assert_eq!(result.name, "mcp__srv__nope");
+        assert!(result.content.contains("no MCP tool named"));
+        // 没执行过，谈不上耗时和退出码
+        assert_eq!(result.duration_ms, 0);
+        assert_eq!(result.exit_code, None);
     }
 
     #[test]

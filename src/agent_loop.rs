@@ -380,6 +380,8 @@ impl AppState {
         // 每条调用走哪条路要在挪进后台任务之前定下来：`route_tool` 要读 `self`，
         // 而 MCP 的连接句柄也得先克隆出来（后台任务只拿得到 `'static` 的东西）
         let routes: Vec<Route> = tools.iter().map(|tool| self.route_tool(&tool.name)).collect();
+        // 「模型调了个用不了的 MCP 工具名」时要拿它列清单。同样得在挪进后台任务之前算好
+        let mcp_tools = self.mcp.available_names(&self.config.mcp_servers);
 
         cx.spawn(async move |this, cx| {
             // 真正干活的在 tokio 运行时里：GPUI 自己的执行器不是 tokio，
@@ -388,7 +390,7 @@ impl AppState {
             // 在 GPUI 这边 await 它没问题。
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             runtime().spawn(async move {
-                let _ = tx.send(run_tool_batch(tools, routes, control).await);
+                let _ = tx.send(run_tool_batch(tools, routes, mcp_tools, control).await);
             });
             // 后台任务整个没了（panic 之类）时不能就这么算了：占位块会永远停在
             // 「正在执行」，界面也一直卡在"忙"上。这时结果为空，`finish_tool_run`
@@ -566,12 +568,26 @@ impl AppState {
 ///
 /// 两条路差别很大，所以分开跑：本机工具是**阻塞**的（读文件、等命令跑完），整批
 /// 丢给后台线程；MCP 调用是异步的，一条条 await——它的瓶颈在对端，占着线程没用。
-async fn run_tool_batch(tools: Vec<PendingTool>, routes: Vec<Route>, control: ExecControl) -> Vec<ToolResult> {
+///
+/// `mcp_tools` 是当前能用的 MCP 工具名，用来给「模型调了个用不了的 MCP 工具名」回话。
+async fn run_tool_batch(
+    tools: Vec<PendingTool>,
+    routes: Vec<Route>,
+    mcp_tools: Vec<String>,
+    control: ExecControl,
+) -> Vec<ToolResult> {
     let mut slots: Vec<Option<ToolResult>> = tools.iter().map(|_| None).collect();
     let mut local: Vec<(usize, PendingTool)> = Vec::new();
     let mut remote: Vec<(usize, PendingTool, Arc<Connection>, String)> = Vec::new();
     for (ix, (tool, route)) in tools.iter().zip(routes).enumerate() {
         match route {
+            // 名字看着是 MCP 的，但这条路只说明「现在用不了」——服务器被停用、没连上、
+            // 或者模型把名字编错了。**不能交给本机执行器**：它只列得出本机那 5 个工具，
+            // 模型拿着那份清单会以为 MCP 工具全没了，下一轮就不敢再调了。
+            Route::Local if mcp::is_mcp_tool(&tool.name) => {
+                let message = mcp::unknown_tool_message(&tool.name, &mcp_tools);
+                slots[ix] = Some(local_tools::error_result(tool, message));
+            }
             Route::Local => local.push((ix, tool.clone())),
             Route::Mcp { connection, raw } => remote.push((ix, tool.clone(), connection, raw)),
         }
