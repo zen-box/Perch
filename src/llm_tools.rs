@@ -192,10 +192,117 @@ pub(crate) fn gemini_tools(tools: &[ToolSpec]) -> Vec<Value> {
             json!({
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                // 只有这一条路径要裁 schema：OpenAI 和 Claude 能读完整 JSON Schema，
+                // 为了迁就 Gemini 把表达力削掉，对另外两个渠道是净损失。
+                "parameters": schema_for_gemini(&tool.parameters),
             })
         })
         .collect()
+}
+
+/// Gemini 的 `functionDeclarations.parameters` 认识的键。
+///
+/// 取自 Gemini API 的 `Schema` 消息（OpenAPI 3.0 Schema 的一个子集）。
+/// `type` / `properties` / `items` / `anyOf` 也在这个集合里，但它们要递归处理，
+/// 所以在 [`schema_for_gemini`] 里单独分支，不列进来。
+const GEMINI_SCHEMA_KEYS: [&str; 18] = [
+    "format",
+    "title",
+    "description",
+    "nullable",
+    "default",
+    "minItems",
+    "maxItems",
+    "enum",
+    "required",
+    "minProperties",
+    "maxProperties",
+    "minimum",
+    "maximum",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "example",
+    "propertyOrdering",
+];
+
+/// 把一份 JSON Schema 裁成 Gemini 认的那部分。
+///
+/// 用**白名单**而不是黑名单：JSON Schema 的关键字有几十个，黑名单永远补不完，
+/// 漏掉一个就是一个 400，而报错只说 "invalid schema"，根本定位不到是哪个键。
+/// MCP 服务器给的 schema 尤其杂——TypeScript 那套 `zod → JSON Schema` 出来的
+/// 东西必带 `$schema` 和 `additionalProperties`，这两个都会让 Gemini 直接拒收。
+///
+/// 代价是丢掉了一些约束（比如 `additionalProperties: false` 表达的"不许传额外字段"），
+/// 但模型多传一个字段，服务器一般会忽略，比整个请求失败好。
+pub(crate) fn schema_for_gemini(schema: &Value) -> Value {
+    let Value::Object(map) = schema else {
+        // 不是对象就不是合法 schema。退回"任意对象"，至少别让请求挂掉。
+        return json!({"type": "object"});
+    };
+    let mut out = serde_json::Map::new();
+    for (key, value) in map {
+        match key.as_str() {
+            // `properties` 的**键**是用户自己的字段名（完全可能就叫 `$schema`），
+            // 只有值是 schema。所以这一层不能整棵子树按关键字过滤，得逐个子树递归。
+            "properties" => {
+                let Value::Object(props) = value else { continue };
+                let cleaned: serde_json::Map<String, Value> = props
+                    .iter()
+                    .map(|(name, sub)| (name.clone(), schema_for_gemini(sub)))
+                    .collect();
+                out.insert(key.clone(), Value::Object(cleaned));
+            }
+            "items" => {
+                out.insert(key.clone(), schema_for_gemini(value));
+            }
+            "anyOf" => {
+                let Value::Array(branches) = value else { continue };
+                out.insert(
+                    key.clone(),
+                    Value::Array(branches.iter().map(schema_for_gemini).collect()),
+                );
+            }
+            "type" => {
+                if let Some((kind, nullable)) = gemini_type(value) {
+                    out.insert("type".to_string(), Value::String(kind));
+                    if nullable {
+                        out.insert("nullable".to_string(), Value::Bool(true));
+                    }
+                }
+            }
+            _ if GEMINI_SCHEMA_KEYS.contains(&key.as_str()) => {
+                out.insert(key.clone(), value.clone());
+            }
+            _ => {}
+        }
+    }
+    // 有 `properties` 却没写 `type` 的 schema 很常见（手写的时候容易漏）。
+    // 对象的结构靠 `properties` 才认得出来，补上比让 Gemini 猜好。
+    if out.contains_key("properties") && !out.contains_key("type") {
+        out.insert("type".to_string(), Value::String("object".to_string()));
+    }
+    Value::Object(out)
+}
+
+/// Gemini 的 `type` 是单个枚举值，而 JSON Schema 允许写成数组——
+/// `zod` 生成的 `.nullable()` 字段经常长成 `["string", "null"]`。
+///
+/// 数组时取第一个非 `null` 的类型，同时把 `nullable` 置上；多种非空类型
+/// （`["string", "number"]`）只留第一种，其余信息会丢——Gemini 表达不了。
+fn gemini_type(value: &Value) -> Option<(String, bool)> {
+    match value {
+        Value::String(kind) => Some((kind.clone(), false)),
+        Value::Array(kinds) => {
+            let nullable = kinds.iter().any(|kind| kind.as_str() == Some("null"));
+            let first = kinds
+                .iter()
+                .filter_map(|kind| kind.as_str())
+                .find(|kind| *kind != "null")?;
+            Some((first.to_string(), nullable))
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn openai_tool_calls(msg: &ChatMessageReq) -> Vec<Value> {
@@ -371,5 +478,102 @@ mod tests {
             arguments: json!({}),
         };
         assert_eq!(tool_call_label(&no_args), "list_sessions");
+    }
+
+    #[test]
+    fn gemini_schema_drops_keys_it_does_not_know() {
+        // 这是 MCP 服务器（zod 那套）最典型的输出，两个多余键都会让 Gemini 400
+        let schema = json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "path": { "type": "string", "description": "路径" } },
+            "required": ["path"]
+        });
+        let cleaned = schema_for_gemini(&schema);
+        assert!(cleaned.get("$schema").is_none(), "得到 {cleaned}");
+        assert!(cleaned.get("additionalProperties").is_none(), "得到 {cleaned}");
+        assert_eq!(cleaned["type"], "object");
+        assert_eq!(cleaned["properties"]["path"]["type"], "string");
+        assert_eq!(cleaned["properties"]["path"]["description"], "路径");
+        assert_eq!(cleaned["required"][0], "path");
+    }
+
+    #[test]
+    fn gemini_schema_keeps_property_names_even_if_they_look_like_keywords() {
+        // 字段名是用户自己的，可能就叫 `$schema`——只过滤关键字，不能连名字一起动
+        let schema = json!({
+            "type": "object",
+            "properties": { "$schema": { "type": "string" } }
+        });
+        let cleaned = schema_for_gemini(&schema);
+        assert_eq!(cleaned["properties"]["$schema"]["type"], "string");
+    }
+
+    #[test]
+    fn gemini_schema_flattens_nullable_type_arrays() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": ["string", "null"] },
+                "count": { "type": ["null", "integer"] }
+            }
+        });
+        let cleaned = schema_for_gemini(&schema);
+        assert_eq!(cleaned["properties"]["path"]["type"], "string");
+        assert_eq!(cleaned["properties"]["path"]["nullable"], true);
+        // 顺序反过来也要挑到那个非 null 的
+        assert_eq!(cleaned["properties"]["count"]["type"], "integer");
+    }
+
+    #[test]
+    fn gemini_schema_recurses_into_items_and_any_of() {
+        let schema = json!({
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true, "properties": {} },
+            "anyOf": [{ "type": "string", "$schema": "x" }]
+        });
+        let cleaned = schema_for_gemini(&schema);
+        assert!(cleaned["items"].get("additionalProperties").is_none());
+        assert!(cleaned["anyOf"][0].get("$schema").is_none());
+        assert_eq!(cleaned["anyOf"][0]["type"], "string");
+    }
+
+    #[test]
+    fn gemini_schema_adds_a_missing_object_type() {
+        // 只写了 properties、忘了 type 的 schema 很常见，补上对象类型
+        let cleaned = schema_for_gemini(&json!({"properties": {"a": {"type": "string"}}}));
+        assert_eq!(cleaned["type"], "object");
+    }
+
+    #[test]
+    fn a_non_object_schema_becomes_an_empty_object_schema() {
+        // 服务器给了个乱七八糟的东西时，宁可退化成"任意对象"，也别让整个请求挂掉
+        assert_eq!(schema_for_gemini(&json!("nope")), json!({"type": "object"}));
+    }
+
+    #[test]
+    fn only_gemini_gets_the_trimmed_schema() {
+        let spec = ToolSpec::new(
+            "mcp__srv__read",
+            "读点什么",
+            json!({"type": "object", "$schema": "x", "properties": {}}),
+        );
+        // OpenAI / Claude 拿到的还是完整 schema，只有 Gemini 那份被裁过
+        assert!(
+            openai_tools(std::slice::from_ref(&spec))[0]["function"]["parameters"]
+                .get("$schema")
+                .is_some()
+        );
+        assert!(
+            claude_tools(std::slice::from_ref(&spec))[0]["input_schema"]
+                .get("$schema")
+                .is_some()
+        );
+        assert!(
+            gemini_tools(std::slice::from_ref(&spec))[0]["parameters"]
+                .get("$schema")
+                .is_none()
+        );
     }
 }
