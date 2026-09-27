@@ -7,6 +7,7 @@ mod empty_state;
 mod error_page;
 mod fetch_models_dialog;
 mod markdown_image;
+mod mcp_editor_dialog;
 mod message_assistant;
 mod message_user;
 mod message_variants;

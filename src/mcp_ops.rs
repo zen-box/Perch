@@ -426,17 +426,21 @@ impl AppState {
     }
 
     /// 把编辑器里的内容存下来。新增和修改走同一条路。
-    pub fn save_mcp_editor(&mut self, cx: &mut Context<Self>) {
+    ///
+    /// 返回**是否真的存下去了**。校验不过、密钥写失败都返回 `false`——调用方（弹窗）
+    /// 靠它决定关不关窗；关掉的话用户刚填的一整页就没了，只能从头再来。
+    /// 配置写盘失败仍然算成功（服务器已经在内存里生效了，用户也收到了提示）。
+    pub fn save_mcp_editor(&mut self, cx: &mut Context<Self>) -> bool {
         let lang = self.language();
         let Some(editor) = self.mcp.editor.as_ref() else {
-            return;
+            return false;
         };
         let name = editor.name.read(cx).value().trim().to_string();
         let command = editor.command.read(cx).value().trim().to_string();
         if name.is_empty() || command.is_empty() {
             self.toast(ToastLevel::Error, tr(lang, Key::McpNameRequired));
             cx.notify();
-            return;
+            return false;
         }
         let args: Vec<String> = editor
             .args
@@ -484,7 +488,7 @@ impl AppState {
                 tr_args(lang, Key::McpSecretFailed, &[&error.to_string()]),
             );
             cx.notify();
-            return;
+            return false;
         }
         match self.config.mcp_servers.iter_mut().find(|slot| slot.id == server.id) {
             Some(slot) => *slot = server,
@@ -502,6 +506,7 @@ impl AppState {
         self.mcp.selected_server_id = Some(id.clone());
         // 存完就按新配置连一次：用户改完命令最想看的就是它能不能起来
         self.connect_mcp_server(&id, cx);
+        true
     }
 
     /// 启用 / 停用一台服务器。停用会把连接断掉（工具也就不再交给模型）。

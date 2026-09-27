@@ -1,10 +1,9 @@
-//! 设置页「MCP 服务器」：服务器列表、详情（工具 + 日志）、添加 / 编辑表单。
+//! 设置页「MCP 服务器」：服务器列表、详情（工具 + 日志）。
 //!
-//! 全部挤在一页里，没有二级弹窗：MCP 服务器的可配置项本来就不多（命令、参数、
-//! 目录、环境变量），一个页内表单比弹窗少一层跳转，改完还能立刻看到连接状态。
+//! 添加 / 编辑的表单是弹窗，见 `mcp_editor_dialog.rs`——它原来是页内展开的，
+//! 展开时会盖住下面选中的那台服务器的工具清单和日志，而那两样正是改命令时最想看的。
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
@@ -13,9 +12,10 @@ use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
 use super::Palette;
-use super::dialogs::{confirm_delete_mcp_server, field};
+use super::dialogs::confirm_delete_mcp_server;
 use super::icon_tile;
-use super::settings::{page, section};
+use super::mcp_editor_dialog::open_mcp_editor_dialog;
+use super::settings::page;
 use crate::app::AppState;
 use crate::config::{McpServerConfig, McpTransport};
 use crate::i18n::{AppLanguage, Key, tr, tr_args};
@@ -56,19 +56,14 @@ pub(super) fn render_mcp(state: &AppState, p: &Palette, cx: &mut Context<AppStat
         );
     }
 
-    if state.mcp.editor.is_some() {
-        content = content.child(render_editor(state, p, lang, cx));
-    }
-
     content = content.child(render_server_list(state, p, lang, cx));
 
-    // 详情只在没在编辑时显示：编辑表单和详情抢同一块地方，同时出现只会让人不知道看哪
-    if state.mcp.editor.is_none()
-        && let Some(server) = state
-            .mcp
-            .selected_server_id
-            .as_ref()
-            .and_then(|id| state.config.mcp_servers.iter().find(|server| &server.id == id))
+    // 编辑现在是弹窗，不会再和详情抢地方，所以选中哪台就一直显示它的详情
+    if let Some(server) = state
+        .mcp
+        .selected_server_id
+        .as_ref()
+        .and_then(|id| state.config.mcp_servers.iter().find(|server| &server.id == id))
     {
         content = content.child(render_detail(state, server, p, lang, cx));
     }
@@ -130,7 +125,10 @@ fn render_server_list(
                         .small()
                         .icon(IconName::Plus)
                         .label(tr(lang, Key::McpAddServer))
-                        .on_click(cx.listener(|this, _, window, cx| this.open_mcp_editor(None, window, cx))),
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_mcp_editor(None, window, cx);
+                            open_mcp_editor_dialog(cx.entity(), window, cx);
+                        })),
                 ),
         )
         .child(
@@ -249,6 +247,7 @@ fn render_server_row(
                         .tooltip(tr(lang, Key::McpEditServer))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_mcp_editor(Some(&edit_id), window, cx);
+                            open_mcp_editor_dialog(cx.entity(), window, cx);
                         })),
                 )
                 .child(
@@ -317,74 +316,6 @@ fn first_line(text: &str, max_chars: usize) -> String {
     }
     let head: String = line.chars().take(max_chars).collect();
     format!("{head}…")
-}
-
-/// 添加 / 编辑表单。
-fn render_editor(state: &AppState, p: &Palette, lang: AppLanguage, cx: &mut Context<AppState>) -> AnyElement {
-    let Some(editor) = state.mcp.editor.as_ref() else {
-        return div().into_any_element();
-    };
-    let title = if editor.editing_id.is_some() {
-        tr(lang, Key::McpEditServer)
-    } else {
-        tr(lang, Key::McpAddServer)
-    };
-    section(
-        title,
-        p,
-        vec![
-            v_flex()
-                .gap_4()
-                .px_4()
-                .py_4()
-                .child(field(tr(lang, Key::McpName), None, Input::new(&editor.name), p))
-                .child(field(
-                    tr(lang, Key::McpCommand),
-                    Some(tr(lang, Key::McpCommandHint)),
-                    Input::new(&editor.command),
-                    p,
-                ))
-                .child(field(
-                    tr(lang, Key::McpArgs),
-                    Some(tr(lang, Key::McpArgsHint)),
-                    Textarea::new(&editor.args),
-                    p,
-                ))
-                .child(field(
-                    tr(lang, Key::McpCwd),
-                    Some(tr(lang, Key::McpCwdHint)),
-                    Input::new(&editor.cwd),
-                    p,
-                ))
-                .child(field(
-                    tr(lang, Key::McpEnv),
-                    Some(tr(lang, Key::McpEnvHint)),
-                    Textarea::new(&editor.env),
-                    p,
-                ))
-                .child(
-                    h_flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("mcp-editor-cancel")
-                                .outline()
-                                .small()
-                                .label(tr(lang, Key::Cancel))
-                                .on_click(cx.listener(|this, _, _, cx| this.close_mcp_editor(cx))),
-                        )
-                        .child(
-                            Button::new("mcp-editor-save")
-                                .primary()
-                                .small()
-                                .label(tr(lang, Key::Save))
-                                .on_click(cx.listener(|this, _, _, cx| this.save_mcp_editor(cx))),
-                        ),
-                )
-                .into_any_element(),
-        ],
-    )
-    .into_any_element()
 }
 
 /// 选中服务器的详情：工具清单 + 运行日志。
