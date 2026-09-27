@@ -115,14 +115,34 @@ impl McpState {
     /// 两个出口（`specs` / `available_names`）共用这一处过滤，免得哪天改了过滤条件
     /// 只改了其中一个——那样「交给模型的清单」和「提示里列的清单」就对不上了。
     fn usable<'a>(&'a self, servers: &'a [McpServerConfig]) -> Vec<&'a ExposedTool> {
-        let mut out = Vec::new();
-        for server in servers.iter().filter(|server| server.enabled) {
-            let Some(tools) = self.tools.get(&server.id) else {
-                continue;
-            };
-            out.extend(tools.iter().filter(|tool| !server.disabled_tools.contains(&tool.raw)));
-        }
-        out
+        self.usable_by_server(servers)
+            .into_iter()
+            .flat_map(|(_, tools)| tools)
+            .collect()
+    }
+
+    /// 同上，但把「属于哪台服务器」也带出来，并按服务器分组。
+    ///
+    /// 会话级的工具选择器要按来源分组显示——用户得知道每个工具是从哪来的，光给一个
+    /// 拍平的名字列表不够。过滤口径与 [`Self::usable`] 完全一致（它就是这份实现派生的），
+    /// 免得出现「选择器里勾得上、实际发不出去」。
+    pub fn usable_by_server<'a>(
+        &'a self,
+        servers: &'a [McpServerConfig],
+    ) -> Vec<(&'a McpServerConfig, Vec<&'a ExposedTool>)> {
+        servers
+            .iter()
+            .filter(|server| server.enabled)
+            .filter_map(|server| {
+                let tools = self.tools.get(&server.id)?;
+                let kept: Vec<&ExposedTool> = tools
+                    .iter()
+                    .filter(|tool| !server.disabled_tools.contains(&tool.raw))
+                    .collect();
+                // 一个工具都没有的服务器不进选择器：空分组只是噪声
+                (!kept.is_empty()).then_some((server, kept))
+            })
+            .collect()
     }
 
     /// 按暴露名找工具：它属于哪台服务器、服务器给的原始定义是什么。

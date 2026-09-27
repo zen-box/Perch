@@ -129,6 +129,47 @@ impl ChatParams {
     }
 }
 
+/// 一个会话要用哪些工具（「本次对话启用的能力集合」）。
+///
+/// **这份状态是唯一的**：composer 上那个 chat / agent 开关只是它的快捷表达——
+/// chat 就是 `enabled = false`，agent 就是「带上 `picked` 里勾的那些」。
+/// 分成两份状态迟早会出现「模式说 chat、工具清单却还在发」这种自相矛盾。
+///
+/// ⚠️ 新会话和旧数据都是 `ChatSession::tools == None`，按 **chat** 处理（一个工具都不带）。
+/// 工具调用是有副作用的操作，默认不开比默认开安全；要用的用户在输入框上切一下就行。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SessionTools {
+    /// agent 模式：把工具清单交给模型。`false`（chat）时 `picked` 整个忽略。
+    #[serde(default)]
+    pub enabled: bool,
+    /// 勾上的工具名。本机工具就是它自己的名字，MCP 工具是**暴露名**
+    /// （`mcp__<服务器 id>__<工具>`）。
+    ///
+    /// `None` = 当前能用的全带（默认）。用户动过一次选择器之后才变成显式白名单。
+    /// 存名字不存下标：服务器顺序变了、或者某台服务器被删了，名字都还能对上，
+    /// 对不上的在组装清单时按「当前实际存在的工具」过滤掉就行，不用做迁移。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picked: Option<Vec<String>>,
+}
+
+impl SessionTools {
+    /// agent 模式、且不做任何收窄。
+    pub fn all() -> Self {
+        Self {
+            enabled: true,
+            picked: None,
+        }
+    }
+
+    /// 这个工具名要不要带。
+    pub fn wants(&self, name: &str) -> bool {
+        match &self.picked {
+            None => true,
+            Some(picked) => picked.iter().any(|item| item == name),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ResolvedParams {
     pub system_prompt: String,
@@ -508,6 +549,10 @@ pub struct ChatSession {
     pub title_auto: bool,
     #[serde(default)]
     pub params: Option<ChatParams>,
+    /// 这个会话要用哪些工具。`None`（新会话、旧数据）= **chat 模式**，一个工具都不带。
+    /// 见 [`SessionTools`]。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<SessionTools>,
 }
 
 impl ChatSession {
@@ -526,6 +571,25 @@ impl ChatSession {
             favorite: false,
             title_auto: true,
             params: None,
+            tools: None,
+        }
+    }
+
+    /// 这个会话现在是不是 agent 模式（会把工具清单交给模型）。
+    ///
+    /// 这只是「第一道闸」：全局的「本地工具」总开关和模型的 `Capability::Tools`
+    /// 各自还有一道，三处都过了才真的带工具，见 `reply_ops::tool_list_for`。
+    pub fn tools_enabled(&self) -> bool {
+        self.tools.as_ref().is_some_and(|tools| tools.enabled)
+    }
+
+    /// 这个工具名在这个会话里要不要带。
+    ///
+    /// 没设过（`None`）＝ 全带；chat 模式下一个都不带。
+    pub fn wants_tool(&self, name: &str) -> bool {
+        match &self.tools {
+            Some(tools) if tools.enabled => tools.wants(name),
+            _ => false,
         }
     }
 
@@ -1133,5 +1197,60 @@ mod tests {
             .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn sessions_without_tool_state_stay_chat() {
+        // 新会话（`tools == None`）是 chat：一个工具都不带。旧数据反序列化出来也是 `None`。
+        let session = ChatSession::new("t".into(), "f".into(), "m".into(), "p".into());
+        assert!(!session.tools_enabled());
+        assert!(!session.wants_tool("read_file"));
+
+        // 没有工具状态的会话，落盘时不该多出 `tools` 字段——否则所有老存档都会被改写一遍。
+        let json = serde_json::to_value(&session).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("tools"));
+    }
+
+    #[test]
+    fn session_tools_round_trip() {
+        let mut session = ChatSession::new("t".into(), "f".into(), "m".into(), "p".into());
+
+        // agent 模式、不做收窄：`picked` 是 `None`，序列化时省掉。
+        session.tools = Some(SessionTools::all());
+        let json = serde_json::to_string(&session).unwrap();
+        assert!(!json.contains("picked"), "全带时不写 picked");
+        let back: ChatSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tools, Some(SessionTools::all()));
+        assert!(back.tools_enabled());
+        assert!(back.wants_tool("anything"), "没动过选择器就全带");
+
+        // 动过选择器：白名单生效，没勾的不带。
+        session.tools = Some(SessionTools {
+            enabled: true,
+            picked: Some(vec!["read_file".into()]),
+        });
+        let json = serde_json::to_string(&session).unwrap();
+        let back: ChatSession = serde_json::from_str(&json).unwrap();
+        assert!(back.wants_tool("read_file"));
+        assert!(!back.wants_tool("write_file"));
+    }
+
+    #[test]
+    fn tool_state_survives_a_sqlite_round_trip() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("chats.db");
+        let legacy_path = dir.path().join("missing.json");
+        let mut data = StorageData::open(&db_path, &legacy_path).unwrap();
+        data.sessions[0].tools = Some(SessionTools {
+            enabled: true,
+            picked: Some(vec!["read_file".into()]),
+        });
+        data.save().unwrap();
+        drop(data);
+
+        let data = StorageData::open(&db_path, &legacy_path).unwrap();
+        assert!(data.sessions[0].tools_enabled());
+        assert!(data.sessions[0].wants_tool("read_file"));
+        assert!(!data.sessions[0].wants_tool("write_file"));
     }
 }

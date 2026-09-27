@@ -101,7 +101,10 @@ impl AppState {
     }
 
     /// 某个模型最终生效的能力：用户设置优先，没设置就按模型 ID 识别。
-    fn model_capabilities(&self, provider_id: &str, model_id: &str) -> Vec<Capability> {
+    ///
+    /// 附件闸门和会话级工具选择（`tool_ops.rs`）都走这里——两处都得知道「这个模型
+    /// 到底行不行」，各写一份迟早会不一致。
+    pub(crate) fn model_capabilities(&self, provider_id: &str, model_id: &str) -> Vec<Capability> {
         match self.resolve_model(provider_id, model_id) {
             Some((_, model)) => model.effective_capabilities(),
             // 配置里查不到（模型刚被删掉之类）时退回按名字猜：发送前的检查既不该

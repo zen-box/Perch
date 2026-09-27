@@ -37,6 +37,7 @@ mod session_list_ops;
 mod session_ops;
 mod storage;
 mod theme;
+mod tool_ops;
 mod ui;
 
 use app::AppState;

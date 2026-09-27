@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use rusqlite::{Connection, params};
 
-use crate::model::{ChatMessage, ChatParams, ChatSession};
+use crate::model::{ChatMessage, ChatParams, ChatSession, SessionTools};
 
 pub type StorageResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -42,11 +42,12 @@ impl Database {
         let mut sessions = Vec::new();
         let mut stmt = self.connection.prepare(
             "SELECT id, title, folder, model, provider_id, created_at, updated_at,
-                    pinned, favorite, title_auto, params
+                    pinned, favorite, title_auto, params, tools
              FROM sessions ORDER BY position, rowid",
         )?;
         let rows = stmt.query_map([], |row| {
             let params_json: String = row.get(10)?;
+            let tools_json: String = row.get(11)?;
             Ok((
                 ChatSession {
                     id: row.get(0)?,
@@ -61,14 +62,20 @@ impl Database {
                     favorite: row.get::<_, i64>(8)? != 0,
                     title_auto: row.get::<_, i64>(9)? != 0,
                     params: None,
+                    tools: None,
                 },
                 params_json,
+                tools_json,
             ))
         })?;
         for row in rows {
-            let (mut session, params_json) = row?;
+            let (mut session, params_json, tools_json) = row?;
             if !params_json.is_empty() {
                 session.params = Some(serde_json::from_str::<ChatParams>(&params_json)?);
+            }
+            // 空串 = 没设过 = chat 模式（见 `SessionTools`），不写进数据免得每个会话都多一段
+            if !tools_json.is_empty() {
+                session.tools = Some(serde_json::from_str::<SessionTools>(&tools_json)?);
             }
             sessions.push(session);
         }
@@ -113,19 +120,24 @@ impl Database {
                     Some(params) => serde_json::to_string(params)?,
                     None => String::new(),
                 };
+                let tools_json = match &session.tools {
+                    Some(tools) => serde_json::to_string(tools)?,
+                    None => String::new(),
+                };
                 transaction.execute(
                     "INSERT INTO sessions (
                         id, title, folder, model, provider_id, created_at, updated_at, position,
-                        pinned, favorite, title_auto, params
+                        pinned, favorite, title_auto, params, tools
                      )
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                      ON CONFLICT(id) DO UPDATE SET
                          title = excluded.title, folder = excluded.folder,
                          model = excluded.model, provider_id = excluded.provider_id,
                          created_at = excluded.created_at,
                          updated_at = excluded.updated_at, position = excluded.position,
                          pinned = excluded.pinned, favorite = excluded.favorite,
-                         title_auto = excluded.title_auto, params = excluded.params",
+                         title_auto = excluded.title_auto, params = excluded.params,
+                         tools = excluded.tools",
                     params![
                         session.id,
                         session.title,
@@ -138,7 +150,8 @@ impl Database {
                         session.pinned as i64,
                         session.favorite as i64,
                         session.title_auto as i64,
-                        params_json
+                        params_json,
+                        tools_json
                     ],
                 )?;
             }
@@ -213,7 +226,7 @@ impl Database {
 
 fn migrate(connection: &Connection) -> StorageResult<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 3 {
+    if version > 4 {
         return Err(format!("Unsupported database version: {version}").into());
     }
     if version == 0 {
@@ -235,7 +248,8 @@ fn migrate(connection: &Connection) -> StorageResult<()> {
                  pinned INTEGER NOT NULL DEFAULT 0,
                  favorite INTEGER NOT NULL DEFAULT 0,
                  title_auto INTEGER NOT NULL DEFAULT 0,
-                 params TEXT NOT NULL DEFAULT ''
+                 params TEXT NOT NULL DEFAULT '',
+                 tools TEXT NOT NULL DEFAULT ''
              );
              CREATE TABLE IF NOT EXISTS messages (
                  id TEXT PRIMARY KEY,
@@ -246,7 +260,7 @@ fn migrate(connection: &Connection) -> StorageResult<()> {
              );
              CREATE INDEX IF NOT EXISTS messages_session_order
                  ON messages(session_id, position);
-             PRAGMA user_version = 3;
+             PRAGMA user_version = 4;
              COMMIT;",
         )?;
         return Ok(());
@@ -268,6 +282,16 @@ fn migrate(connection: &Connection) -> StorageResult<()> {
              COMMIT;",
         )?;
     }
+    if version < 4 {
+        // 空串 = 没设过 = chat 模式。老会话升级上来一律是 chat，
+        // 也就是「升级后不会突然自己调工具」——工具调用有副作用，默认不开更安全
+        connection.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN tools TEXT NOT NULL DEFAULT '';
+             PRAGMA user_version = 4;
+             COMMIT;",
+        )?;
+    }
     Ok(())
 }
 
@@ -283,6 +307,7 @@ fn session_signature(session: &ChatSession, position: usize) -> StorageResult<St
         &session.favorite,
         &session.title_auto,
         &session.params,
+        &session.tools,
         position,
     ))?)
 }
@@ -325,11 +350,14 @@ mod tests {
         assert_eq!(sessions[0].id, "session-1");
         assert!(sessions[0].provider_id.is_empty());
         assert!(!sessions[0].pinned);
+        // 老库升级上来的会话没设过工具，一律按 chat 处理（不会突然自己调工具）
+        assert!(sessions[0].tools.is_none());
+        assert!(!sessions[0].tools_enabled());
         let version: i64 = database
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]

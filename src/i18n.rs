@@ -608,6 +608,15 @@ i18n! {
     DeleteFailed => { "删除失败: {}", "Failed to delete: {}", "削除に失敗しました: {}", "刪除失敗: {}" },
     DefaultPresetName => { "通用助手", "General assistant", "汎用アシスタント", "通用助手" },
     PresetExplainCodeTemplate => { "请逐段解释下面这段代码：\n{{selection}}", "Please explain the following code section by section:\n{{selection}}", "以下のコードを順を追って解説してください：\n{{selection}}", "請逐段解釋下面這段程式碼：\n{{selection}}" },
+
+    // ---- 会话级工具选择（composer 上的模式开关与工具选择器）----
+    AgentMode => { "智能体", "Agent", "エージェント", "智能體" },
+    SessionTools => { "本次对话的工具", "Tools for this chat", "この会話のツール", "本次對話的工具" },
+    SelectAllTools => { "全选", "Select all", "すべて選択", "全選" },
+    ClearAllTools => { "全不选", "Select none", "すべて解除", "全不選" },
+    SessionToolsChatHint => { "当前是对话模式，工具不会启用。切到「智能体」后，下面勾选的工具才会生效。", "This chat is in Chat mode, so no tools are offered. Switch to Agent and the tools checked below take effect.", "現在はチャットモードのためツールは使われません。「エージェント」に切り替えると、以下で選択したツールが有効になります。", "目前是對話模式，工具不會啟用。切到「智能體」後，下面勾選的工具才會生效。" },
+    SessionToolsEmpty => { "还没有可用的工具。到设置里打开「本地工具」，或者添加一台 MCP 服务器。", "No tools available yet. Turn on “Local tools” in Settings, or add an MCP server.", "利用できるツールがまだありません。設定で「ローカルツール」を有効にするか、MCP サーバーを追加してください。", "還沒有可用的工具。到設定裡開啟「本機工具」，或新增一台 MCP 伺服器。" },
+    SessionToolsModelHint => { "当前模型不支持「工具调用」，勾了也不会生效。", "The current model does not support tool use, so nothing here will take effect.", "現在のモデルはツール呼び出しに対応していないため、選択しても効果がありません。", "目前模型不支援「工具呼叫」，勾了也不會生效。" },
 }
 
 /// 按顺序替换文案里的 `{}` 占位符。

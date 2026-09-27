@@ -198,7 +198,9 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                 )
                                 .child(model_picker::render_model_picker(state, p, cx))
                                 .child(super::params::render_params_button(lang, cx))
-                                .child(super::params::render_compare_button(state, cx)),
+                                .child(super::params::render_compare_button(state, cx))
+                                .child(super::tool_picker::render_mode_switch(state, p, cx))
+                                .child(super::tool_picker::render_tool_picker(state, cx)),
                         )
                         .child(if is_streaming {
                             Button::new("stop")

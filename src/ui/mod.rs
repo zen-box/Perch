@@ -20,6 +20,7 @@ mod settings_misc;
 mod settings_prompts;
 mod settings_providers;
 mod sidebar;
+mod tool_picker;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
