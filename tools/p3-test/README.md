@@ -22,7 +22,8 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
 | `cwd/` | 隔离的工作目录（一个带 `.env` 的假项目），给工具调用当靶子。`.env` 是特意放的——用来验证敏感路径会不会被拦 |
 | `mock-config.json` | P3-2 那轮的 `perch-config.json`：渠道指向 mock 服务、开了本地工具、超时 600 秒。**故意不叫 `perch-config.json`**——仓库根 `.gitignore` 有一条 `perch-*.json`（防真实配置带密钥被提交），改名是为了不跟那条规则打架 |
 | `mock-config-mcp.json` | P3-3 那轮的配置：在上一份基础上加了 4 台 MCP 服务器（两台能连、一台命令不存在、一台停用），并给演示服务器配了 `disabled_tools: ["spam"]` |
-| `shots/` | 实测留下的截图。`A`~`H` 是 P3-2 主流程，`v1`~`v8` 是 P3-2 收尾，`m1`~`m12` 是 P3-3，`m13`~`m15` 是 P3-3 三处界面缺陷的修复验证 |
+| `mock-config-real-mcp.json` | **给用户照抄的样例**：三台真实可用的 npx 服务器（文件系统 / 顺序思考 / 记忆图谱）。渠道仍然指向 `mock.py`，所以模型侧不真跑，只用来验证「能不能连上、工具清单对不对」 |
+| `shots/` | 实测留下的截图。`A`~`H` 是 P3-2 主流程，`v1`~`v8` 是 P3-2 收尾，`m1`~`m12` 是 P3-3，`m13`~`m15` 是 P3-3 三处界面缺陷的修复验证，`m16`~`m18` 是真实 MCP 服务器接入验证 |
 
 ## 怎么跑
 
@@ -123,8 +124,17 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
   `Not executed: this tool call was interrupted before it ran.`（占位块的初始文案）。
   看起来像 Agent 循环坏了，其实只是 id 撞了。**换一个「新对话」再测**（或先删掉旧会话）。
   真实环境不会撞：调用 id 由服务方保证唯一。
-- ⚠️ **mock 的调用计数器重启就归零**，所以两次运行之间的 `mcp_calls.jsonl` 编号会重叠，
-  跨运行比对时看 `tool` 字段，别看编号。
+- **跨运行比对 `mcp_calls.jsonl` 时看 `tool` 字段，别看 `call_N` 编号**——编号每次重启都从 1 开始。
+- ⚠️ **PATH 里同名的「无后缀脚本」会让 spawn 报 os error 193。** Node 的 Windows 发行版
+  在 `npx.cmd` 旁边还放了一个**无后缀的 `npx`**（给 Git Bash 用的 shell 脚本），
+  `npm` / `pnpm` 也一样。Windows 执行不了没有扩展名的文件，所以按 PATH 找可执行文件时
+  **不能把无后缀的名字算进去**（`mcp.rs::find_in_path`，已修）。踩到时的报错是
+  `%1 不是有效的 Win32 应用程序。(os error 193)`，里面只有路径，看不出是「选错了同名的
+  另一个文件」——症状见 `shots/m16-npx-not-win32.png`。
+- **别从 agent 的 shell 里 `git push` 或长时间跑东西**：agent 的 PATH 前面挂着一串托管
+  运行时的目录（`~/.workbuddy-ai/binaries/...`），跟用户真实启动进程时的 PATH 不一样。
+  验证「用户会看到什么」时要用 `Win32_ProcessStartup.EnvironmentVariables` 把 `Path`
+  显式设成 `机器级 PATH + ";" + 用户级 PATH`。
 - **`python` 在 PATH 上可能解析到 Microsoft Store 的别名**
   （`AppData\Local\Microsoft\WindowsApps\python.exe`），它会再起一层真正的 python。
   所以 MCP 服务器的进程树是两层——正好用来验证按 pid 收整棵树有没有做对。
@@ -139,5 +149,8 @@ P3-2（Agent 循环）和 P3-3（MCP）都是用这套东西实测的，不是�
 - P3-3 三处界面缺陷的修复验证：`m13-approval-mcp-hint.png`（授权卡片改成 MCP 文案）、
   `m14-raw-names.png`（结果卡片显示服务器原始名 `a.b` / `a_b`）、
   `m15-unknown-mcp-tool.png`（不存在的 MCP 工具名回 MCP 侧清单，而不是本机那 5 个）。
+- 真实 MCP 服务器接入：`m16-npx-not-win32.png`（修复前的报错）、
+  `m17-real-mcp-connected.png`（三台全连上：文件系统 14 / 顺序思考 1 / 记忆图谱 9 个工具）、
+  `m18-real-mcp-tools.png`（文件系统的工具清单）。
 
 本文只讲怎么把环境跑起来。

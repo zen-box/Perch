@@ -515,10 +515,20 @@ fn resolve_program(command: &str) -> String {
 
 #[cfg(target_os = "windows")]
 fn find_in_path(program: &str) -> Option<String> {
-    // 顺序照 Windows 自己的来：先看没后缀的，再按 PATHEXT 里最常见的几种
-    const EXTS: [&str; 4] = ["", ".exe", ".cmd", ".bat"];
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
+    find_in_path_in(program, &std::env::var_os("PATH")?)
+}
+
+/// [`find_in_path`] 的实体，PATH 由调用方给——测试要能自己摆一个目录出来。
+#[cfg(target_os = "windows")]
+fn find_in_path_in(program: &str, path: &std::ffi::OsStr) -> Option<String> {
+    // **不能试无后缀的名字**：Windows 执行不了一个没有扩展名的文件，而 Node 的 Windows
+    // 发行版里 `npx` / `npm` 都同时有一个无后缀的 shell 脚本（给 Git Bash 用的）和一个
+    // `npx.cmd`。先命中那个脚本的话，spawn 会报 `%1 不是有效的 Win32 应用程序 (os error 193)`，
+    // 而报错里显示的是路径，看不出是「选错了同名的另一个文件」。
+    //
+    // 顺序按 PATHEXT 里最常见的几种来，`.exe` 在 `.cmd` 前面。
+    const EXTS: [&str; 3] = [".exe", ".cmd", ".bat"];
+    for dir in std::env::split_paths(path) {
         if dir.as_os_str().is_empty() {
             continue;
         }
@@ -735,5 +745,30 @@ mod tests {
         assert!(bare.contains("no MCP tools are available"), "得到 {bare}");
         // 回给模型的话不跟着界面语言走（它要进请求体，跟着变会让 prompt 缓存失效）
         assert!(bare.is_ascii());
+    }
+
+    /// Node 的 Windows 发行版里 `npx` 有两个同名文件：一个无后缀的 shell 脚本（给 Git Bash
+    /// 用的）和一个 `npx.cmd`。挑到前者的话 spawn 会报
+    /// `%1 不是有效的 Win32 应用程序 (os error 193)`——这个报错里只有路径，
+    /// 看不出是「选错了同名的另一个文件」，实测踩过一次。
+    #[cfg(target_os = "windows")]
+    #[std::prelude::v1::test]
+    fn an_extensionless_shim_is_not_mistaken_for_the_program() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("npx"), "#!/bin/sh\nexec node npx.js\n").unwrap();
+        std::fs::write(dir.path().join("npx.cmd"), "@echo off\r\n").unwrap();
+        let path = std::env::join_paths([dir.path()]).unwrap();
+
+        let found = find_in_path_in("npx", &path);
+        assert!(
+            found.as_deref().is_some_and(|found| found.ends_with("npx.cmd")),
+            "得到 {found:?}"
+        );
+
+        // 目录里只有那个脚本时不能拿它凑数：找不到就原样返回，让 spawn 去报错
+        let bare = tempfile::tempdir().unwrap();
+        std::fs::write(bare.path().join("npx"), "#!/bin/sh\n").unwrap();
+        let bare_path = std::env::join_paths([bare.path()]).unwrap();
+        assert_eq!(find_in_path_in("npx", &bare_path), None);
     }
 }
