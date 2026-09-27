@@ -62,14 +62,12 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 界面层   ui/*                              画界面，把用户操作转成 AppState 方法调用
   ↓
 应用层   app.rs、*_ops.rs                   AppState：状态、业务流程、后台任务、提示
+         （含 agent_loop.rs）
   ↓
 服务层   llm.rs、llm_request.rs、          与外部通信、系统能力
          llm_stream.rs、llm_tools.rs、
          provider_api.rs、
          image_http.rs、models_dev.rs、agent.rs
-  ↓
-应用层   app.rs、*_ops.rs                   AppState：状态、业务流程、后台任务、提示
-         （含 agent_loop.rs）
   ↓
 数据层   config.rs、model.rs、storage.rs、   数据结构、持久化、纯计算
          prompts.rs、backup.rs、paths.rs、
@@ -470,7 +468,6 @@ cx.spawn(async move |this, cx| {
 | 5 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
 | 6 | 重复的小组件：`section` 和 `form_card`（几乎逐行相同）、`labeled` 和 `row_title`（都是"标题+说明"） | `ui/settings.rs`、`ui/model_editor_dialog.rs`、`ui/params.rs` | 合并到 `ui/widgets.rs`。⚠️ 本条目原先还列了 `filter_chip` 和 `chip`，**2026-09-26 核实为错判**——前者是 `Button`、后者是手绘 `Div`，视觉与交互都不同，不该合并 |
 | 7 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
-| 8 | 工具执行仍同步跑在界面线程上，慢命令会冻住窗口 | `local_tools.rs`（`execute`） | 异步化要先定"占位消息怎么渲染、取消按钮放哪"，放 P4 |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
 
@@ -487,7 +484,10 @@ cx.spawn(async move |this, cx| {
 > `app.rs::execute_agent_tool` 拆成 `approve_pending_tool` / `run_agent_tool` /
 > `push_tool_result` / `continue_agent`（循环在 `agent_loop.rs`）。
 > 删除后原 #5~#9 顺次上移为 #4~#8。
-> ⚠️ **但"异步"这半没做完**：执行仍在界面线程上，已作为新 #8 记进来。
+> **异步那半随后（2026-09-27）也做完了**：`start_tool_run` 先插占位消息，
+> 再用 `cx.spawn` + `runtime().spawn_blocking` 把执行挪出界面线程，
+> `ExecControl` 带超时与取消（「停止」会结束进程树）。故上面那张表里
+> 不再保留"工具执行仍同步"这一条。
 >
 > ⚠️ 同一批还改正了一个**文档与代码不符**处：本表原文说 Responses「请求体走 `input`」，
 > 实际 `openai_body()` 对 Responses 渠道发的仍是 `messages`。**请求侧还是不对**，
