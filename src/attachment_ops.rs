@@ -17,9 +17,80 @@ use crate::model_info::{self, Capability};
 /// Word / Excel / PPT 不在里面：它们不会进请求体，入口直接拒收（见 [`refusal_by_type`]）。
 const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp"];
 const PDF_EXTS: &[&str] = &["pdf"];
+/// 文本与代码。
+///
+/// ⚠️ **这张表要尽量全**：列表里没有的扩展名，从界面上就选不到了（用户只能改名或者
+/// 把内容粘进来）。以前这里只有十来个，另有一个「所有文件 (*.*)」兜底——但那等于把
+/// 「选完才被拒」重新放回来（用户能从通配里点一张图片，导入时才被拦下）。现在兜底项
+/// 去掉，改成把常见格式补进这张表。`log` 是最常见的一种附件，别漏。
 const TEXT_EXTS: &[&str] = &[
-    "txt", "md", "json", "rs", "py", "js", "ts", "c", "cpp", "go", "java", "sql", "sh", "yaml", "yml", "toml", "xml",
+    // 文本与配置
+    "txt",
+    "md",
+    "log",
     "csv",
+    "tsv",
+    "json",
+    "jsonl",
+    "yaml",
+    "yml",
+    "toml",
+    "ini",
+    "conf",
+    "cfg",
+    "env",
+    "properties",
+    "xml",
+    "html",
+    "htm",
+    "css",
+    "scss",
+    "less",
+    "sql",
+    // 代码
+    "rs",
+    "py",
+    "js",
+    "mjs",
+    "cjs",
+    "jsx",
+    "ts",
+    "tsx",
+    "vue",
+    "svelte",
+    "go",
+    "java",
+    "kt",
+    "kts",
+    "swift",
+    "dart",
+    "c",
+    "h",
+    "cpp",
+    "hpp",
+    "cc",
+    "cs",
+    "rb",
+    "php",
+    "pl",
+    "lua",
+    "r",
+    "scala",
+    "clj",
+    "ex",
+    "exs",
+    "erl",
+    "hs",
+    "fs",
+    "sh",
+    "bash",
+    "zsh",
+    "ps1",
+    "bat",
+    "cmd",
+    "tf",
+    "proto",
+    "gradle",
 ];
 
 /// 这批附件要求目标模型具备哪些能力。
@@ -51,9 +122,9 @@ pub(crate) fn required_capabilities(attachments: &[Attachment]) -> Vec<Capabilit
 
 /// 附件菜单里的一项，同时也是文件对话框过滤器的一组。
 ///
-/// 菜单按类型分项、而不是一个「添加附件」直接开对话框：模型接不住哪一类，菜单里那一项
-/// 就灰掉并写明原因。合成一个过滤器的话，纯文本模型下照样能选到图片，**选完才被
-/// [`refusal_by_type`] 拒掉**——白跑一趟，用户还不知道自己错在哪。
+/// 菜单按类型分项，而且**只摆当前模型收得下的那几项**：接不住的类型干脆不出现。
+/// 灰着摆出来既占地方，又让人以为「点一下也许能行」；合成一个「所有文件」也不行——
+/// 用户照样能选到图片，**选完才被 [`refusal_by_type`] 拒掉**，白跑一趟。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum AttachmentFilter {
     /// 图片与截图，要模型有 `Vision`
@@ -62,18 +133,15 @@ pub(crate) enum AttachmentFilter {
     Documents,
     /// 文本与代码，拼进正文，任何模型都收
     TextCode,
-    /// 兜底：不在上面三组里的扩展名（`.log`、`.ini`……）
-    AllFiles,
 }
 
-/// 附件菜单里的顺序：先摆最常用的图片，再是 PDF、文本与代码，最后才是兜底的「所有文件」。
+/// 附件菜单里的顺序：先摆最常用的图片，再是 PDF、文本与代码。
 ///
-/// 顺序只写一份，改菜单就是改这里——不然界面上的顺序和别处（比如文档、测试）各说各话。
-pub(crate) const ATTACHMENT_FILTERS: [AttachmentFilter; 4] = [
+/// 顺序只写一份，改菜单就是改这里——不然界面上的顺序和别处（比如测试）各说各话。
+pub(crate) const ATTACHMENT_FILTERS: [AttachmentFilter; 3] = [
     AttachmentFilter::Images,
     AttachmentFilter::Documents,
     AttachmentFilter::TextCode,
-    AttachmentFilter::AllFiles,
 ];
 
 impl AttachmentFilter {
@@ -87,7 +155,6 @@ impl AttachmentFilter {
                 Self::Images => Key::FilterImages,
                 Self::Documents => Key::FilterDocuments,
                 Self::TextCode => Key::FilterTextCode,
-                Self::AllFiles => Key::FilterAllFiles,
             },
         )
     }
@@ -95,35 +162,30 @@ impl AttachmentFilter {
     /// 这一类要求模型具备的能力；`None` 表示任何模型都收。
     ///
     /// 只有图片和 PDF 算——文本与代码会被拼进消息正文（`llm_request::effective_message_text`），
-    /// 拿能力去卡它们是错的。「所有文件」是兜底项，灰掉它等于把没列出来的文本扩展名一起封死。
+    /// 拿能力去卡它们是错的。
     pub(crate) fn requires(self) -> Option<Capability> {
         match self {
             Self::Images => Some(Capability::Vision),
             Self::Documents => Some(Capability::Files),
-            Self::TextCode | Self::AllFiles => None,
+            Self::TextCode => None,
         }
     }
 
-    /// 菜单项前面的图标。四类各一个，扫一眼就知道哪一项是哪一类。
+    /// 当前这批模型收不收这一类。菜单只摆收得下的项。
+    pub(crate) fn allowed(self, gate: &AttachmentGate) -> bool {
+        match self.requires() {
+            Some(capability) => gate.missing(capability).is_none(),
+            None => true,
+        }
+    }
+
+    /// 菜单项前面的图标。三类各一个，扫一眼就知道哪一项是哪一类。
     pub(crate) fn icon(self) -> IconName {
         match self {
             Self::Images => IconName::Image,
             Self::Documents => IconName::FileText,
             Self::TextCode => IconName::FileCode,
-            Self::AllFiles => IconName::FolderOpen,
         }
-    }
-
-    /// 模型接不住这一类时，菜单项上的文案：点名是哪个模型、缺哪一项。
-    ///
-    /// `None` = 这一项永远可用（文本与代码、所有文件）。
-    pub(crate) fn unavailable_label(self, model: &str, lang: AppLanguage) -> Option<String> {
-        let key = match self {
-            Self::Images => Key::AttachImagesUnavailable,
-            Self::Documents => Key::AttachPdfUnavailable,
-            Self::TextCode | Self::AllFiles => return None,
-        };
-        Some(tr_args(lang, key, &[model]))
     }
 
     /// 开文件对话框时摆的扩展名。
@@ -132,8 +194,6 @@ impl AttachmentFilter {
             Self::Images => IMAGE_EXTS.to_vec(),
             Self::Documents => PDF_EXTS.to_vec(),
             Self::TextCode => TEXT_EXTS.to_vec(),
-            // 没列出来的扩展名（`.log`、`.vue`……）从这儿选；是不是能收由内容决定
-            Self::AllFiles => vec!["*"],
         }
     }
 }
@@ -669,36 +729,50 @@ mod tests {
         );
     }
 
-    /// 附件菜单按类型分项：模型缺哪项能力，菜单里那一项就灰掉并写明原因。
+    /// 附件菜单**只摆当前模型收得下的项**：接不住的类型根本不出现。
     ///
-    /// 这不是锦上添花——菜单项可用与否**必须**和 [`refusal_by_type`] 的判断一致，否则又回到
+    /// 这不是锦上添花——菜单里摆什么**必须**和 [`refusal_by_type`] 的判断一致，否则又回到
     /// 「选完才被拒」的老路上：用户点开菜单、选了一张 .png、等导入跑完，才收到一条拒收提示。
+    /// 灰显也不行：灰项看着像「点一下也许能行」，而且每多一行就把菜单撑长一点。
     #[std::prelude::v1::test]
-    fn the_attachment_menu_greys_out_what_the_model_cannot_take() {
-        let lang = AppLanguage::ZhCn;
-        let name = "DeepSeek V4 Flash";
-
+    fn the_attachment_menu_only_lists_what_the_models_can_take() {
         // 图片要 Vision、PDF 要 Files
         assert_eq!(AttachmentFilter::Images.requires(), Some(Capability::Vision));
         assert_eq!(AttachmentFilter::Documents.requires(), Some(Capability::Files));
 
-        // 灰掉的那两项要把模型名点出来，用户才知道该换谁
-        let reason = AttachmentFilter::Images
-            .unavailable_label(name, lang)
-            .expect("图片项要写明原因");
-        assert!(reason.contains(name), "灰掉的原因里要点名模型：{reason}");
-        assert!(AttachmentFilter::Documents.unavailable_label(name, lang).is_some());
+        // 纯文本模型：菜单里只剩「文本与代码」
+        let text_only = gate(Some("DeepSeek V4 Flash"), Some("DeepSeek V4 Flash"));
+        let listed: Vec<AttachmentFilter> = ATTACHMENT_FILTERS
+            .into_iter()
+            .filter(|filter| filter.allowed(&text_only))
+            .collect();
+        assert_eq!(listed, vec![AttachmentFilter::TextCode]);
 
-        // 文本与代码、所有文件**永远可用**：前者会被拼进消息正文，任何模型都读得了；
-        // 后者是兜底，灰掉它等于把没列出来的文本扩展名（.log、.vue……）一起封死
-        for filter in [AttachmentFilter::TextCode, AttachmentFilter::AllFiles] {
-            assert_eq!(filter.requires(), None, "{filter:?} 不该拿能力卡人");
-            assert!(filter.unavailable_label(name, lang).is_none());
+        // 看得懂图片但读不了 PDF：图片留着，PDF 不摆
+        let vision_only = gate(None, Some("DeepSeek V4 Flash"));
+        assert!(AttachmentFilter::Images.allowed(&vision_only));
+        assert!(!AttachmentFilter::Documents.allowed(&vision_only));
+
+        // 能力齐全：三项都在
+        let full = AttachmentGate::default();
+        let listed: Vec<AttachmentFilter> = ATTACHMENT_FILTERS
+            .into_iter()
+            .filter(|filter| filter.allowed(&full))
+            .collect();
+        assert_eq!(listed, ATTACHMENT_FILTERS.to_vec());
+
+        // 文本与代码永远在：它会被拼进消息正文，任何模型都读得了，不该拿能力卡人
+        assert_eq!(AttachmentFilter::TextCode.requires(), None);
+        for gate in [&text_only, &vision_only, &full] {
+            assert!(AttachmentFilter::TextCode.allowed(gate));
         }
     }
 
     /// 每一组过滤器只摆自己那类的扩展名，互不串门；Office 扩展名哪一组都不摆
     /// （它们不会进请求体，入口就拒收了，摆出来只会让人白选）。
+    ///
+    /// 文本与代码那张表**要尽量全**：兜底的「所有文件 (*.*)」已经去掉了，表里没写的
+    /// 扩展名就真的选不到。
     #[std::prelude::v1::test]
     fn each_attachment_filter_offers_its_own_extensions() {
         let images = AttachmentFilter::Images.exts();
@@ -706,15 +780,12 @@ mod tests {
         assert_eq!(AttachmentFilter::Documents.exts(), vec!["pdf"]);
         let text = AttachmentFilter::TextCode.exts();
         assert!(text.contains(&"rs") && text.contains(&"md") && !text.contains(&"png"));
-        // 兜底那一项用通配：没列出来的扩展名从这儿选，收不收由内容判断
-        assert_eq!(AttachmentFilter::AllFiles.exts(), vec!["*"]);
+        // 常见的几种别漏：日志、单文件组件、配置文件
+        for ext in ["log", "vue", "yml", "toml", "sql"] {
+            assert!(text.contains(&ext), "{ext} 是常见附件，文本与代码里得有");
+        }
 
-        for filter in [
-            AttachmentFilter::Images,
-            AttachmentFilter::Documents,
-            AttachmentFilter::TextCode,
-            AttachmentFilter::AllFiles,
-        ] {
+        for filter in ATTACHMENT_FILTERS {
             for ext in ["docx", "xlsx", "pptx"] {
                 assert!(!filter.exts().contains(&ext), "{ext} 不该出现在 {filter:?} 里");
             }

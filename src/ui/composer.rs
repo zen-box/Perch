@@ -11,7 +11,7 @@ use gpui_kit_assets::IconName;
 use super::chat::{attachment_badge, preview};
 use super::{CONTENT_MAX_WIDTH, Palette, model_picker};
 use crate::app::AppState;
-use crate::attachment_ops::{ATTACHMENT_FILTERS, AttachmentObstacle};
+use crate::attachment_ops::{ATTACHMENT_FILTERS, AttachmentFilter, AttachmentObstacle};
 use crate::i18n::{AppLanguage, Key, tr, tr_args};
 use crate::model::Attachment;
 use crate::model_info::Capability;
@@ -134,6 +134,18 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
     // 入口本身也要说清楚能加什么。按钮不能因为模型看不懂图片就整个藏掉：
     // 文本和代码会拼进正文，任何模型都读得了
     let gate = state.attachment_gate();
+    // 菜单只摆当前模型收得下的项——接不住的类型干脆不出现，灰着摆出来既占地方，
+    // 又让人以为「点一下也许能行」
+    let available: Vec<AttachmentFilter> = ATTACHMENT_FILTERS
+        .into_iter()
+        .filter(|filter| filter.allowed(&gate))
+        .collect();
+    // 只剩一类可加时不再摆下拉：菜单里就一项，点两下没意义
+    let only_one = if available.len() == 1 {
+        available.first().copied()
+    } else {
+        None
+    };
     let attachment_tooltip = tr(
         lang,
         match (
@@ -203,41 +215,42 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                 .gap_0p5()
                                 .child({
                                     let app = cx.entity();
-                                    // 附件入口按类型拆成菜单，而不是一个按钮直接开文件对话框：
-                                    // 模型接不住哪一类，菜单里那一项就灰掉并写明原因。只摆一个
-                                    // 「所有文件」的话，纯文本模型下照样能选到图片，**选完才在
-                                    // 导入时被拒**——白跑一趟，用户还不知道自己错在哪。
-                                    Button::new("composer-pick-attachment")
+                                    // 附件入口按类型分项，而且只摆当前模型收得下的项。
+                                    // 不能摆一个「所有文件 (*.*)」兜底：用户照样能选到图片，
+                                    // **选完才在导入时被拒**——白跑一趟，用户还不知道自己错在哪。
+                                    let button = Button::new("composer-pick-attachment")
                                         .ghost()
                                         .small()
                                         .icon(IconName::Paperclip)
-                                        .tooltip(attachment_tooltip)
-                                        // 这排按钮贴着窗口底边，菜单往上开（跟旁边的模型、参数一致）
-                                        .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
-                                            ATTACHMENT_FILTERS.iter().fold(menu, |menu, &filter| {
-                                                let app = app.clone();
-                                                // 缺能力时把模型名和缺的那一项一起写在菜单项上，
-                                                // 用户才知道该换成谁，而不是猜为什么点不动
-                                                let reason = filter
-                                                    .requires()
-                                                    .and_then(|capability| gate.missing(capability))
-                                                    .and_then(|model| filter.unavailable_label(model, lang));
-                                                let label = match &reason {
-                                                    Some(reason) => format!("{} · {}", filter.label(lang), reason),
-                                                    None => filter.label(lang).to_string(),
-                                                };
-                                                menu.item(
-                                                    PopupMenuItem::new(label)
-                                                        .icon(filter.icon())
-                                                        .disabled(reason.is_some())
-                                                        .on_click(move |_, _, cx| {
-                                                            app.update(cx, |this, cx| {
-                                                                this.pick_attachments(filter, cx)
-                                                            });
-                                                        }),
-                                                )
+                                        .tooltip(attachment_tooltip);
+                                    match only_one {
+                                        // 只有一类可加：点一下直接开那一类的对话框。
+                                        // 不加下拉箭头——没有菜单可开，画个箭头等于骗人
+                                        Some(filter) => button
+                                            .on_click(
+                                                cx.listener(move |this, _, _, cx| this.pick_attachments(filter, cx)),
+                                            )
+                                            .into_any_element(),
+                                        // 这排按钮贴着窗口底边，菜单往上开（跟旁边的模型、参数一致）。
+                                        // 箭头必须画：点下去开的是菜单不是对话框，得让用户先看出来
+                                        None => button
+                                            .dropdown_caret(true)
+                                            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                                                available.iter().copied().fold(menu, |menu, filter| {
+                                                    let app = app.clone();
+                                                    menu.item(
+                                                        PopupMenuItem::new(filter.label(lang))
+                                                            .icon(filter.icon())
+                                                            .on_click(move |_, _, cx| {
+                                                                app.update(cx, |this, cx| {
+                                                                    this.pick_attachments(filter, cx)
+                                                                });
+                                                            }),
+                                                    )
+                                                })
                                             })
-                                        })
+                                            .into_any_element(),
+                                    }
                                 })
                                 .child(model_picker::render_model_picker(state, p, cx))
                                 .child(super::params::render_params_button(lang, cx))

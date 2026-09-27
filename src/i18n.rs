@@ -167,10 +167,12 @@ i18n! {
     AddModelChannel => { "添加模型渠道", "Add a provider", "プロバイダーを追加", "新增模型渠道" },
     Remove => { "移除", "Remove", "削除", "移除" },
     AttachmentUnsupported => { "「{}」不支持「{}」，发送前请换模型或先移除对应附件", "\"{}\" does not support \"{}\". Switch models or remove the attachment before sending.", "「{}」は「{}」に対応していません。送信前にモデルを切り替えるか、該当の添付を外してください。", "「{}」不支援「{}」，發送前請換模型或先移除對應附件" },
-    AddAttachment => { "添加附件：图片、PDF、文本与代码", "Add attachment: images, PDFs, text and code", "添付を追加：画像・PDF・テキスト・コード", "新增附件：圖片、PDF、文字與程式碼" },
-    AddAttachmentNoFiles => { "添加附件：图片、文本与代码（当前模型读不了 PDF）", "Add attachment: images, text and code (the current model cannot read PDFs)", "添付を追加：画像・テキスト・コード（現在のモデルは PDF を読めません）", "新增附件：圖片、文字與程式碼（目前模型讀不了 PDF）" },
-    AddAttachmentNoVision => { "添加附件：PDF、文本与代码（当前模型看不了图片）", "Add attachment: PDFs, text and code (the current model cannot see images)", "添付を追加：PDF・テキスト・コード（現在のモデルは画像を見られません）", "新增附件：PDF、文字與程式碼（目前模型看不了圖片）" },
-    AddAttachmentTextOnly => { "添加附件：仅限文本与代码（当前模型看不了图片，也读不了 PDF）", "Add attachment: text and code only (the current model cannot see images or read PDFs)", "添付を追加：テキストとコードのみ（現在のモデルは画像も PDF も扱えません）", "新增附件：僅限文字與程式碼（目前模型看不了圖片，也讀不了 PDF）" },
+    // 附件按钮的悬停提示：受限时只列「能加什么」，不解释「为什么少了那类」——
+    // 菜单本身已经只摆收得下的项，这里再念一遍限制只会把提示拉得很长
+    AddAttachment => { "添加附件", "Add attachment", "添付を追加", "新增附件" },
+    AddAttachmentNoFiles => { "添加附件（图片、文本与代码）", "Add attachment (images, text and code)", "添付を追加（画像・テキスト・コード）", "新增附件（圖片、文字與程式碼）" },
+    AddAttachmentNoVision => { "添加附件（PDF、文本与代码）", "Add attachment (PDFs, text and code)", "添付を追加（PDF・テキスト・コード）", "新增附件（PDF、文字與程式碼）" },
+    AddAttachmentTextOnly => { "添加附件（文本与代码）", "Add attachment (text and code)", "添付を追加（テキストとコード）", "新增附件（文字與程式碼）" },
     StopGenerating => { "停止生成", "Stop generating", "生成を停止", "停止生成" },
     SendEnter => { "发送 (Enter)", "Send (Enter)", "送信（Enter）", "發送 (Enter)" },
     SendCompareEnter => { "对比发送 (Enter)", "Send for comparison (Enter)", "比較送信（Enter）", "對比發送 (Enter)" },
@@ -528,10 +530,6 @@ i18n! {
     FilterImages => { "图片文件", "Image files", "画像ファイル", "圖片檔案" },
     FilterDocuments => { "PDF 文档", "PDF documents", "PDF 文書", "PDF 文件" },
     FilterTextCode => { "文本与代码", "Text & code", "テキストとコード", "文字與程式碼" },
-    FilterAllFiles => { "所有文件 (*.*)", "All files (*.*)", "すべてのファイル (*.*)", "所有檔案 (*.*)" },
-    // 附件菜单里灰掉的那两项：只说「为什么不能用」，菜单项名由 AttachmentFilter::label 拼在前面
-    AttachImagesUnavailable => { "{} 看不了图片", "{} cannot see images", "{} は画像を見られません", "{} 看不了圖片" },
-    AttachPdfUnavailable => { "{} 读不了 PDF", "{} cannot read PDFs", "{} は PDF を読めません", "{} 讀不了 PDF" },
     CannotPasteFolder => { "不能粘贴文件夹，请选择文件夹里的文件", "Folders cannot be pasted; pick files inside the folder instead", "フォルダは貼り付けできません。フォルダ内のファイルを選んでください", "不能貼上資料夾，請選擇資料夾裡的檔案" },
     PasteImageFailed => { "粘贴图片失败：{}", "Failed to paste the image: {}", "画像の貼り付けに失敗しました：{}", "貼上圖片失敗：{}" },
     ImagePasted => { "已从剪贴板粘贴图片", "Image pasted from the clipboard", "クリップボードから画像を貼り付けました", "已從剪貼簿貼上圖片" },
