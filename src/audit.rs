@@ -146,7 +146,12 @@ fn summarize_text(text: &str) -> String {
     // 我们自己拼的那几段用**英文**：日志是给人翻、给脚本 grep 的机器可读文件，
     // 而它的格式不该跟着界面语言变——同一个 `audit-2026-09-27.jsonl` 里
     // 前半段中文后半段英文，谁看都得先愣一下。
-    format!("{}... ({total} chars)", truncate(text, MAX_VALUE_CHARS))
+    //
+    // 这里**不走** `truncate`：它会在尾巴上补一个 `…`，再拼 `... ({total} chars)`
+    // 就成了 `…... (1000 chars)` 两个省略号。参数摘要的读者要的是"有多长"，
+    // 长度本身就是信号，不用再补一个"被切过"的记号。
+    let head: String = text.chars().take(MAX_VALUE_CHARS).collect();
+    format!("{head}... ({total} chars)")
 }
 
 /// 按**字符**截断，不是按字节。
@@ -185,7 +190,10 @@ mod tests {
         let summary = summarize_args(Some(&args));
 
         assert!(summary.contains("path=a.md"));
-        assert!(summary.contains("1000 chars"), "要标出原始长度：{summary}");
+        assert!(summary.contains("... (1000 chars)"), "要标出原始长度：{summary}");
+        // 只在"太长"这一处收尾，别让 `…` 和 `... (N chars)` 叠在一起——
+        // 实测导出的日志里见过 `…... (300 chars)` 这种两个省略号的样子。
+        assert!(!summary.contains('…'), "截断记号只该有一个：{summary}");
         assert!(summary.chars().count() < 500, "不能把整篇正文抄进来");
     }
 
