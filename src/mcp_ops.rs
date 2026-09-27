@@ -79,13 +79,29 @@ pub struct McpState {
 ///
 /// 输入框**懒创建**：只有打开编辑器时才建（建 `Entity` 要窗口），关掉就丢掉。
 /// 放进 `McpState` 而不是 `AppState` 顶层，是因为它只在设置页里活着（§4.1）。
+/// 编辑器里选的连接方式。
+///
+/// 和 [`McpTransport`] 分开：那个是**存盘**的形状（带 serde 标签、跟着配置走），
+/// 这个是**编辑期间**的界面状态（决定哪一组输入框可见）。两者不必一一对应——
+/// 以后再加传输时，界面上很可能仍旧复用同一组字段。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpKind {
+    /// 起一个本地子进程
+    Stdio,
+    /// 连一个 Streamable HTTP 端点
+    Http,
+}
+
 pub struct McpEditor {
     /// 正在编辑哪台服务器；`None` 表示新增
     pub editing_id: Option<String>,
+    pub kind: McpKind,
     pub name: Entity<InputState>,
     pub command: Entity<InputState>,
     pub args: Entity<TextareaState>,
     pub cwd: Entity<InputState>,
+    pub url: Entity<InputState>,
+    /// stdio 下是环境变量、HTTP 下是请求头——同一个 `NAME: VALUE` 输入框，两种用途
     pub env: Entity<TextareaState>,
 }
 
@@ -376,17 +392,26 @@ impl AppState {
         let existing = server_id
             .and_then(|id| self.config.mcp_servers.iter().find(|server| server.id == id))
             .cloned();
-        let (name, command, args, cwd) = match existing.as_ref() {
-            Some(server) => {
-                let McpTransport::Stdio { command, args, cwd } = &server.transport;
-                (
-                    server.name.clone(),
-                    command.clone(),
-                    args.join("\n"),
-                    cwd.clone().unwrap_or_default(),
-                )
+        let name = existing.as_ref().map(|server| server.name.clone()).unwrap_or_default();
+        let (kind, command, args, cwd, url) = match existing.as_ref().map(|server| &server.transport) {
+            Some(McpTransport::Stdio { command, args, cwd }) => (
+                McpKind::Stdio,
+                command.clone(),
+                args.join("\n"),
+                cwd.clone().unwrap_or_default(),
+                String::new(),
+            ),
+            Some(McpTransport::Http { url }) => {
+                (McpKind::Http, String::new(), String::new(), String::new(), url.clone())
             }
-            None => (String::new(), String::new(), String::new(), String::new()),
+            // 新建默认走本地命令：MCP 生态里九成是 `npx` / `uvx` 起的本地服务器
+            None => (
+                McpKind::Stdio,
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ),
         };
         // 环境变量的**值**在凭据管理器里，这里只是把它读出来显示
         let env = existing
@@ -414,16 +439,30 @@ impl AppState {
         let command_input = text_input(window, cx, &command);
         let args_input = text_area(window, cx, &args);
         let cwd_input = text_input(window, cx, &cwd);
+        let url_input = text_input(window, cx, &url);
         let env_input = text_area(window, cx, &env);
 
         self.mcp.editor = Some(McpEditor {
             editing_id: server_id.map(str::to_string),
+            kind,
             name: name_input,
             command: command_input,
             args: args_input,
             cwd: cwd_input,
+            url: url_input,
             env: env_input,
         });
+        cx.notify();
+    }
+
+    /// 编辑器里切换连接方式。
+    ///
+    /// 只动 `kind` 这一个字段，两组输入框里的内容都留着——用户点错了再点回来，
+    /// 不该把刚填的东西清掉。
+    pub fn set_mcp_editor_kind(&mut self, kind: McpKind, cx: &mut Context<Self>) {
+        if let Some(editor) = self.mcp.editor.as_mut() {
+            editor.kind = kind;
+        }
         cx.notify();
     }
 
@@ -442,10 +481,14 @@ impl AppState {
         let Some(editor) = self.mcp.editor.as_ref() else {
             return false;
         };
+        let kind = editor.kind;
         let name = editor.name.read(cx).value().trim().to_string();
         let command = editor.command.read(cx).value().trim().to_string();
-        if name.is_empty() || command.is_empty() {
-            self.toast(ToastLevel::Error, tr(lang, Key::McpNameRequired));
+        let url = editor.url.read(cx).value().trim().to_string();
+        // 校验按连接方式分开：两种方式各自必填的字段不一样。合成一句
+        // 「名称和启动命令不能为空」会把正在填 URL 的人指错方向。
+        if let Some(key) = missing_required(kind, &name, &command, &url) {
+            self.toast(ToastLevel::Error, tr(lang, key));
             cx.notify();
             return false;
         }
@@ -475,10 +518,13 @@ impl AppState {
             name,
             // 新建出来的默认就是开的：用户刚填完命令，显然想让它跑起来
             enabled,
-            transport: McpTransport::Stdio {
-                command,
-                args,
-                cwd: (!cwd.is_empty()).then_some(cwd),
+            transport: match kind {
+                McpKind::Stdio => McpTransport::Stdio {
+                    command,
+                    args,
+                    cwd: (!cwd.is_empty()).then_some(cwd),
+                },
+                McpKind::Http => McpTransport::Http { url },
             },
             // 留空即可，`secret_reference()` 会回落到 `mcp/<id>`
             secret_ref: String::new(),
@@ -570,6 +616,20 @@ impl AppState {
         }
         self.persist_config(cx);
         cx.notify();
+    }
+}
+
+/// 编辑器里缺了哪个必填字段，返回该提示的那条文案；都填齐了返回 `None`。
+///
+/// 抽成纯函数只为一个理由：`save_mcp_editor` 要窗口（建输入框实体）和凭据管理器，
+/// 单测跑不动；而"哪种连接方式缺哪个字段"正是最容易写错、也最该锁住的一小段逻辑。
+/// 三种输入都传进来而不是按 `kind` 只传一个：调用点不用先判断，少一个分支就少一处出错。
+fn missing_required(kind: McpKind, name: &str, command: &str, url: &str) -> Option<Key> {
+    let empty = |value: &str| value.trim().is_empty();
+    match kind {
+        McpKind::Stdio if empty(name) || empty(command) => Some(Key::McpNameRequired),
+        McpKind::Http if empty(name) || empty(url) => Some(Key::McpUrlRequired),
+        _ => None,
     }
 }
 
@@ -707,5 +767,46 @@ mod tests {
         // 用户主动断开就该清掉，不然重新连上之前那行会一直挂着
         state.drop_server("srv");
         assert_eq!(state.last_error_of("srv"), None);
+    }
+
+    /// 校验要跟着连接方式走：填 URL 的时候缺命令、和填命令的时候缺 URL，
+    /// 是两件不同的事，提示也该是两条。合成一条会把用户指错方向。
+    #[std::prelude::v1::test]
+    fn each_connection_kind_asks_for_its_own_required_fields() {
+        // 本地命令：名称 + 命令；URL 填没填都不看
+        assert_eq!(
+            missing_required(McpKind::Stdio, "", "npx", ""),
+            Some(Key::McpNameRequired)
+        );
+        assert_eq!(
+            missing_required(McpKind::Stdio, "Files", "", ""),
+            Some(Key::McpNameRequired)
+        );
+        assert_eq!(missing_required(McpKind::Stdio, "Files", "npx", ""), None);
+
+        // HTTP：名称 + URL；命令填没填都不看
+        assert_eq!(
+            missing_required(McpKind::Http, "", "", "https://x/mcp"),
+            Some(Key::McpUrlRequired)
+        );
+        assert_eq!(
+            missing_required(McpKind::Http, "Remote", "", ""),
+            Some(Key::McpUrlRequired)
+        );
+        assert_eq!(missing_required(McpKind::Http, "Remote", "", "https://x/mcp"), None);
+    }
+
+    /// 只有空白字符不算填过。用户按了空格或者粘贴了一段空行，
+    /// 存下去就是一个连不上的服务器，报错还得自己猜。
+    #[std::prelude::v1::test]
+    fn whitespace_does_not_count_as_filled_in() {
+        assert_eq!(
+            missing_required(McpKind::Stdio, "  ", "npx", ""),
+            Some(Key::McpNameRequired)
+        );
+        assert_eq!(
+            missing_required(McpKind::Http, "Remote", "", " \t "),
+            Some(Key::McpUrlRequired)
+        );
     }
 }

@@ -271,12 +271,18 @@ fn status_badge(status: &ServerStatus, tool_count: usize, p: &Palette, lang: App
 
 /// 命令行摘要（`npx -y @modelcontextprotocol/server-filesystem`）。
 fn transport_summary(server: &McpServerConfig) -> String {
-    let McpTransport::Stdio { command, args, .. } = &server.transport;
-    let mut summary = command.clone();
-    for arg in args {
-        summary.push(' ');
-        summary.push_str(arg);
-    }
+    let summary = match &server.transport {
+        McpTransport::Stdio { command, args, .. } => {
+            let mut summary = command.clone();
+            for arg in args {
+                summary.push(' ');
+                summary.push_str(arg);
+            }
+            summary
+        }
+        // HTTP 服务器没有命令行，摘要就是那个地址
+        McpTransport::Http { url } => url.clone(),
+    };
     first_line(&summary, 90)
 }
 

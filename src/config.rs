@@ -237,7 +237,7 @@ pub struct ProviderConfig {
 ///
 /// 用带 `kind` 标签的枚举，而不是"两个都可能是空的字段"：JSON 里长成
 /// `{"kind": "stdio", "command": "npx", "args": ["-y", "…"]}`，
-/// 以后加 Streamable HTTP 只是多一个 `kind`，老配置读进来照样有效。
+/// 加 Streamable HTTP 只是多一个 `kind`，老配置读进来照样有效。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum McpTransport {
@@ -251,6 +251,12 @@ pub enum McpTransport {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<String>,
     },
+    /// 连一个 Streamable HTTP 端点。
+    ///
+    /// 请求头**不写在这里**，和 stdio 的环境变量一样走
+    /// [`McpServerConfig::secrets`]：头里带不带密钥是用户自己的事，
+    /// 分两处存只会多出一个"哪个头算密钥"的选择题，答案还只能靠猜。
+    Http { url: String },
 }
 
 /// 一个 MCP 服务器。
@@ -816,12 +822,54 @@ mod tests {
     }
 
     #[test]
+    fn mcp_http_server_round_trips_with_a_kind_tag() {
+        // 加了 HTTP 之后，两种连接方式在 JSON 里只差 `kind`——
+        // 已经落盘的 stdio 配置（上面那条测试）照样读得进来。
+        let server = McpServerConfig {
+            id: "remote".into(),
+            name: "Remote".into(),
+            enabled: true,
+            transport: McpTransport::Http {
+                url: "https://mcp.example.test/mcp".into(),
+            },
+            secret_ref: String::new(),
+            disabled_tools: Vec::new(),
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        assert!(json.contains(r#""kind":"http""#), "{json}");
+        assert!(json.contains(r#""url":"https://mcp.example.test/mcp""#), "{json}");
+        assert_eq!(serde_json::from_str::<McpServerConfig>(&json).unwrap(), server);
+    }
+
+    #[test]
+    fn a_kind_less_transport_is_rejected_instead_of_silently_defaulting() {
+        // `kind` 是枚举的标签，缺了它反序列化必须报错。要是哪天有人给它加了
+        // `#[serde(default)]`，一台配错的老服务器会被静默当成 stdio 去 spawn，
+        // 报出来的错会指向一个根本不存在的命令——比直接说"配置读不出来"难查得多。
+        assert!(serde_json::from_str::<McpTransport>(r#"{"command":"npx"}"#).is_err());
+    }
+
+    #[test]
     fn mcp_config_never_carries_secrets() {
         // 环境变量的值只能进凭据管理器。这个测试锁住"配置结构里根本没有存它的地方"——
-        // 将来有人图省事加一个 `env: HashMap`，这里就会红
-        let json = serde_json::to_string(&stdio_server("files")).unwrap();
-        for forbidden in ["\"env\"", "\"headers\"", "\"token\"", "\"secret\""] {
-            assert!(!json.contains(forbidden), "配置里不该有 {forbidden}：{json}");
+        // 将来有人图省事加一个 `env: HashMap`，这里就会红。
+        // HTTP 请求头同理：值走凭据管理器，配置里只该有 url。
+        let stdio = serde_json::to_string(&stdio_server("files")).unwrap();
+        let http = serde_json::to_string(&McpServerConfig {
+            id: "remote".into(),
+            name: "Remote".into(),
+            enabled: true,
+            transport: McpTransport::Http {
+                url: "https://mcp.example.test/mcp".into(),
+            },
+            secret_ref: String::new(),
+            disabled_tools: Vec::new(),
+        })
+        .unwrap();
+        for json in [&stdio, &http] {
+            for forbidden in ["\"env\"", "\"headers\"", "\"token\"", "\"secret\""] {
+                assert!(!json.contains(forbidden), "配置里不该有 {forbidden}：{json}");
+            }
         }
     }
 

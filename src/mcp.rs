@@ -21,16 +21,18 @@
 //! - **stderr 收进日志。** 子进程的 stderr 一旦 piped 就必须有人一直读，否则管道写满
 //!   服务器会卡在 write 上；而「npx 找不到包」这类真正有用的报错恰好都在 stderr 里。
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use http::{HeaderName, HeaderValue};
 use rmcp::RoleClient;
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, Tool};
 use rmcp::service::RunningService;
-use rmcp::transport::TokioChildProcess;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::{IntoTransport, StreamableHttpClientTransport, TokioChildProcess, TransportAdapterIdentity};
 use serde_json::{Value, json};
 
 use crate::config::{McpServerConfig, McpTransport};
@@ -346,11 +348,25 @@ impl Connection {
     ///
     /// 必须在 tokio 运行时里调用（它内部要 `tokio::spawn` 一个读 stderr 的任务）。
     pub async fn connect(server: &McpServerConfig) -> Result<Self, String> {
-        let McpTransport::Stdio { command, args, cwd } = &server.transport;
+        match &server.transport {
+            McpTransport::Stdio { command, args, cwd } => {
+                Self::connect_stdio(server, command, args, cwd.as_deref()).await
+            }
+            McpTransport::Http { url } => Self::connect_http(server, url).await,
+        }
+    }
+
+    /// stdio：起一个子进程，用它的 stdin / stdout 说话。
+    async fn connect_stdio(
+        server: &McpServerConfig,
+        command: &str,
+        args: &[String],
+        cwd: Option<&str>,
+    ) -> Result<Self, String> {
         let program = resolve_program(command);
         let mut cmd = tokio::process::Command::new(&program);
         cmd.args(args);
-        if let Some(dir) = cwd.as_deref().filter(|dir| !dir.trim().is_empty()) {
+        if let Some(dir) = cwd.filter(|dir| !dir.trim().is_empty()) {
             cmd.current_dir(dir);
         }
         // 环境变量的值不在配置文件里，在凭据管理器里，见 `McpServerConfig::secrets`
@@ -371,9 +387,44 @@ impl Connection {
         if let Some(stderr) = stderr {
             spawn_stderr_reader(stderr, logs.clone());
         }
+        Self::handshake(transport, pid, logs).await
+    }
 
+    /// Streamable HTTP：直接连一个 URL，没有子进程可收。
+    async fn connect_http(server: &McpServerConfig, url: &str) -> Result<Self, String> {
+        let url = url.trim();
+        if url.is_empty() {
+            return Err("the server URL is empty".to_string());
+        }
+        // 请求头全走凭据管理器，和 stdio 的环境变量是同一套 `NAME: VALUE`。
+        // 解析不出来就直接报错，不静默跳过：少一个头的话用户看到的是服务器 401，
+        // 根本想不到问题出在本地这一行。
+        let mut headers = HashMap::new();
+        for pair in server.secrets() {
+            let name = HeaderName::from_bytes(pair.name.trim().as_bytes())
+                .map_err(|error| format!("invalid header name `{}`: {error}", pair.name))?;
+            let value = HeaderValue::from_str(pair.value.trim())
+                .map_err(|error| format!("invalid value for header `{}`: {error}", pair.name))?;
+            headers.insert(name, value);
+        }
+        let mut config = StreamableHttpClientTransportConfig::with_uri(url.to_string());
+        if !headers.is_empty() {
+            config = config.custom_headers(headers);
+        }
+        let transport = StreamableHttpClientTransport::from_config(config);
+        // HTTP 没有子进程，`logs` 给个空表（界面上「服务器日志」那块会显示成空的）
+        Self::handshake(transport, None, Arc::new(Mutex::new(VecDeque::new()))).await
+    }
+
+    /// 握手，带超时。两条路只差一个 transport，后面这套完全一样。
+    async fn handshake<T, E>(transport: T, pid: Option<u32>, logs: Arc<Mutex<VecDeque<String>>>) -> Result<Self, String>
+    where
+        T: IntoTransport<RoleClient, E, TransportAdapterIdentity>,
+        E: std::error::Error + Send + Sync + 'static,
+    {
         // 握手可能卡住（服务器起来了但不肯说协议版本、或者有别的东西往 stdout 写脏了
         // 帧）。超时要自己把进程收掉——这时候还没构造出 `Connection`，Drop 兜不住。
+        // HTTP 那边没有进程，`kill(None)` 是空操作。
         let handshake = tokio::time::timeout(HANDSHAKE_TIMEOUT, ().serve(transport)).await;
         let client = match handshake {
             Ok(Ok(client)) => client,
@@ -770,5 +821,27 @@ mod tests {
         std::fs::write(bare.path().join("npx"), "#!/bin/sh\n").unwrap();
         let bare_path = std::env::join_paths([bare.path()]).unwrap();
         assert_eq!(find_in_path_in("npx", &bare_path), None);
+    }
+
+    /// 地址为空的 HTTP 服务器要在**发起连接之前**就报错。
+    /// 放它过去的话，reqwest 会拿一个空 URI 去连，报出来的是一句
+    /// 「builder error」——看不出是配置里那格没填。
+    #[tokio::test]
+    async fn an_http_server_without_a_url_fails_before_dialing() {
+        let server = McpServerConfig {
+            id: "remote".into(),
+            name: "Remote".into(),
+            enabled: true,
+            transport: McpTransport::Http { url: String::new() },
+            secret_ref: String::new(),
+            disabled_tools: Vec::new(),
+        };
+        // 不用 `expect_err`：那要求 `Ok` 那半（`Connection`）实现 `Debug`，
+        // 而它里面装着 rmcp 的运行时句柄，没什么可打印的。
+        let error = match Connection::connect(&server).await {
+            Ok(_) => panic!("空地址不该连上"),
+            Err(error) => error,
+        };
+        assert!(error.contains("empty"), "得到 {error}");
     }
 }

@@ -25,10 +25,22 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 base64 = "0.22"
 rfd = "0.15"
 sha2 = "0.10"
-# MCP 官方 Rust SDK。首批只接 stdio（子进程）服务器，所以只开 client +
-# transport-child-process；Streamable HTTP 那套留到第二批，届时再加
-# transport-streamable-http-client-reqwest（它依赖的 reqwest 0.13 已经和本项目统一）。
-rmcp = { version = "3.4.1", default-features = false, features = ["client", "transport-child-process"] }
+# MCP 官方 Rust SDK。stdio（子进程）和 Streamable HTTP 两条路都接。
+# ⚠️ 后者的坑：rmcp 自己的 reqwest 是 `default-features = false`、**不带 TLS**，
+# 只开 `transport-streamable-http-client-reqwest` 的话 https 的服务器连不上
+# （握手阶段报 TLS 相关的错，看不出是缺 feature）。所以还要显式挑一个 TLS 后端——
+# 这里选 `reqwest`（= rustls），和上面渠道那条路用的是同一个后端，
+# 不会把 native-tls 也编进来。
+rmcp = { version = "3.4.1", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+    "reqwest",
+] }
+# `StreamableHttpClientTransportConfig::custom_headers` 收的是
+# `HashMap<HeaderName, HeaderValue>`，这两个类型在 `http` 里，rmcp 没有 re-export。
+# 版本跟着 rmcp 自己依赖的那个（都是 1.x），不会编出两份。
+http = "1"
 
 [dev-dependencies]
 tempfile = "3"
