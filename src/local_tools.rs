@@ -629,21 +629,35 @@ fn collect_output(receiver: Option<mpsc::Receiver<Vec<u8>>>) -> Vec<u8> {
 
 /// 结束进程和它启动的所有子进程。
 fn kill_process_tree(child: &mut Child) {
-    // 只结束 powershell 本身的话，它启动的程序（比如 ping -t）会继续在后台跑
+    kill_process_tree_by_pid(child.id());
+    // 同上：进程已经退出时这两步会失败，属于预期情况
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// 按 pid 结束整棵进程树。
+///
+/// 只杀父进程的话，它启动的程序（`ping -t`、开发服务器）会继续在后台跑。
+/// 单独抽出来是因为 MCP 服务器的子进程不归本模块管（句柄在 rmcp 手里），
+/// 但用户关掉那台服务器时同样要把整棵树收掉，而那时手上只剩一个 pid。
+///
+/// **同步实现**：调用点可能在界面线程上（点「删除服务器」），那里没有 tokio 上下文，await 不了。
+pub fn kill_process_tree_by_pid(pid: u32) {
     #[cfg(target_os = "windows")]
     {
         let mut taskkill = Command::new("taskkill");
         taskkill
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         hide_console_window(&mut taskkill);
-        // 进程可能刚好自己退出了，taskkill 失败无所谓，下面还有 kill 兜底
+        // 进程可能刚好自己退出了，taskkill 失败无所谓
         let _ = taskkill.status();
     }
-    // 同上：进程已经退出时这两步会失败，属于预期情况
-    let _ = child.kill();
-    let _ = child.wait();
+    // 非 Windows 上暂时什么都不做：这里没有拿到子进程句柄，也就没法 kill。
+    // 需要时再按平台补（Linux 可以用进程组，macOS 同）。
+    #[cfg(not(target_os = "windows"))]
+    let _ = pid;
 }
 
 /// Windows 上图形界面程序启动控制台程序时，默认会弹出一个黑色的命令行窗口。

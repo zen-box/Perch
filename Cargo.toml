@@ -9,7 +9,10 @@ gpui-kit-assets = "0.6.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "macros", "process", "net"] }
+# io-util 是给 MCP 那条路用的：要按行读子进程的 stderr（`AsyncBufReadExt::lines`）。
+# 本来 rmcp 的 transport-child-process 也会把它打开，但既然我们自己直接用了这个 API，
+# 就显式写上，别靠别的 crate 顺手打开。
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "macros", "process", "net", "io-util"] }
 futures = "0.3"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = "0.4"
@@ -22,6 +25,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 base64 = "0.22"
 rfd = "0.15"
 sha2 = "0.10"
+# MCP 官方 Rust SDK。首批只接 stdio（子进程）服务器，所以只开 client +
+# transport-child-process；Streamable HTTP 那套留到第二批，届时再加
+# transport-streamable-http-client-reqwest（它依赖的 reqwest 0.13 已经和本项目统一）。
+rmcp = { version = "3.4.1", default-features = false, features = ["client", "transport-child-process"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -19,6 +19,7 @@ mod llm_request;
 mod llm_stream;
 mod llm_tools;
 mod local_tools;
+mod mcp;
 mod model;
 mod model_info;
 mod model_ops;

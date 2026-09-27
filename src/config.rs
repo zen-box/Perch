@@ -233,6 +233,85 @@ pub struct ProviderConfig {
     pub extra_headers: Vec<HeaderPair>,
 }
 
+/// MCP 服务器的连接方式。
+///
+/// 用带 `kind` 标签的枚举，而不是"两个都可能是空的字段"：JSON 里长成
+/// `{"kind": "stdio", "command": "npx", "args": ["-y", "…"]}`，
+/// 以后加 Streamable HTTP 只是多一个 `kind`，老配置读进来照样有效。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum McpTransport {
+    /// 启动一个本地子进程，用它的 stdin / stdout 通信。
+    /// 环境变量的**值**不写在这里，见 [`McpServerConfig::secrets`]。
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        /// 子进程的工作目录。留空表示继承程序自己的工作目录
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+    },
+}
+
+/// 一个 MCP 服务器。
+///
+/// 密钥（stdio 的环境变量值，以后 HTTP 的请求头值）**不写进配置文件**——
+/// 和渠道的 API Key 一个道理：配置文件会被备份、会被贴进 issue，
+/// 凭据管理器里的东西不会。这里只留一个条目名的引用。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub enabled: bool,
+    pub transport: McpTransport,
+    /// 凭据管理器里的条目名。为空时按 `mcp/<id>` 取，见 [`Self::secret_reference`]
+    #[serde(default)]
+    pub secret_ref: String,
+    /// 被用户单独停用的工具。存的是**服务器给的原始工具名**，不是加过前缀的那个——
+    /// 前缀里含服务器 id，服务器改名就会失配。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_tools: Vec<String>,
+}
+
+impl McpServerConfig {
+    /// 凭据管理器里的条目名。老配置里这个字段是空的，回落到 `mcp/<id>`，
+    /// 和渠道那边 `api_key_ref` 为空时补 `provider/<id>` 是同一套做法。
+    pub fn secret_reference(&self) -> String {
+        if self.secret_ref.is_empty() {
+            format!("mcp/{}", self.id)
+        } else {
+            self.secret_ref.clone()
+        }
+    }
+
+    /// 读这台服务器的环境变量表。
+    ///
+    /// 读不出来（没设过、凭据管理器不可用、存的内容不是合法 JSON）一律当空表：
+    /// 缺环境变量该由连接过程报出真实错误，不该在这里 panic。
+    /// 复用渠道请求头那套 `NAME: VALUE` 的表示，界面也就能复用同一个输入框。
+    pub fn secrets(&self) -> Vec<HeaderPair> {
+        load_secret(&self.secret_reference())
+            .ok()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default()
+    }
+
+    /// 写入环境变量表。空表表示删掉这条凭据。
+    pub fn store_secrets(&self, secrets: &[HeaderPair]) -> keyring::Result<()> {
+        let reference = self.secret_reference();
+        if secrets.is_empty() {
+            return store_secret(&reference, "");
+        }
+        match serde_json::to_string(secrets) {
+            Ok(json) => store_secret(&reference, &json),
+            // 序列化一个 `Vec<HeaderPair>` 不会失败，走到这里说明类型被改坏了；
+            // 报成凭据管理器错误比 panic 好，用户至少能看到原因
+            Err(error) => Err(keyring::Error::PlatformFailure(Box::new(error))),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     pub active_provider_id: String,
@@ -248,6 +327,9 @@ pub struct AppConfig {
     #[serde(default = "default_command_timeout_secs")]
     pub command_timeout_secs: u64,
     pub providers: Vec<ProviderConfig>,
+    /// 用户添加的 MCP 服务器。老配置里没有这个字段，读进来是空的。
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerConfig>,
 }
 
 /// 本地命令的默认超时。取 `local_tools` 里那个常量，
@@ -271,6 +353,7 @@ impl Default for AppConfig {
             local_tools_enabled: false,
             command_timeout_secs: default_command_timeout_secs(),
             providers: Vec::new(),
+            mcp_servers: Vec::new(),
         }
     }
 }
@@ -316,7 +399,10 @@ fn has_plain_api_key(content: &str) -> bool {
 ///
 /// 顺带做一次惰性迁移：新服务名里没有、旧服务名（改名前的 `PersonalControl`）里有，
 /// 就读旧值并写回新服务名。这样不用一次性扫描全部凭据，用户第一次用到哪个渠道就迁移哪个。
-pub fn load_provider_key(reference: &str) -> keyring::Result<String> {
+///
+/// 名字里不带 provider：MCP 服务器的环境变量也走这里，机制完全一样
+/// （同一个凭据服务、不同的条目名），没必要为它再写一套。
+pub fn load_secret(reference: &str) -> keyring::Result<String> {
     let entry = keyring::Entry::new(APP_NAME, reference)?;
     match entry.get_password() {
         Ok(secret) => Ok(secret),
@@ -332,6 +418,24 @@ pub fn load_provider_key(reference: &str) -> keyring::Result<String> {
             }
         }
         Err(error) => Err(error),
+    }
+}
+
+/// 渠道 API Key 的读入口。AGENTS.md §7 按这个名字写的，行为就是 [`load_secret`]。
+pub fn load_provider_key(reference: &str) -> keyring::Result<String> {
+    load_secret(reference)
+}
+
+/// 写入某个引用对应的密钥。空字符串表示删除这条凭据。
+pub fn store_secret(reference: &str, secret: &str) -> keyring::Result<()> {
+    let entry = keyring::Entry::new(APP_NAME, reference)?;
+    if secret.is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error),
+        }
+    } else {
+        entry.set_password(secret)
     }
 }
 
@@ -375,6 +479,14 @@ impl AppConfig {
                 };
             }
         }
+        // MCP 服务器同理：老配置（或者手工改过的）里凭据引用可能是空的，
+        // 补成 `mcp/<id>` 写回去，界面就不用每次都算一遍
+        for server in &mut config.mcp_servers {
+            if server.secret_ref.is_empty() {
+                server.secret_ref = format!("mcp/{}", server.id);
+                migrated = true;
+            }
+        }
         if migrated {
             config.save()?;
         }
@@ -389,16 +501,9 @@ impl AppConfig {
         write_atomic(&data_file(CONFIG_FILE), &json)
     }
 
+    /// 渠道 API Key 的写入口。AGENTS.md §7 按这个名字写的，行为就是 [`store_secret`]。
     pub fn store_provider_key(reference: &str, secret: &str) -> keyring::Result<()> {
-        let entry = keyring::Entry::new(APP_NAME, reference)?;
-        if secret.is_empty() {
-            match entry.delete_credential() {
-                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                Err(error) => Err(error),
-            }
-        } else {
-            entry.set_password(secret)
-        }
+        store_secret(reference, secret)
     }
 
     pub fn get_active_provider(&self) -> Option<&ProviderConfig> {
@@ -609,6 +714,68 @@ mod tests {
         assert!(!has_plain_api_key(r#"{"providers":[{"api_key":""}]}"#));
         assert!(!has_plain_api_key(r#"{"providers":[{"api_key_ref":"provider/1"}]}"#));
         assert!(!has_plain_api_key("not json at all"));
+    }
+
+    fn stdio_server(id: &str) -> McpServerConfig {
+        McpServerConfig {
+            id: id.into(),
+            name: format!("Server {id}"),
+            enabled: true,
+            transport: McpTransport::Stdio {
+                command: "npx".into(),
+                args: vec!["-y".into(), "@modelcontextprotocol/server-everything".into()],
+                cwd: None,
+            },
+            secret_ref: String::new(),
+            disabled_tools: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn old_configs_without_mcp_servers_still_load() {
+        // P3-3 之前写下的配置里没有 mcp_servers 这个字段，读进来要是空表而不是报错
+        let json = r#"{
+            "active_provider_id": "",
+            "model": "m",
+            "temperature": 0.7,
+            "system_prompt": "",
+            "is_dark": false,
+            "language": "zh-CN",
+            "providers": []
+        }"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert!(config.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn mcp_stdio_server_round_trips_with_a_kind_tag() {
+        let server = stdio_server("files");
+        let json = serde_json::to_string(&server).unwrap();
+        // 连接方式带 kind 标签：以后加 Streamable HTTP 只是多一个分支，
+        // 已经落盘的配置不用改格式
+        assert!(json.contains(r#""kind":"stdio""#), "{json}");
+        // 空的可选字段不写出来，配置文件才不会被一堆 null 塞满
+        assert!(!json.contains("cwd"), "{json}");
+        assert!(!json.contains("disabled_tools"), "{json}");
+        assert_eq!(serde_json::from_str::<McpServerConfig>(&json).unwrap(), server);
+    }
+
+    #[test]
+    fn mcp_config_never_carries_secrets() {
+        // 环境变量的值只能进凭据管理器。这个测试锁住"配置结构里根本没有存它的地方"——
+        // 将来有人图省事加一个 `env: HashMap`，这里就会红
+        let json = serde_json::to_string(&stdio_server("files")).unwrap();
+        for forbidden in ["\"env\"", "\"headers\"", "\"token\"", "\"secret\""] {
+            assert!(!json.contains(forbidden), "配置里不该有 {forbidden}：{json}");
+        }
+    }
+
+    #[test]
+    fn mcp_secret_reference_falls_back_to_the_server_id() {
+        let mut server = stdio_server("files");
+        assert_eq!(server.secret_reference(), "mcp/files");
+        server.secret_ref = "custom/ref".into();
+        assert_eq!(server.secret_reference(), "custom/ref");
     }
 
     #[cfg(target_os = "windows")]
