@@ -13,7 +13,16 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::config::ChannelType;
 use crate::llm::{StreamEvent, ToolCall};
-use crate::llm_tools::{ToolCallState, parse_arguments};
+use crate::llm_tools::{ToolCallState, fresh_call_id, parse_arguments};
+
+/// Gemini 的调用 id。新版接口会给 `id`，老版本不给——不给时补一个唯一的，
+/// 不能拿函数名凑数（同一个函数调两次就撞 id 了，见 [`fresh_call_id`]）。
+fn gemini_call_id(call: &Value) -> String {
+    call.get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map_or_else(fresh_call_id, str::to_string)
+}
 
 pub(crate) fn emit_complete(
     channel: ChannelType,
@@ -143,7 +152,7 @@ pub(crate) fn emit_complete(
                         let name = call.get("name").and_then(Value::as_str).unwrap_or("");
                         if !name.is_empty() {
                             let _ = tx.send(StreamEvent::ToolCall(ToolCall {
-                                id: name.to_string(),
+                                id: gemini_call_id(call),
                                 name: name.to_string(),
                                 arguments: call.get("args").cloned().unwrap_or_else(|| json!({})),
                             }));
@@ -352,8 +361,7 @@ pub(crate) fn emit_delta(
                         if !name.is_empty() {
                             let arguments = call.get("args").cloned().unwrap_or_else(|| json!({}));
                             let _ = tx.send(StreamEvent::ToolCall(ToolCall {
-                                // Gemini 不给调用 id，回传时用函数名对应
-                                id: name.to_string(),
+                                id: gemini_call_id(call),
                                 name: name.to_string(),
                                 arguments,
                             }));
@@ -396,6 +404,7 @@ mod tests {
             },
             api_key: "secret".into(),
             model: "test-model".into(),
+            provider_id: "test-provider".into(),
             messages: vec![ChatMessageReq::new("user", "hi")],
             tools: Vec::new(),
             temperature: None,
@@ -583,8 +592,23 @@ mod tests {
         let calls = feed_sse(ChannelType::Gemini, payload).await;
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "read_file");
-        assert_eq!(calls[0].id, "read_file", "Gemini 没有调用 id，用函数名代替");
+        assert!(!calls[0].id.is_empty(), "Gemini 不给调用 id，要补一个");
         assert_eq!(calls[0].arguments["path"], "a.rs");
+    }
+
+    /// 同一个函数一轮里被调两次（或者两轮各调一次），id 不能相同——
+    /// Agent 循环按 id 判断调用有没有回过结果，撞了 id 第二次调用就被跳过了。
+    #[tokio::test]
+    async fn gemini_calls_to_the_same_function_get_distinct_ids() {
+        let payload = concat!(
+            "data: {\"candidates\":[{\"content\":{\"parts\":[",
+            "{\"functionCall\":{\"name\":\"read_file\",\"args\":{\"path\":\"a.rs\"}}},",
+            "{\"functionCall\":{\"name\":\"read_file\",\"args\":{\"path\":\"b.rs\"}}}",
+            "]}}]}\n\n",
+        );
+        let calls = feed_sse(ChannelType::Gemini, payload).await;
+        assert_eq!(calls.len(), 2);
+        assert_ne!(calls[0].id, calls[1].id);
     }
 
     /// 没有任何工具调用时不该凭空冒出 ToolCall 事件。

@@ -6,7 +6,7 @@ use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::*;
 use tokio::sync::oneshot;
 
-use crate::agent::execute_local_tool;
+use crate::agent_loop::AgentState;
 use crate::backup::BackupFile;
 use crate::config::{AppConfig, ChannelType};
 use crate::i18n::{AppLanguage, Key, apply_locale, set_current, tr, tr_args};
@@ -82,10 +82,11 @@ pub struct AppState {
     pub add_channel_type: ChannelType,
     pub rename_target_session_id: Option<String>,
 
-    // Agent 权限确认卡片
-    pub pending_tool_name: Option<String>,
-    pub pending_tool_cmd: Option<String>,
+    /// Agent 循环与本地工具：等授权的调用、正在执行的工具、循环进行到哪了（见 `agent_loop.rs`）
+    pub agent: AgentState,
 
+    /// 助手正在忙：流式生成回答，或者在后台执行工具。
+    /// 忙的时候输入框显示停止按钮，不能发新消息、不能重新生成。
     pub is_streaming: bool,
     pub(crate) active_streams: HashMap<String, oneshot::Sender<()>>,
     pending_toasts: Vec<(ToastLevel, String)>,
@@ -335,8 +336,7 @@ impl AppState {
             analytics_tab: crate::analytics::AnalyticsTab::Overview,
             add_channel_type: ChannelType::OpenAiChat,
             rename_target_session_id: None,
-            pending_tool_name: None,
-            pending_tool_cmd: None,
+            agent: AgentState::default(),
             is_streaming: false,
             active_streams: HashMap::new(),
             pending_toasts: Vec::new(),
@@ -532,8 +532,12 @@ impl AppState {
         let lang = self.language();
         self.config.local_tools_enabled = !self.config.local_tools_enabled;
         if !self.config.local_tools_enabled {
-            self.pending_tool_name = None;
-            self.pending_tool_cmd = None;
+            // 关掉开关就把挂着的授权请求一并撤销——否则卡片还留着，
+            // 用户点同意会走到"工具未启用"的分支，看起来像点了个空按钮。
+            // 正在执行的工具不打断：它是用户已经同意过的，让它跑完。
+            self.agent.pending = None;
+            self.agent.origin = None;
+            self.agent.round = 0;
         }
         if let Err(error) = self.config.save() {
             self.toast(
@@ -593,45 +597,6 @@ impl AppState {
             .iter_mut()
             .flat_map(|s| s.messages.iter_mut())
             .find(|m| m.id == id)
-    }
-
-    pub fn execute_agent_tool(&mut self, tool_name: &str, arg: &str, cx: &mut Context<Self>) {
-        let lang = self.language();
-        if !self.config.local_tools_enabled {
-            self.pending_tool_name = None;
-            self.pending_tool_cmd = None;
-            self.toast(ToastLevel::Error, tr(lang, Key::LocalToolsDisabled));
-            cx.notify();
-            return;
-        }
-        // 权限卡片里展示的是 "Bash"，本地工具名是小写的 "bash"
-        let result = execute_local_tool(&tool_name.to_ascii_lowercase(), arg);
-        let active_id = self.storage.active_session_id.clone();
-        if let Some(session) = self.storage.sessions.iter_mut().find(|s| s.id == active_id) {
-            let mut assistant_msg = ChatMessage::new_assistant();
-            assistant_msg.is_streaming = false;
-            assistant_msg.tool_calls.push(result.display.clone());
-
-            // 换行留在调用点拼，不塞进译文——译文里带看不见的 \n 太容易写错
-            let formatted_content = if result.is_error {
-                tr_args(lang, Key::ToolExecFailed, &[&result.output])
-            } else {
-                tr_args(lang, Key::ToolExecOk, &[&result.output])
-            };
-            assistant_msg.content = formatted_content;
-            session.messages.push(assistant_msg);
-        }
-        self.persist_storage(cx);
-        self.pending_tool_name = None;
-        self.pending_tool_cmd = None;
-        self.scroll_to_end_pending = true;
-        cx.notify();
-    }
-
-    pub fn deny_pending_tool(&mut self, cx: &mut Context<Self>) {
-        self.pending_tool_name = None;
-        self.pending_tool_cmd = None;
-        cx.notify();
     }
 
     /// 把快捷指令填入输入框（例如 "/bash "），方便用户继续补全

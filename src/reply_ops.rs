@@ -3,19 +3,37 @@
 use gpui_kit::*;
 use tokio::sync::oneshot;
 
+use crate::agent_loop::AgentOrigin;
 use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::config::{ChannelType, ModelConfig, ProviderConfig};
 use crate::i18n::{AppLanguage, Key, tr};
 use crate::llm::{ChatMessageReq, ChatRequest, StreamEvent, stream_chat};
 use crate::llm_tools::tool_call_label;
 use crate::model::{ChatMessage, MessageVariant, ReasoningLevel, ResolvedParams};
+use crate::model_info::Capability;
 
 /// 一次流式请求：会话里对应哪条消息、哪个版本，以及组装好的请求体。
 pub(crate) struct Job {
     key: String,
+    session_id: String,
     message_id: String,
     variant_id: Option<String>,
+    /// 这一轮是不是 Agent 循环的一环（带了工具清单）。结束时靠它决定要不要续跑
+    agent: bool,
     request: ChatRequest,
+}
+
+/// 组装一次请求需要知道的东西。
+pub(crate) struct JobSpec<'a> {
+    /// 请求替哪个对话发。不能默认用「当前打开的对话」：循环续跑时用户可能已经切走了
+    pub session_id: &'a str,
+    pub message_id: &'a str,
+    pub variant_id: Option<&'a str>,
+    pub provider_id: &'a str,
+    pub model_id: &'a str,
+    /// 要不要带工具清单。只有正常的一问一答（以及它的续跑）带：
+    /// 多模型对比、起标题、「继续生成」都不需要工具，带上了模型反而可能只回一个调用
+    pub with_tools: bool,
 }
 
 impl AppState {
@@ -55,8 +73,18 @@ impl AppState {
             session.model = model.clone();
             session.messages.push(assistant);
         }
-        let history = self.history_messages();
-        let Some(job) = self.make_job(&message_id, None, &provider_id, &model, history) else {
+        // 新的一问：轮数上限从头数
+        self.agent.round = 0;
+        let history = self.history_messages(&active_id);
+        let spec = JobSpec {
+            session_id: &active_id,
+            message_id: &message_id,
+            variant_id: None,
+            provider_id: &provider_id,
+            model_id: &model,
+            with_tools: true,
+        };
+        let Some(job) = self.make_job(spec, history) else {
             // 先把文案取出来：下面要可变借用 self 去改消息，不能同时再读 self
             let error = tr(self.language(), Key::ErrNoModelInChannel).to_string();
             if let Some(message) = self.find_message_mut(&message_id) {
@@ -73,7 +101,7 @@ impl AppState {
 
     pub(crate) fn start_compare(&mut self, targets: &[(String, String)], cx: &mut Context<Self>) {
         let active_id = self.storage.active_session_id.clone();
-        let history = self.history_messages();
+        let history = self.history_messages(&active_id);
         let mut variants = Vec::new();
         let mut jobs = Vec::new();
         for (provider_id, model) in targets {
@@ -90,7 +118,16 @@ impl AppState {
                 speed_tps: 0.0,
                 latency_ms: 0,
             };
-            if let Some(job) = self.make_job("pending", Some(&variant.id), provider_id, model, history.clone()) {
+            let spec = JobSpec {
+                session_id: &active_id,
+                message_id: "pending",
+                variant_id: Some(&variant.id),
+                provider_id,
+                model_id: model,
+                // 对比看的是各家的回答本身；版本里也没地方记工具调用
+                with_tools: false,
+            };
+            if let Some(job) = self.make_job(spec, history.clone()) {
                 variants.push(variant);
                 jobs.push(job);
             }
@@ -115,18 +152,13 @@ impl AppState {
         self.spawn_jobs(jobs, cx);
     }
 
-    pub(crate) fn history_messages(&self) -> Vec<ChatMessageReq> {
-        let Some(session) = self.storage.get_active_session() else {
+    pub(crate) fn history_messages(&self, session_id: &str) -> Vec<ChatMessageReq> {
+        let Some(session) = self.session(session_id) else {
             return Vec::new();
         };
         let resolved = session.resolved_params(&self.config.system_prompt, self.config.temperature);
         let mut messages = vec![ChatMessageReq::new("system", resolved.system_prompt)];
-        messages.extend(
-            session
-                .api_turns(resolved.context_limit)
-                .into_iter()
-                .map(|(role, content, attachments)| ChatMessageReq::with_attachments(role, content, attachments)),
-        );
+        messages.extend(session.api_turns(resolved.context_limit));
         messages
     }
 
@@ -146,31 +178,28 @@ impl AppState {
         Some((provider, model))
     }
 
-    pub(crate) fn make_job(
-        &self,
-        message_id: &str,
-        variant_id: Option<&str>,
-        provider_id: &str,
-        model_id: &str,
-        messages: Vec<ChatMessageReq>,
-    ) -> Option<Job> {
-        let (provider, model) = self.resolve_model(provider_id, model_id)?;
-        let session = self.storage.get_active_session()?;
+    pub(crate) fn make_job(&self, spec: JobSpec, messages: Vec<ChatMessageReq>) -> Option<Job> {
+        let (provider, model) = self.resolve_model(spec.provider_id, spec.model_id)?;
+        let session = self.session(spec.session_id)?;
         let resolved = session.resolved_params(&self.config.system_prompt, self.config.temperature);
         let explicit_temperature = session
             .params
             .as_ref()
             .is_some_and(|params| params.temperature.is_some());
+        let with_tools = spec.with_tools && self.config.local_tools_enabled;
         Some(Job {
-            key: stream_key(message_id, variant_id),
-            message_id: message_id.to_string(),
-            variant_id: variant_id.map(str::to_string),
+            key: stream_key(spec.message_id, spec.variant_id),
+            session_id: spec.session_id.to_string(),
+            message_id: spec.message_id.to_string(),
+            variant_id: spec.variant_id.map(str::to_string),
+            agent: with_tools,
             request: chat_request(
                 provider,
                 model,
                 messages,
                 &resolved,
                 explicit_temperature,
+                with_tools,
                 self.language(),
             ),
         })
@@ -187,6 +216,15 @@ impl AppState {
             let key = job.key.clone();
             let message_id = job.message_id.clone();
             let variant_id = job.variant_id.clone();
+            // 记下这一轮是替谁发的：它结束时如果模型要求了工具调用，循环要靠这些接着跑
+            if job.agent {
+                self.agent.origin = Some(AgentOrigin {
+                    session_id: job.session_id.clone(),
+                    message_id: message_id.clone(),
+                    provider_id: job.request.provider_id.clone(),
+                    model: job.request.model.clone(),
+                });
+            }
             let request = job.request;
             cx.spawn(async move |this, cx| {
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -234,30 +272,47 @@ impl AppState {
             self.active_streams.remove(key);
             self.is_streaming = !self.active_streams.is_empty();
             if !self.is_streaming {
+                // 先存盘再问循环要不要续跑：续跑会往会话里再插消息
                 self.persist_storage(cx);
-                self.maybe_autotitle(cx);
+                if self.advance_agent_loop(message_id, cx) {
+                    return;
+                }
+                // 按消息找对话，而不是用当前打开的对话：生成期间用户可能切走了
+                if let Some(session_id) = self.session_of_message(message_id) {
+                    self.maybe_autotitle(&session_id, cx);
+                }
             }
         }
         cx.notify();
     }
 
-    fn maybe_autotitle(&mut self, cx: &mut Context<Self>) {
-        let Some(session) = self.storage.get_active_session() else {
+    /// 这条消息在哪个对话里
+    pub(crate) fn session_of_message(&self, message_id: &str) -> Option<String> {
+        self.storage
+            .sessions
+            .iter()
+            .find(|session| session.messages.iter().any(|message| message.id == message_id))
+            .map(|session| session.id.clone())
+    }
+
+    pub(crate) fn maybe_autotitle(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        let Some(session) = self.session(session_id) else {
             return;
         };
         if !session.title_auto || session.messages.len() < 2 {
             return;
         }
-        let session_id = session.id.clone();
         let excerpt = session
             .messages
             .iter()
-            .find(|message| message.role == "user")
+            .find(|message| message.role == "user" && !message.local_only)
             .map(|message| message.content.chars().take(400).collect::<String>())
             .unwrap_or_default();
         if excerpt.is_empty() {
             return;
         }
+        let provider_id = session.provider_id.clone();
+        let model_id = session.model.clone();
         if let Some(session) = self
             .storage
             .sessions
@@ -266,21 +321,16 @@ impl AppState {
         {
             session.title_auto = false;
         }
-        let provider_id = self
-            .storage
-            .get_active_session()
-            .map(|s| s.provider_id.clone())
-            .unwrap_or_default();
-        let model_id = self
-            .storage
-            .get_active_session()
-            .map(|s| s.model.clone())
-            .unwrap_or_default();
+        let spec = JobSpec {
+            session_id,
+            message_id: "title",
+            variant_id: None,
+            provider_id: &provider_id,
+            model_id: &model_id,
+            with_tools: false,
+        };
         let Some(job) = self.make_job(
-            "title",
-            None,
-            &provider_id,
-            &model_id,
+            spec,
             vec![
                 ChatMessageReq::new("system", "用不超过16个字给对话起标题，只输出标题本身，不要标点包裹。"),
                 ChatMessageReq::new("user", excerpt),
@@ -288,6 +338,7 @@ impl AppState {
         ) else {
             return;
         };
+        let session_id = session_id.to_string();
         let mut request = job.request;
         request.stream = false;
         // 起标题用最弱的思考强度；还要思考的模型不限制输出长度，否则思考就把额度用完了
@@ -363,6 +414,7 @@ fn chat_request(
     messages: Vec<ChatMessageReq>,
     params: &ResolvedParams,
     explicit_temperature: bool,
+    tools_enabled: bool,
     lang: AppLanguage,
 ) -> ChatRequest {
     let levels = model.effective_reasoning_levels();
@@ -383,6 +435,7 @@ fn chat_request(
         base_url: provider.base_url.clone(),
         api_key: provider.api_key.clone(),
         model: model.id.clone(),
+        provider_id: provider.id.clone(),
         messages,
         temperature: (!omit_sampling).then_some(params.temperature),
         top_p: if omit_sampling { None } else { params.top_p },
@@ -393,9 +446,15 @@ fn chat_request(
         reasoning,
         max_output,
         model_thinks: model.thinks(),
-        // P3-1 只打通协议层：界面还没地方让用户挂工具，所以这里先固定为空。
-        // 请求体里因此不会出现 tools 字段，线上行为与改动前一致。
-        tools: Vec::new(),
+        // 只有用户开了本地工具、且这个模型确实支持函数调用时才带上工具清单。
+        // 不支持 tools 的模型（比如部分纯推理模型）收到 tools 字段可能直接报错，
+        // 而"用户开了开关但选了个不支持的模型"是很常见的组合，
+        // 所以这里按模型的 `Capability::Tools` 再挡一道。
+        tools: if tools_enabled && model.effective_capabilities().contains(&Capability::Tools) {
+            crate::local_tools::specs()
+        } else {
+            Vec::new()
+        },
         extra_headers: provider
             .extra_headers
             .iter()
@@ -416,9 +475,13 @@ fn apply_to_message(message: &mut ChatMessage, event: &StreamEvent) {
     match event {
         StreamEvent::Thinking(text) => message.reasoning_content.get_or_insert_with(String::new).push_str(text),
         StreamEvent::Content(text) => message.content.push_str(text),
-        // 消息上存的是给人看的短标签（`Vec<String>`，界面上当 chip 渲染），
-        // 不是完整的调用记录。完整记录留给 P3-2 的 Agent 循环去存。
-        StreamEvent::ToolCall(call) => message.tool_calls.push(tool_call_label(call)),
+        // 两份都存：`tool_calls` 是给人看的短标签（界面上当 chip 渲染），
+        // `called_tools` 是完整记录（下一轮要拿它把参数原样发回去）。
+        // 只存标签的话回传时还原不出参数，模型会看到自己发过一个空调用。
+        StreamEvent::ToolCall(call) => {
+            message.tool_calls.push(tool_call_label(call));
+            message.called_tools.push(call.clone());
+        }
         StreamEvent::Metrics {
             tokens_prompt,
             tokens_completion,
@@ -511,6 +574,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             false,
+            false,
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, None);
@@ -521,6 +585,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             true,
+            false,
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, Some(0.7), "explicit temperature is kept");
@@ -532,6 +597,7 @@ mod tests {
             Vec::new(),
             &params(None, None),
             false,
+            false,
             AppLanguage::ZhCn,
         );
         assert_eq!(request.temperature, Some(0.7));
@@ -542,6 +608,7 @@ mod tests {
             &claude,
             Vec::new(),
             &params(None, None),
+            false,
             false,
             AppLanguage::ZhCn,
         );
@@ -563,6 +630,7 @@ mod tests {
             Vec::new(),
             &params(None, Some(100_000)),
             false,
+            false,
             AppLanguage::ZhCn,
         );
         assert_eq!(request.reasoning, Some(ReasoningLevel::High));
@@ -573,6 +641,7 @@ mod tests {
             &model,
             Vec::new(),
             &params(Some(ReasoningLevel::Off), None),
+            false,
             false,
             AppLanguage::ZhCn,
         );
@@ -589,6 +658,7 @@ mod tests {
             &plain,
             Vec::new(),
             &params(Some(ReasoningLevel::High), None),
+            false,
             false,
             AppLanguage::ZhCn,
         );

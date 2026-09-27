@@ -2,10 +2,12 @@
 
 use gpui_kit::*;
 
+use crate::agent_loop::{ApprovalSource, PendingToolApproval};
 use crate::app::{AppState, ToastLevel};
 use crate::i18n::{Key, tr};
 use crate::llm::ChatMessageReq;
 use crate::model::{ChatMessage, DEFAULT_SESSION_TITLE};
+use crate::reply_ops::JobSpec;
 
 impl AppState {
     pub fn cancel_streaming(&mut self, cx: &mut Context<Self>) {
@@ -13,6 +15,9 @@ impl AppState {
         for sender in senders {
             let _ = sender.send(());
         }
+        // 正在执行的工具一并结束，循环也不再往下跑。要在下面统一复位 is_streaming 之前做：
+        // 那一步会把执行中的占位块也标成完成，就来不及写「已停止」了
+        self.stop_agent();
         self.is_streaming = false;
         for session in &mut self.storage.sessions {
             for message in &mut session.messages {
@@ -64,6 +69,9 @@ impl AppState {
         if (user_prompt.is_empty() && self.pending_attachments.is_empty()) || self.is_streaming {
             return;
         }
+        if self.block_while_approval_pending(cx) {
+            return;
+        }
         if self
             .storage
             .get_active_session()
@@ -90,7 +98,7 @@ impl AppState {
     pub fn send_compare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let lang = self.language();
         let user_prompt = self.chat_input.read(cx).value().trim().to_string();
-        if self.is_streaming {
+        if self.is_streaming || self.block_while_approval_pending(cx) {
             return;
         }
         if user_prompt.is_empty() && self.pending_attachments.is_empty() {
@@ -119,7 +127,7 @@ impl AppState {
         cx: &mut Context<Self>,
     ) {
         let lang = self.language();
-        if self.is_streaming {
+        if self.is_streaming || self.block_while_approval_pending(cx) {
             return;
         }
         let active_id = self.storage.active_session_id.clone();
@@ -148,7 +156,7 @@ impl AppState {
 
     pub fn continue_message(&mut self, cx: &mut Context<Self>) {
         let lang = self.language();
-        if self.is_streaming {
+        if self.is_streaming || self.block_while_approval_pending(cx) {
             return;
         }
         let active_id = self.storage.active_session_id.clone();
@@ -167,9 +175,18 @@ impl AppState {
         let message_id = message.id.clone();
         let model = message.model.clone();
         let provider_id = session.provider_id.clone();
-        let mut history = self.history_messages();
+        let mut history = self.history_messages(&active_id);
         history.push(ChatMessageReq::new("user", tr(lang, Key::ContinuePrompt)));
-        let Some(job) = self.make_job(&message_id, None, &provider_id, &model, history) else {
+        let spec = JobSpec {
+            session_id: &active_id,
+            message_id: &message_id,
+            variant_id: None,
+            provider_id: &provider_id,
+            model_id: &model,
+            // 「继续」是把一段被截断的回答接着写完，不需要工具
+            with_tools: false,
+        };
+        let Some(job) = self.make_job(spec, history) else {
             self.toast(ToastLevel::Error, tr(lang, Key::CurrentModelUnavailable));
             cx.notify();
             return;
@@ -179,6 +196,9 @@ impl AppState {
 
     pub fn delete_message(&mut self, message_id: &str, cx: &mut Context<Self>) {
         let lang = self.language();
+        if self.block_while_approval_pending(cx) {
+            return;
+        }
         if self.is_streaming {
             self.toast(ToastLevel::Error, tr(lang, Key::CannotDeleteWhileGenerating));
             cx.notify();
@@ -242,7 +262,7 @@ impl AppState {
             return false;
         };
         let text = self.edit_message_input.read(cx).value().trim().to_string();
-        if text.is_empty() || self.is_streaming {
+        if text.is_empty() || self.is_streaming || self.block_while_approval_pending(cx) {
             return false;
         }
         let active_id = self.storage.active_session_id.clone();
@@ -319,44 +339,68 @@ impl AppState {
         cx.notify();
     }
 
+    /// 手打的斜杠命令。走的是和 Agent 循环**同一套执行器**，只是不经过模型：
+    /// 用户已经明确说了要跑什么，没必要再让模型转述一遍（还费 token）。
+    ///
+    /// 结果存成没有调用 id 的 `tool` 消息，之后发给模型时当作一段普通文字
+    /// （见 `model.rs::api_message`）。读敏感文件的命令和结果都标成只在本机显示：
+    /// 用户同意读取是想自己看，不代表同意把 `.env`、私钥交给模型服务商。
     fn handle_local_tool(&mut self, user_prompt: &str, cx: &mut Context<Self>) -> bool {
         if !self.config.local_tools_enabled {
             return false;
         }
-        let (tool, arg, needs_confirm) = if user_prompt.starts_with("/ls") || user_prompt.starts_with("/dir") {
-            (
-                "list_dir",
-                user_prompt
+        let (tool, arguments, needs_confirm, sensitive) =
+            if user_prompt.starts_with("/ls") || user_prompt.starts_with("/dir") {
+                let path = user_prompt
                     .trim_start_matches("/ls")
                     .trim_start_matches("/dir")
                     .trim()
-                    .to_string(),
-                false,
-            )
-        } else if let Some(path) = user_prompt.strip_prefix("/read ") {
-            ("read_file", path.trim().to_string(), false)
-        } else if user_prompt == "/git" || user_prompt.starts_with("/git ") {
-            ("git_status", String::new(), false)
-        } else if let Some(cmd) = user_prompt
-            .strip_prefix("/bash ")
-            .or_else(|| user_prompt.strip_prefix("/sh "))
-        {
-            ("bash", cmd.trim().to_string(), true)
-        } else {
-            return false;
+                    .to_string();
+                ("list_directory", serde_json::json!({ "path": path }), false, false)
+            } else if let Some(path) = user_prompt.strip_prefix("/read ") {
+                // 敏感文件手打也要确认——模型能读的东西，手打同样能读
+                let sensitive = crate::local_tools::is_sensitive_path(std::path::Path::new(path.trim()));
+                (
+                    "read_file",
+                    serde_json::json!({ "path": path.trim() }),
+                    sensitive,
+                    sensitive,
+                )
+            } else if user_prompt == "/git" || user_prompt.starts_with("/git ") {
+                ("git_status", serde_json::json!({}), false, false)
+            } else if let Some(command) = user_prompt
+                .strip_prefix("/bash ")
+                .or_else(|| user_prompt.strip_prefix("/sh "))
+            {
+                (
+                    "run_command",
+                    serde_json::json!({ "command": command.trim() }),
+                    true,
+                    false,
+                )
+            } else {
+                return false;
+            };
+        let session_id = self.storage.active_session_id.clone();
+        let mut command_message = ChatMessage::new_user(user_prompt.to_string());
+        command_message.local_only = sensitive;
+        self.push_to_session(&session_id, command_message);
+
+        let pending = crate::local_tools::PendingTool {
+            id: String::new(),
+            name: tool.to_string(),
+            arguments,
         };
-        let session = match self.storage.get_active_session_mut() {
-            Some(session) => session,
-            None => return true,
-        };
-        session.messages.push(ChatMessage::new_user(user_prompt.to_string()));
         if needs_confirm {
-            self.pending_tool_name = Some("Bash".into());
-            self.pending_tool_cmd = Some(arg);
+            self.agent.pending = Some(PendingToolApproval {
+                session_id,
+                tool: pending,
+                source: ApprovalSource::Manual { local_only: sensitive },
+            });
             self.persist_storage(cx);
             cx.notify();
         } else {
-            self.execute_agent_tool(tool, &arg, cx);
+            self.start_tool_run(&session_id, vec![pending], None, false, cx);
         }
         true
     }

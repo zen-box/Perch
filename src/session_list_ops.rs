@@ -69,6 +69,7 @@ impl AppState {
 
     pub fn delete_session(&mut self, id: String, cx: &mut Context<Self>) {
         let lang = self.language();
+        self.forget_agent_session(&id);
         self.storage.delete_session(&id);
         self.persist_storage(cx);
         self.toast(ToastLevel::Info, tr(lang, Key::SessionDeleted));
@@ -123,6 +124,8 @@ impl AppState {
 
     pub fn clear_current_session(&mut self, cx: &mut Context<Self>) {
         let lang = self.language();
+        let active_id = self.storage.active_session_id.clone();
+        self.forget_agent_session(&active_id);
         if let Some(session) = self.storage.get_active_session_mut() {
             session.messages.clear();
             self.persist_storage(cx);

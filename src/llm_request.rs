@@ -427,6 +427,7 @@ mod tests {
             },
             api_key: "secret".into(),
             model: "test-model".into(),
+            provider_id: "test-provider".into(),
             messages: vec![
                 ChatMessageReq::new("system", "be brief"),
                 ChatMessageReq::new("user", "hi"),

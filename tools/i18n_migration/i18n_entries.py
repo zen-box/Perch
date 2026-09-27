@@ -365,6 +365,8 @@ ENTRIES = [
     ("LocalToolsDisabled", "本地工具未启用", "Local tools are disabled", "ローカルツールが無効です", "本機工具未啟用"),
     ("ToolExecFailed", "**工具执行失败**:\n```text\n{}\n```", "**Tool execution failed**:\n```text\n{}\n```", "**ツールの実行に失敗**:\n```text\n{}\n```", "**工具執行失敗**:\n```text\n{}\n```"),
     ("ToolExecOk", "**工具执行成功**:\n```text\n{}\n```", "**Tool executed successfully**:\n```text\n{}\n```", "**ツールの実行に成功**:\n```text\n{}\n```", "**工具執行成功**:\n```text\n{}\n```"),
+    ("AgentRoundLimit", "这一轮工具调用太多了，已经停下。可以让模型继续，或者换个更明确的问法。", "Too many tool calls in one turn; stopping here. You can ask the model to continue, or be more specific.", "1 ターン内のツール呼び出しが多すぎるため停止しました。続きを依頼するか、より具体的に指示してください。", "這一輪工具呼叫太多，已經停下。可以請模型繼續，或換個更明確的問法。"),
+    ("ToolResultTitle", "工具结果", "Tool result", "ツールの結果", "工具結果"),
     ("CopiedToClipboard", "已复制到剪贴板", "Copied to clipboard", "クリップボードにコピーしました", "已複製到剪貼簿"),
     ("SystemPromptSaved", "系统提示词已保存", "System prompt saved", "システムプロンプトを保存しました", "系統提示詞已儲存"),
     # 附件

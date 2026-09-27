@@ -68,16 +68,25 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
          provider_api.rs、
          image_http.rs、models_dev.rs、agent.rs
   ↓
+应用层   app.rs、*_ops.rs                   AppState：状态、业务流程、后台任务、提示
+         （含 agent_loop.rs）
+  ↓
 数据层   config.rs、model.rs、storage.rs、   数据结构、持久化、纯计算
          prompts.rs、backup.rs、paths.rs、
          file_store.rs、model_info.rs、brand.rs、
-         clipboard.rs、analytics.rs
+         clipboard.rs、analytics.rs、
+         local_tools.rs
 ```
 
 > `llm.rs` 是发送与重试的入口（`stream_chat`），它下面拆成三块，互不引用：
 > `llm_request.rs` 管请求体怎么拼、`llm_stream.rs` 管流式响应怎么解、
 > `llm_tools.rs` 管工具调用协议。四者都在服务层内部，方向是单向的
 > （`llm` → 其余三个），不要反过来引用。
+>
+> `agent_loop.rs` 归**应用层**而不是服务层：它要读写 `AppState`（会话消息、挂起的
+> 授权请求、当前轮数），是业务流程而不是纯能力。`local_tools.rs` 归**数据层**：
+> 它不碰 GPUI，只回答"有哪些工具"和"照着参数跑起来"，纯计算性质。
+> `local_tools.rs` 会 `use crate::paths::data_dir()` 做敏感路径判断——数据层内部互引，允许。
 
 - 下层不能引用上层。数据层和服务层不 `use crate::app` 或 `crate::ui`；`app.rs` 不使用 `ui::` 里定义的类型。
 - 数据层和服务层不依赖 GPUI 的 `Context`、`Window`、`Entity`。`brand.rs` 实现 `AssetSource`、`image_http.rs` 实现 `HttpClient` 属于接口适配，是例外；`clipboard.rs` 只用 gpui 的数据类型（`ClipboardEntry`、`Image`）做纯计算，不碰 `Context` / `Window`，同样允许。
@@ -94,6 +103,8 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 | 数据文件路径 | `paths.rs`：数据目录、`APP_NAME` / `LEGACY_APP_NAME`，以及全部数据文件名常量（`CONFIG_FILE`、`SESSIONS_FILE`、`DATABASE_FILE`、`PROMPTS_FILE`、`MODELS_DEV_CACHE_FILE`）和旧名对照表 `LEGACY_FILES`。写文件一律用 `write_atomic` / `write_atomic_bytes` |
 | 大模型请求格式 | `llm_request.rs`（请求体构建写成纯函数并测试）；发送与重试在 `llm.rs::stream_chat`，流式响应解析在 `llm_stream.rs` |
 | 工具调用协议（工具声明、调用、结果） | `llm_tools.rs`。要加新渠道就在这里加一组 `xxx_tools` / `xxx_message` 翻译函数 |
+| **本机可执行的工具**（清单、参数校验、执行、权限级别） | `local_tools.rs`。加一个工具只要在 `all()` 里加一条 + 在 `execute()` 加一个分支；**声明和执行必须放在一起**，不然请求体里的 schema 和实际能跑的会对不上 |
+| **Agent 循环**（工具调用后怎么接着跑、轮数上限、授权挂起） | `agent_loop.rs`。判断逻辑写成纯函数（`next_action`），动作部分才是 `impl AppState`——纯函数才能直接写测试 |
 | 渠道管理接口（拉取模型、测试连接） | `provider_api.rs` |
 | 一组新的业务操作 | 新建 `xxx_ops.rs`，写 `impl AppState { … }`；不要再往 `app.rs`、`session_ops.rs` 里加 |
 | 剪贴板内容的识别和转换 | `clipboard.rs`（纯数据层：接收 `&[ClipboardEntry]`，判断该粘贴什么、把图片转成可保存格式）。**读剪贴板本身**在 `attachment_ops.rs` 里调 `cx.read_from_clipboard()`，不要直接调 Win32 剪贴板接口 |
@@ -106,7 +117,7 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 
 ### 3.3 规模
 
-- 单个文件（不算测试）超过 **800 行** 就要拆。目前没有超标文件（最大的 `llm_request.rs` 非测试 411 行）：新功能不要再往大文件里加；改到其中某块时，顺手把那块拆成新文件。
+- 单个文件（不算测试）超过 **800 行** 就要拆。目前没有超标文件（最大的是 `app.rs` 732 行）：新功能不要再往大文件里加；改到其中某块时，顺手把那块拆成新文件。
 - 界面函数超过约 100 行，或链式调用嵌套超过 4 层，拆出 `render_xxx` 子函数。
 - 每个 `xxx_ops.rs` 只负责一个领域，例如会话、模型、附件、渠道。
 
@@ -374,7 +385,7 @@ cx.spawn(async move |this, cx| {
 ## 11. 安全与隐私
 
 - API Key 只存在系统凭据管理器里。提示、错误信息、备份文件里都不能出现明文密钥。
-- 本地工具（`/bash`、`/read` 等）默认关闭。每次执行都要用户在授权卡片上确认，不能自动执行模型输出的命令。
+- 本地工具（`/bash`、`/read` 等）默认关闭。危险操作（执行命令、写文件）每次都要用户在授权卡片上确认，不能自动执行模型输出的命令。
 - 模型回复是**不可信内容**，可能被提示词注入操纵。回复里的链接和图片地址，不能在用户不知情时访问；本机和局域网地址一律拦截（`image_http.rs`）。
 - 程序只访问用户配置的渠道地址。要新增访问其他服务的功能（包括后台同步），需要用户同意，并且在设置里可以关闭。
 - 附件只保存在数据目录里，文件名先清理（`file_store::sanitize_file_name`），单个文件不超过 `file_store::MAX_ATTACHMENT_BYTES`。
@@ -385,11 +396,30 @@ cx.spawn(async move |this, cx| {
 以下不能推翻，要改先问用户：
 
 - 先把普通对话做好，Agent 和 MCP 放在最后。
-- 本地工具默认关闭，每次执行都要授权。
+- 本地工具默认关闭，**危险操作每次都要授权**；只读操作免确认。分级见下。
 - API Key 不写进任何文件。
 - 在较早的回答上"重新生成"会删掉后面的消息，必须先确认。
 - 模板变量（`{{clipboard}}` 等）只在插入模板时展开，发送消息时不展开，避免剪贴板内容被悄悄发出去。
 - OpenAI 渠道上的推理模型不发送默认温度（会报 400）。
+
+> **授权的分级口径（2026-09-26 与用户确认）。**
+> "每次授权"按字面执行会让模型读一个文件都要点一次确认，Agent 就没法用了，
+> 所以按操作的危险程度分两级，实现见 `local_tools.rs::Guard`：
+>
+> | 级别 | 工具 | 行为 |
+> | --- | --- | --- |
+> | `Free` | `list_directory`、`git_status`、`read_file`（普通路径） | 直接执行，不弹卡片 |
+> | `NeedsApproval` | `write_file`、`run_command`、`read_file`（敏感路径） | 每次弹卡片，用户同意才跑 |
+>
+> **敏感路径**指：`~/.ssh/id_rsa`、`.env`、`credentials*`、`*.pem` / `*.key` / `*.pfx`、
+> 数据目录内的任何文件、以及工作目录之外的 `.env`。
+> ⚠️ 这是**防呆不是安全边界**——模型换个路径绕过去拦不住。
+> 真正的边界是"敏感读取必须用户点一次"。
+> 另外**工具名不认识时按最严处理**（`Guard::NeedsApproval`），
+> 因为模型可能编一个不存在的工具名，不能因为"查不到"就当成只读放行。
+>
+> 还有一条兜底：**一轮用户提问最多 12 轮工具调用**（`agent_loop::MAX_AGENT_ROUNDS`），
+> 超了就停下并提示。没有上限的话模型卡住时会一直转，每轮都在花 token。
 
 ## 12. 测试与交付
 
@@ -436,20 +466,32 @@ cx.spawn(async move |this, cx| {
 | 1 | 远程图片自动加载并写入磁盘缓存（没有容量上限，也不清理）；下载层去掉了"用户同意"的检查 | `ui/markdown_image.rs`、`image_http.rs` | ⚠ 和之前"默认不加载、不落盘"的决定冲突，待确认 |
 | 2 | 启动时自动访问 models.dev；自建线程和 tokio 运行时；不走代理；错误全部静默 | `models_dev.rs` | ⚠ 是否保留自动同步待确认；保留的话改用 `runtime()`、走代理、在设置里加开关 |
 | 3 | 启动或初始化失败直接 panic（7 处） | `main.rs`（`main`）、`app.rs`（`runtime`、`new`）、`config.rs`（`load`）、`model.rs`（`load_or_init`）、`paths.rs`（`data_file`）、`llm_request.rs`（`claude_body`） | 改成错误提示界面。`model_info.rs` 的 5 处 `LazyLock<Regex>` 属 [§6](#6-错误处理) 合法例外 |
-| 4 | 阻塞界面线程：本地工具同步执行 | `app.rs` | 放到后台 |
-| 5 | 重复的小组件：`section` 和 `form_card`（几乎逐行相同）、`labeled` 和 `row_title`（都是"标题+说明"） | `ui/settings.rs`、`ui/model_editor_dialog.rs`、`ui/params.rs` | 合并到 `ui/widgets.rs`。⚠️ 本条目原先还列了 `filter_chip` 和 `chip`，**2026-09-26 核实为错判**——前者是 `Button`、后者是手绘 `Div`，视觉与交互都不同，不该合并 |
-| 6 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
+| 4 | 拉取模型、测试连接不走渠道代理 | `provider_api.rs` | 改到时修 |
+| 5 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
+| 6 | 重复的小组件：`section` 和 `form_card`（几乎逐行相同）、`labeled` 和 `row_title`（都是"标题+说明"） | `ui/settings.rs`、`ui/model_editor_dialog.rs`、`ui/params.rs` | 合并到 `ui/widgets.rs`。⚠️ 本条目原先还列了 `filter_chip` 和 `chip`，**2026-09-26 核实为错判**——前者是 `Button`、后者是手绘 `Div`，视觉与交互都不同，不该合并 |
 | 7 | 全部会话和消息常驻内存，保存时全量比对 | `model.rs`、`storage.rs` | 见 ROADMAP |
-| 8 | 2 处 `#[allow(clippy::too_many_arguments)]` 压着 clippy（`render_assistant_message` 9 个参数、`token_row` 8 个参数） | `ui/message_assistant.rs`、`ui/model_editor_dialog.rs` | 参考 `ui/params.rs` 的 `ChoiceRow`，用结构体收参数 |
+| 8 | 工具执行仍同步跑在界面线程上，慢命令会冻住窗口 | `local_tools.rs`（`execute`） | 异步化要先定"占位消息怎么渲染、取消按钮放哪"，放 P4 |
 
 修掉一项，就从这张表里删掉；新发现的问题也记进来。
 
 > **2026-09-26 已修并删除**：原 #7「OpenAI Responses 渠道仍按 Chat Completions 格式发请求」——
 > P3-1 打通工具调用协议时一并修好。现在 `OpenAiResponses` 在 `emit_delta` / `emit_complete` 里
-> 是独立分支：请求体走 `input`，解析走 `response.output_text.delta` 与 `output[].type`，
+> 是独立分支，解析走 `response.output_text.delta` 与 `output[].type`，
 > 且 `handle_sse_line` 不再丢弃 `event:` 行。回归测试
-> `llm::tests::responses_streaming_uses_event_names` 锁住。
+> `llm_stream::tests::responses_streaming_uses_event_names` 锁住。
 > 删除后原 #8、#9 顺次上移为 #7、#8。
+
+> **2026-09-26 已修并删除**：原 #4「阻塞界面线程：本地工具同步执行」——
+> P3-2 建 Agent 循环时整体重写：`agent.rs::execute_local_tool`（`:::` 拼参数那套）
+> 搬去 `local_tools.rs` 并改成结构化 JSON 参数 + 权限分级；
+> `app.rs::execute_agent_tool` 拆成 `approve_pending_tool` / `run_agent_tool` /
+> `push_tool_result` / `continue_agent`（循环在 `agent_loop.rs`）。
+> 删除后原 #5~#9 顺次上移为 #4~#8。
+> ⚠️ **但"异步"这半没做完**：执行仍在界面线程上，已作为新 #8 记进来。
+>
+> ⚠️ 同一批还改正了一个**文档与代码不符**处：本表原文说 Responses「请求体走 `input`」，
+> 实际 `openai_body()` 对 Responses 渠道发的仍是 `messages`。**请求侧还是不对**，
+> 只是响应侧对了。已记入 `TECH_DEBT.md` 第五节，真正启用该渠道时单独修。
 
 ---
 

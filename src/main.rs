@@ -2,6 +2,7 @@ use gpui_kit::component::{Root, TitleBar};
 use gpui_kit::*;
 
 mod agent;
+mod agent_loop;
 mod analytics;
 mod app;
 mod attachment_ops;
@@ -17,6 +18,7 @@ mod llm;
 mod llm_request;
 mod llm_stream;
 mod llm_tools;
+mod local_tools;
 mod model;
 mod model_info;
 mod model_ops;

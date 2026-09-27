@@ -57,9 +57,6 @@ impl ChatMessageReq {
     }
 
     /// 助手在本轮要求调用的工具。`content` 通常为空，但渠道要求这个字段存在。
-    ///
-    /// 同 `ToolResult`：P3-1 只有测试在调用，实际调用点在 P3-2 的 Agent 循环。
-    #[allow(dead_code)]
     pub fn assistant_tool_calls(content: impl Into<String>, tool_calls: Vec<ToolCall>) -> Self {
         Self {
             tool_calls,
@@ -69,7 +66,6 @@ impl ChatMessageReq {
 
     /// 一条工具执行结果。`role` 统一写 "tool"，各渠道序列化时再决定怎么表达：
     /// OpenAI / Claude 用 `tool_call_id` 里的调用 id，Gemini 用 `tool_name`。
-    #[allow(dead_code)]
     pub fn tool_result(result: crate::llm_tools::ToolResult) -> Self {
         Self {
             tool_call_id: result.id,
@@ -102,6 +98,9 @@ pub struct ChatRequest {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    /// 发出这个请求的渠道 id。请求体用不到它，但 Agent 循环续跑时要拿它
+    /// 找到同一个渠道（用户可能在生成期间换了模型，续跑必须还发在这里）。
+    pub provider_id: String,
     pub messages: Vec<ChatMessageReq>,
     /// 本轮可用的工具。**为空时请求体里完全不出现 tools 字段**——老会话、没开
     /// Agent 的对话发出去的请求和以前逐字节一致，prompt 缓存不会失效。
@@ -468,6 +467,7 @@ mod tests {
             base_url: "https://api.openai.com/v1".into(),
             api_key: "secret".into(),
             model: "test-model".into(),
+            provider_id: "test-provider".into(),
             messages: vec![ChatMessageReq::new("user", "hi")],
             tools: Vec::new(),
             temperature: None,

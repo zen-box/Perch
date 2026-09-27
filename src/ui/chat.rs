@@ -1,5 +1,6 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::message_scroller::MessageScroller;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, h_flex, v_flex};
@@ -12,9 +13,11 @@ use super::brand_icon::{
 };
 use super::{CONTENT_MAX_WIDTH, Palette, dialogs, icon_tile};
 use super::{composer, empty_state, message_assistant, message_user};
+use crate::agent_loop::PendingToolApproval;
 use crate::app::AppState;
 use crate::i18n::{AppLanguage, Key, tr, tr_args};
-use crate::model::Attachment;
+use crate::local_tools::PendingTool;
+use crate::model::{Attachment, ChatMessage, DEFAULT_SESSION_TITLE};
 
 // ================= 对话主区域 =================
 
@@ -27,6 +30,15 @@ pub fn render_chat_panel(state: &mut AppState, p: &Palette, cx: &mut Context<App
         .storage
         .get_active_session()
         .is_some_and(|s| !s.messages.is_empty());
+    // 授权卡片只在它所属的对话里显示；挂在别的对话上时，这里只给一条提示
+    let active_id = state.storage.active_session_id.clone();
+    let approval_here = state.agent.pending_in(&active_id).cloned();
+    let approval_elsewhere = state
+        .agent
+        .pending
+        .as_ref()
+        .filter(|pending| pending.session_id != active_id)
+        .map(|pending| pending.session_id.clone());
 
     v_flex()
         .flex_1()
@@ -66,8 +78,11 @@ pub fn render_chat_panel(state: &mut AppState, p: &Palette, cx: &mut Context<App
                         .is_some_and(|session| session.has_unresolved_compare()),
                     |this| this.child(render_compare_notice(p, lang)),
                 )
-                .when(state.pending_tool_name.is_some(), |this| {
-                    this.child(render_tool_permission(state, p, cx))
+                .when_some(approval_here, |this, approval| {
+                    this.child(render_tool_permission(&approval, lang, p, cx))
+                })
+                .when_some(approval_elsewhere, |this, session_id| {
+                    this.child(render_pending_elsewhere(state, &session_id, p, cx))
                 })
                 .child(composer::render_composer(state, p, cx)),
         )
@@ -80,7 +95,7 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
         .get_active_session()
         .map(|session| {
             (
-                session.title.clone(),
+                session_display_title(session, lang),
                 session.messages.len(),
                 session.id.clone(),
                 session.pinned,
@@ -231,6 +246,10 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
     let lang = app.read(cx).language();
     let content = if msg.role == "user" {
         message_user::render_user_message(app, ix, msg, streaming, lang, &p).into_any_element()
+    } else if msg.role == "tool" {
+        let expanded = app.read(cx).agent.expanded_results.contains(&msg.id);
+        let mono_font = cx.theme().mono_font_family.clone();
+        render_tool_result(app, &msg, expanded, mono_font, &p, lang)
     } else {
         let (avatar, model_label) = match owner {
             Some(model) => (model_avatar(&model, px(28.), &p), model.name.clone()),
@@ -251,6 +270,161 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
         .px_3()
         .child(div().w_full().max_w(CONTENT_MAX_WIDTH).child(content))
         .into_any_element()
+}
+
+// ================= 工具结果 =================
+
+/// 折叠时最多显示的行数和字数。超出的部分点「展开全部」再看。
+const TOOL_RESULT_COLLAPSED_LINES: usize = 12;
+const TOOL_RESULT_COLLAPSED_CHARS: usize = 1500;
+
+/// 一条工具执行结果。
+///
+/// 单独成块而不是挂在助手消息下面：一次追问里模型可能连着调好几个工具，
+/// 挂在同一条消息上会挤成一堆，也看不出哪个结果对应哪次调用。
+///
+/// 正文按行显示：命令输出、目录列表、文件内容的换行都有意义，压成一行就没法看了。
+fn render_tool_result(
+    app: &Entity<AppState>,
+    msg: &ChatMessage,
+    expanded: bool,
+    mono_font: SharedString,
+    p: &Palette,
+    lang: AppLanguage,
+) -> AnyElement {
+    let running = msg.is_streaming;
+    let accent = if running {
+        p.muted_foreground
+    } else if msg.tool_is_error {
+        p.danger
+    } else {
+        p.success
+    };
+    let title = if msg.tool_name.is_empty() {
+        tr(lang, Key::ToolResultTitle).to_string()
+    } else {
+        msg.tool_name.clone()
+    };
+    let body = msg.content.trim_end();
+    let total_lines = body.lines().count();
+    let long = total_lines > TOOL_RESULT_COLLAPSED_LINES || body.chars().count() > TOOL_RESULT_COLLAPSED_CHARS;
+    let lines = if long && !expanded {
+        collapsed_lines(body)
+    } else {
+        body.lines().map(str::to_string).collect()
+    };
+    let toggle_app = app.clone();
+    let toggle_id = msg.id.clone();
+
+    v_flex()
+        .w_full()
+        .max_w(CONTENT_MAX_WIDTH)
+        .gap_2()
+        .p_3()
+        .rounded_lg()
+        .border_1()
+        .border_color(accent.opacity(0.35))
+        .bg(accent.opacity(if p.is_dark { 0.08 } else { 0.05 }))
+        .child(
+            h_flex()
+                .gap_2()
+                .child(if running {
+                    Spinner::new().small().into_any_element()
+                } else {
+                    Icon::new(if msg.tool_is_error {
+                        IconName::CircleAlert
+                    } else {
+                        IconName::Terminal
+                    })
+                    .size(px(14.))
+                    .text_color(accent)
+                    .into_any_element()
+                })
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(accent)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child(format_msg_time(&msg.created_at).to_string()),
+                ),
+        )
+        .when(running, |this| {
+            this.child(
+                div()
+                    .text_xs()
+                    .text_color(p.muted_foreground)
+                    .child(tr(lang, Key::ToolRunning)),
+            )
+        })
+        .when(!running && !lines.is_empty(), |this| {
+            this.child(
+                v_flex()
+                    .w_full()
+                    .font_family(mono_font)
+                    .text_xs()
+                    .text_color(p.foreground)
+                    // 空行也要占一行的高度，不然段落之间的空行会被吃掉
+                    .children(
+                        lines
+                            .into_iter()
+                            .map(|line| div().child(if line.is_empty() { " ".to_string() } else { line })),
+                    ),
+            )
+        })
+        .when(long && !running, |this| {
+            this.child(
+                div().child(
+                    Button::new(SharedString::from(format!("tool-toggle-{}", msg.id)))
+                        .ghost()
+                        .xsmall()
+                        .icon(if expanded {
+                            IconName::ChevronUp
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .label(if expanded {
+                            tr(lang, Key::CollapseResult).to_string()
+                        } else {
+                            tr_args(lang, Key::ShowAllLines, &[&total_lines.to_string()])
+                        })
+                        .on_click(move |_, _, cx| {
+                            toggle_app.update(cx, |this, cx| this.toggle_tool_result(&toggle_id, cx));
+                        }),
+                ),
+            )
+        })
+        .when(msg.local_only, |this| {
+            this.child(
+                h_flex()
+                    .gap_1()
+                    .text_xs()
+                    .text_color(p.muted_foreground)
+                    .child(Icon::new(IconName::Lock).size(px(12.)))
+                    .child(tr(lang, Key::LocalOnlyNote)),
+            )
+        })
+        .into_any_element()
+}
+
+/// 折叠状态下显示的开头几行：行数和总字数都有上限（一行压缩过的 JSON 就能有几万字）。
+fn collapsed_lines(body: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut budget = TOOL_RESULT_COLLAPSED_CHARS;
+    for line in body.lines().take(TOOL_RESULT_COLLAPSED_LINES) {
+        if budget == 0 {
+            break;
+        }
+        let piece: String = line.chars().take(budget).collect();
+        budget = budget.saturating_sub(piece.chars().count().max(1));
+        lines.push(piece);
+    }
+    lines
 }
 
 fn render_import_banner(p: &Palette, lang: AppLanguage, cx: &mut Context<AppState>) -> impl IntoElement {
@@ -325,12 +499,49 @@ pub(super) fn attachment_badge(att: &Attachment, p: &Palette, lang: AppLanguage)
 
 // ================= 工具授权卡片 =================
 
-fn render_tool_permission(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
-    let lang = state.language();
-    let tool_name = state.pending_tool_name.clone().unwrap_or_default();
-    let tool_cmd = state.pending_tool_cmd.clone().unwrap_or_default();
-    let exec_tool = tool_name.clone();
-    let exec_arg = tool_cmd.clone();
+/// 授权卡片上展示的调用内容。
+///
+/// 命令**原样全文展示**：用户同意的就是这一串，截掉一段就可能正好藏住危险的部分。
+/// 要写入的文件内容可能很长，只预览开头几十行，路径写在最前面。
+fn approval_detail(tool: &PendingTool, lang: AppLanguage) -> String {
+    const PREVIEW_LINES: usize = 20;
+    let arg = |key: &str| {
+        tool.arguments
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    };
+    match tool.name.as_str() {
+        "run_command" => arg("command").unwrap_or_else(|| tool.arguments_summary()),
+        "write_file" => {
+            let path = arg("path").unwrap_or_default();
+            let content = arg("content").unwrap_or_default();
+            let lines: Vec<&str> = content.lines().collect();
+            let shown = lines.len().min(PREVIEW_LINES);
+            format!(
+                "write_file → {path}\n{}\n{}",
+                tr_args(
+                    lang,
+                    Key::ToolPreviewLines,
+                    &[&shown.to_string(), &lines.len().to_string()]
+                ),
+                lines[..shown].join("\n")
+            )
+        }
+        _ => tool.arguments_summary(),
+    }
+}
+
+fn render_tool_permission(
+    approval: &PendingToolApproval,
+    lang: AppLanguage,
+    p: &Palette,
+    cx: &mut Context<AppState>,
+) -> impl IntoElement {
+    // 两个来源共用一个卡片：模型请求的调用（Agent 循环）和用户手打的斜杠命令
+    let tool_name = approval.tool.name.clone();
+    let tool_detail = approval_detail(&approval.tool, lang);
+    let local_only = approval.is_local_only();
     let mono_font = cx.theme().mono_font_family.clone();
 
     v_flex()
@@ -361,7 +572,7 @@ fn render_tool_permission(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                 .child(tr(lang, Key::ToolAuthHint)),
         )
         .child(
-            div()
+            v_flex()
                 .w_full()
                 .px_3()
                 .py_2()
@@ -371,8 +582,24 @@ fn render_tool_permission(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                 .border_color(p.border)
                 .font_family(mono_font)
                 .text_xs()
-                .child(tool_cmd),
+                .children(tool_detail.lines().map(|line| {
+                    div().child(if line.is_empty() {
+                        " ".to_string()
+                    } else {
+                        line.to_string()
+                    })
+                })),
         )
+        .when(local_only, |this| {
+            this.child(
+                h_flex()
+                    .gap_1()
+                    .text_xs()
+                    .text_color(p.muted_foreground)
+                    .child(Icon::new(IconName::Lock).size(px(12.)))
+                    .child(tr(lang, Key::LocalOnlyNote)),
+            )
+        })
         .child(
             h_flex()
                 .justify_end()
@@ -390,11 +617,59 @@ fn render_tool_permission(state: &AppState, p: &Palette, cx: &mut Context<AppSta
                         .small()
                         .icon(IconName::Check)
                         .label(tr(lang, Key::AllowOnce))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.execute_agent_tool(&exec_tool, &exec_arg, cx);
-                        })),
+                        .on_click(cx.listener(|this, _, _, cx| this.approve_pending_tool(cx))),
                 ),
         )
+}
+
+/// 别的对话挂着授权卡片：这里提示一句，点「前往」切过去处理。
+/// 卡片本身不搬过来——在这里点允许，结果和后续请求都属于那个对话，用户会搞混。
+fn render_pending_elsewhere(
+    state: &AppState,
+    session_id: &str,
+    p: &Palette,
+    cx: &mut Context<AppState>,
+) -> impl IntoElement {
+    let lang = state.language();
+    let title = state
+        .session(session_id)
+        .map(|session| session_display_title(session, lang))
+        .unwrap_or_default();
+    let target = session_id.to_string();
+
+    h_flex()
+        .w_full()
+        .max_w(CONTENT_MAX_WIDTH)
+        .gap_2()
+        .px_3()
+        .py_2()
+        .rounded_lg()
+        .border_1()
+        .border_color(p.warning.opacity(0.45))
+        .bg(p.warning.opacity(if p.is_dark { 0.12 } else { 0.07 }))
+        .child(Icon::new(IconName::ShieldAlert).size(px(14.)).text_color(p.warning))
+        .child(div().flex_1().min_w_0().truncate().text_sm().child(tr_args(
+            lang,
+            Key::ApprovalPendingElsewhere,
+            &[&title],
+        )))
+        .child(
+            Button::new("goto-pending-approval")
+                .ghost()
+                .xsmall()
+                .label(tr(lang, Key::GoToChat))
+                .on_click(cx.listener(move |this, _, window, cx| this.switch_session(target.clone(), window, cx))),
+        )
+}
+
+/// 对话在界面上显示的标题：还没被命名过的占位标题换成当前语言的「新对话」。
+/// 数据里存的占位值是固定的（见 `model.rs::DEFAULT_SESSION_TITLE`），不随界面语言变。
+fn session_display_title(session: &crate::model::ChatSession, lang: AppLanguage) -> String {
+    if session.title_auto && session.title == DEFAULT_SESSION_TITLE {
+        tr(lang, Key::NewChat).to_string()
+    } else {
+        session.title.clone()
+    }
 }
 
 pub(super) fn format_msg_time(created_at: &str) -> &str {

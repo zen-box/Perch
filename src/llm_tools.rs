@@ -16,7 +16,9 @@ use crate::llm::ChatMessageReq;
 /// 模型要求调用某个工具的记录。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
-    /// 渠道给的调用 id。Claude / OpenAI 会带，Gemini 没有（回传时按函数名对应）。
+    /// 调用 id，**一定不为空、在会话里唯一**：Agent 循环靠它把结果和调用配对。
+    /// Claude / OpenAI 会给；Gemini 和部分兼容接口不给，由 [`fresh_call_id`] 补一个
+    /// （Gemini 回传时按函数名对应，用不到这个 id）。
     #[serde(default)]
     pub id: String,
     pub name: String,
@@ -26,12 +28,7 @@ pub struct ToolCall {
 }
 
 /// 工具执行结果，回传时按渠道转成对应格式。
-///
-/// P3-1 只做协议层：这个类型目前在产品代码里还没有构造点（工具执行属于 P3-2 的
-/// Agent 循环），只有测试在用，所以非测试构建会报 `never constructed`。
-/// 这里显式豁免并写明原因——删掉的话 P3-2 立刻又要加回来。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct ToolResult {
     /// 对应 `ToolCall::id`；Gemini 用不到，回传时忽略。
     #[serde(default)]
@@ -43,17 +40,13 @@ pub struct ToolResult {
 }
 
 /// 一个可供模型调用的工具。`parameters` 是 JSON Schema。
-///
-/// 同 `ToolResult`：P3-1 只有测试在构造它，工具清单由 P3-2 填进来。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct ToolSpec {
     pub name: String,
     pub description: String,
     pub parameters: Value,
 }
 
-#[allow(dead_code)]
 impl ToolSpec {
     pub fn new(name: impl Into<String>, description: impl Into<String>, parameters: Value) -> Self {
         Self {
@@ -112,12 +105,20 @@ impl ToolCallState {
                 continue;
             }
             emit(ToolCall {
-                id: call.id,
+                id: if call.id.is_empty() { fresh_call_id() } else { call.id },
                 name: call.name,
                 arguments: parse_arguments(&call.raw),
             });
         }
     }
+}
+
+/// 给没带 id 的调用补一个。
+///
+/// 不能留空、也不能拿函数名凑数：Agent 循环按 id 判断「这个调用回过结果没有」，
+/// 同一个函数被调第二次时，id 重复就会被当成已经回过，循环直接停住。
+pub(crate) fn fresh_call_id() -> String {
+    format!("call_{}", uuid::Uuid::new_v4().simple())
 }
 
 /// 把攒起来的参数字符串解析成 JSON。
@@ -237,13 +238,16 @@ pub(crate) fn claude_message(msg: &ChatMessageReq) -> Value {
 
 /// Gemini 的工具结果：是个 user 消息里的 `functionResponse` part。
 /// Gemini 不认调用 id，只认函数名，所以用 `tool_name` 而不是 `tool_call_id`。
+///
+/// 结果必须放在 `response` 对象里——`functionResponse` 没有 `content` 这个字段，
+/// 写成 `content` 会被接口以"未知字段"拒绝，循环第二轮就断了。
 pub(crate) fn gemini_tool_response(msg: &ChatMessageReq) -> Value {
     json!({
         "role": "user",
         "parts": [{
             "functionResponse": {
                 "name": msg.tool_name,
-                "content": msg.content,
+                "response": { "result": msg.content },
             }
         }]
     })
