@@ -552,6 +552,17 @@ i18n! {
     MigrationCopyDir => { "{} 复制到 {} 失败，继续使用旧目录", "Failed to copy {} to {}; continuing with the old directory", "{} を {} へコピーできませんでした。旧ディレクトリを引き続き使用します", "{} 複製到 {} 失敗，繼續使用舊目錄" },
     MigrationCopyFile => { "{} 复制为 {} 失败: {}", "Failed to copy {} to {}: {}", "{} を {} へコピーできませんでした: {}", "{} 複製為 {} 失敗: {}" },
 
+    // ---- 启动失败页（TECH_DEBT #3）----
+    StartupFailedTitle => { "启动失败", "Failed to start", "起動できませんでした", "啟動失敗" },
+    StartupFailedHint => { "配置或数据文件读不出来。修好之后重新启动，或者先打开数据目录看看。", "The configuration or data files could not be read. Fix them and restart, or open the data folder first.", "設定またはデータファイルを読み込めませんでした。修正して再起動するか、先にデータフォルダーを開いて確認してください。", "設定或資料檔案讀不出來。修好之後重新啟動，或先開啟資料目錄看看。" },
+    StartupRuntimeFailed => { "无法启动后台运行时：{}", "Could not start the background runtime: {}", "バックグラウンド実行環境を起動できません：{}", "無法啟動背景執行環境：{}" },
+    StartupConfigFailed => { "读取配置失败：{}", "Could not read the configuration: {}", "設定を読み込めませんでした：{}", "讀取設定失敗：{}" },
+    StartupStorageFailed => { "读写会话数据失败：{}", "Could not read or write the session data: {}", "セッションデータの読み書きに失敗しました：{}", "讀寫工作階段資料失敗：{}" },
+    StartupDataDir => { "数据目录：{}", "Data folder: {}", "データフォルダー：{}", "資料目錄：{}" },
+    StartupOpenDataDir => { "打开数据目录", "Open data folder", "データフォルダーを開く", "開啟資料目錄" },
+    StartupOpenDataDirFailed => { "打开数据目录失败：{}", "Could not open the data folder: {}", "データフォルダーを開けませんでした：{}", "開啟資料目錄失敗：{}" },
+    StartupQuit => { "退出", "Quit", "終了", "結束" },
+
     // ---- 4.4-c：图片与文件链路 ----
     ModelIdRequired => { "模型 ID 不能为空", "The model ID cannot be empty", "モデル ID は必須です", "模型 ID 不能為空" },
     ModelAlreadyExists => { "这个渠道已经有模型「{}」了", "This provider already has a model named “{}”", "このプロバイダーには既にモデル「{}」があります", "這個管道已經有模型「{}」了" },

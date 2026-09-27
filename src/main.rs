@@ -38,7 +38,7 @@ mod theme;
 mod ui;
 
 use app::AppState;
-use ui::Workspace;
+use ui::{ErrorPage, Workspace};
 
 actions!(
     perch,
@@ -47,12 +47,17 @@ actions!(
 
 fn main() {
     models_dev::sync_cache_background(false);
-    let config = config::AppConfig::load();
+    // 配置读不出来也得能把窗口开起来——错误页要用它定主题和语言。所以这里退回默认值，
+    // 真正的读取和报错交给 `AppState::bootstrap`（它失败时显示错误页，而不是闪退）。
+    let config = config::AppConfig::try_load().unwrap_or_default();
+    // 这两个值要在窗口开出来之前用，先取出来，省得把整份配置搬进闭包
+    let is_dark = config.is_dark;
+    let language = config.language.clone();
     let app = gpui_kit::application()
         .with_assets(brand::AppAssets)
         .with_http_client(image_http::client_for_config(&config));
 
-    app.run(|cx: &mut App| {
+    app.run(move |cx: &mut App| {
         gpui_kit::init(cx);
         cx.bind_keys([
             KeyBinding::new("secondary-n", NewChat, None),
@@ -64,8 +69,15 @@ fn main() {
             KeyBinding::new("secondary-v", PasteIntoChat, Some("Perch")),
         ]);
 
+        // 主题和语言先设好：错误页也要有颜色、有文案（`AppState::new` 会再设一次，
+        // 那次带上窗口，用来触发重绘）。
+        let lang = i18n::AppLanguage::from_str(&language);
+        theme::apply_theme(is_dark, None, cx);
+        i18n::apply_locale(lang);
+        i18n::set_current(cx, lang);
+
         let bounds = Bounds::centered(None, size(px(1180.0), px(780.0)), cx);
-        cx.open_window(
+        let opened = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
@@ -76,11 +88,25 @@ fn main() {
                 ..TitleBar::window_options()
             },
             |window, cx| {
-                let app = cx.new(|cx| AppState::new(window, cx));
-                let workspace = cx.new(|_| Workspace::new(app));
-                cx.new(|cx| Root::new(workspace, window, cx))
+                // 启动数据先试读。读不出来就换一个根视图显示原因——这一步必须在
+                // 建 `AppState` 之前，因为它失败时 `AppState` 根本构造不出来。
+                match AppState::bootstrap() {
+                    Ok(bootstrap) => {
+                        let app = cx.new(|cx| AppState::new(bootstrap, window, cx));
+                        let workspace = cx.new(|_| Workspace::new(app));
+                        cx.new(|cx| Root::new(workspace, window, cx))
+                    }
+                    Err(failure) => {
+                        let page = cx.new(|_| ErrorPage::new(failure));
+                        cx.new(|cx| Root::new(page, window, cx))
+                    }
+                }
             },
-        )
-        .unwrap();
+        );
+        if let Err(error) = opened {
+            // 走到这里连窗口都没开出来，没有任何界面能显示错误了，只能留下记录再退出
+            eprintln!("Perch 启动失败：无法创建窗口：{error}");
+            cx.quit();
+        }
     });
 }

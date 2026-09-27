@@ -194,11 +194,48 @@ pub fn data_file(name: &str) -> PathBuf {
     }
     for legacy in candidates {
         if legacy.exists() {
-            fs::copy(&legacy, &path).unwrap_or_else(|error| panic!("Unable to migrate {}: {error}", legacy.display()));
+            // 复制不过去就等于读不到旧数据，必须让用户知道。
+            //
+            // 这里**不能 panic**：`data_file` 在启动早期就会被调用（读配置、开会话库），
+            // 崩在这里的话用户连错误页都看不到，只会看到程序一闪而过。走已有的
+            // 迁移失败通道——启动后由 `app.rs` 弹提示，或者由错误页一并显示。
+            if let Err(failure) = copy_legacy_file(&legacy, &path, name) {
+                record_migration_failure(failure);
+            }
             break;
         }
     }
     path
+}
+
+/// 把旧位置的文件复制到数据目录。失败时**返回原因**而不是自己记进全局，
+/// 这样逻辑本身可以直接测（`data_dir()` 是 `OnceLock`，测试里改不动）。
+fn copy_legacy_file(legacy: &Path, target: &Path, name: &str) -> Result<(), MigrationFailure> {
+    fs::copy(legacy, target)
+        .map(|_| ())
+        .map_err(|error| MigrationFailure::CopyFile {
+            old: legacy.display().to_string(),
+            new: name.to_string(),
+            error: error.to_string(),
+        })
+}
+
+/// 在系统文件管理器里打开一个路径。
+///
+/// 只有 Windows 有实现；别的平台返回 `Unsupported`，调用方按"打不开"处理即可。
+pub fn reveal(path: &Path) -> io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer").arg(path).spawn().map(|_| ())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "reveal is not implemented on this platform",
+        ))
+    }
 }
 
 /// 附件存储目录（如多模态图片、文件等）
@@ -302,6 +339,26 @@ mod tests {
             "失败时正式路径上不能留下半成品，否则下次启动会当成迁移已完成"
         );
         assert!(!base.path().join("Perch.migrating").exists(), "staging 也要清掉");
+    }
+
+    #[test]
+    fn a_failed_legacy_copy_is_reported_instead_of_panicking() {
+        let dir = tempdir().unwrap();
+        let legacy = dir.path().join("perch-config.json");
+        fs::write(&legacy, "{}").unwrap();
+        // 目标目录不存在，复制必然失败
+        let target = dir.path().join("missing/perch-config.json");
+
+        let failure = copy_legacy_file(&legacy, &target, "perch-config.json").unwrap_err();
+
+        match failure {
+            MigrationFailure::CopyFile { old, new, error } => {
+                assert!(old.ends_with("perch-config.json"), "要指出是哪个文件：{old}");
+                assert_eq!(new, "perch-config.json");
+                assert!(!error.is_empty(), "要带上系统给的原因");
+            }
+            other => panic!("应当是复制失败，实际是 {other:?}"),
+        }
     }
 
     #[test]

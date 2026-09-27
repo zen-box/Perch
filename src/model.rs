@@ -591,9 +591,10 @@ struct LegacyStorageData {
 }
 
 impl StorageData {
-    pub fn load_or_init() -> Self {
-        Self::open(&data_dir().join(DATABASE_FILE), &data_file(SESSIONS_FILE))
-            .unwrap_or_else(|error| panic!("Unable to open chat storage: {error}"))
+    /// 打开会话库。失败时把原因**交给调用方**，不在这里 panic——
+    /// 启动阶段要拿它渲染错误页，panic 掉就没有界面能显示原因了。
+    pub fn try_load_or_init() -> Result<Self, String> {
+        Self::open(&data_dir().join(DATABASE_FILE), &data_file(SESSIONS_FILE)).map_err(|error| error.to_string())
     }
 
     fn open(database_path: &Path, legacy_path: &Path) -> StorageResult<Self> {

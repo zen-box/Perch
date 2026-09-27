@@ -173,7 +173,7 @@ impl AppState {
     #[cfg(target_os = "windows")]
     pub fn reveal_attachment(&mut self, path: &Path, cx: &mut Context<Self>) {
         let lang = self.language();
-        if let Err(error) = std::process::Command::new("explorer").arg(path).spawn() {
+        if let Err(error) = crate::paths::reveal(path) {
             self.toast(
                 ToastLevel::Error,
                 tr_args(lang, Key::OpenFileFailed, &[&error.to_string()]),

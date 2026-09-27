@@ -4,6 +4,7 @@ mod chat;
 mod composer;
 mod dialogs;
 mod empty_state;
+mod error_page;
 mod fetch_models_dialog;
 mod markdown_image;
 mod message_assistant;
@@ -33,6 +34,9 @@ use crate::app::{AppState, SettingsTab, ToastLevel, ViewMode};
 use crate::config::ChannelType;
 use crate::i18n::{AppLanguage, Key, tr};
 use crate::{CloseSettings, NewChat, PasteIntoChat, ToggleSettings, ToggleSidebar};
+
+/// 启动失败页。`main.rs` 在 `AppState::bootstrap()` 失败时用它当窗口的根视图。
+pub use error_page::ErrorPage;
 
 /// 对话内容与输入框的最大宽度，宽屏下保持舒适的行长
 pub const CONTENT_MAX_WIDTH: Pixels = px(780.);

@@ -37,17 +37,37 @@ pub enum ToastLevel {
     Error,
 }
 
+/// 只建一次。缓存的是 `Result`——建不起来是环境问题（线程资源），重试没有意义，
+/// 而且要让启动时的预检（[`preflight_runtime`]）和之后的 [`runtime`] 看到同一个结论。
+static RUNTIME: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
+
+fn build_runtime() -> Result<tokio::runtime::Runtime, String> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+/// 启动时提前把运行时建起来，好让"建不起来"变成错误页而不是崩溃。
+fn preflight_runtime() -> Result<(), String> {
+    RUNTIME
+        .get_or_init(build_runtime)
+        .as_ref()
+        .map(|_| ())
+        .map_err(|error| error.clone())
+}
+
 /// reqwest 与流式请求依赖 tokio，而 GPUI 自己的执行器不是 tokio，
 /// 直接在 `cx.spawn` 里调用 `tokio::spawn` 会 panic，所以单独起一个运行时。
 pub fn runtime() -> &'static tokio::runtime::Runtime {
-    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("failed to start tokio runtime")
-    })
+    match RUNTIME.get_or_init(build_runtime) {
+        Ok(runtime) => runtime,
+        // 启动时 [`preflight_runtime`] 已经试建过一次，能走到这里说明是**运行期**
+        // 资源耗尽。这时没有可回退的动作——网络和流式响应全都要靠它，只能崩掉
+        // 并留下原因；启动期的同类失败会变成错误页，不会走到这里。
+        Err(error) => panic!("failed to start tokio runtime: {error}"),
+    }
 }
 
 /// 后台任务里更新 `AppState`，实体已经不在了就静默跳过。
@@ -155,33 +175,86 @@ pub struct AppState {
     _subscriptions: Vec<Subscription>,
 }
 
-impl AppState {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut storage = StorageData::load_or_init();
-        let config = AppConfig::load();
-        let (default_provider_id, default_model) = config.default_model_selection();
-        let mut session_selection_changed = false;
-        for session in &mut storage.sessions {
-            if session.provider_id.is_empty() {
-                if let Some(provider) = config
-                    .providers
-                    .iter()
-                    .find(|provider| provider.models.iter().any(|model| model.id == session.model))
-                {
-                    session.provider_id = provider.id.clone();
-                    session_selection_changed = true;
-                } else if !default_provider_id.is_empty() {
-                    session.provider_id = default_provider_id.clone();
-                    session.model = default_model.clone();
-                    session_selection_changed = true;
-                }
+/// 启动时要读进来的两样东西：会话数据与配置。
+///
+/// 单独拆一步，是因为**它们失败时 `AppState` 根本构造不出来**——界面还没建、
+/// 界面语言也还没定，没法靠 `AppState` 自己渲染错误页。所以先试读，失败就把
+/// 原因交给 `main.rs`，由它换一个根视图来显示（见 `ui::ErrorPage`）。
+pub struct Bootstrap {
+    pub storage: StorageData,
+    pub config: AppConfig,
+}
+
+/// 启动阶段读不出数据的原因。
+///
+/// 和 [`crate::paths::MigrationFailure`] 一样**只带结构化数据、不带现成文案**：
+/// 出错时配置很可能根本没读出来，界面语言也就无从得知，所以文案留到渲染错误页时
+/// 按当时的语言生成。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StartupFailure {
+    /// tokio 运行时建不起来
+    Runtime(String),
+    /// 配置文件读不出来
+    Config(String),
+    /// 会话库打不开，或者回填后存不回去
+    Storage(String),
+}
+
+impl StartupFailure {
+    /// 渲染成给用户看的一句话。
+    pub fn message(&self, lang: AppLanguage) -> String {
+        let (key, detail) = match self {
+            Self::Runtime(detail) => (Key::StartupRuntimeFailed, detail),
+            Self::Config(detail) => (Key::StartupConfigFailed, detail),
+            Self::Storage(detail) => (Key::StartupStorageFailed, detail),
+        };
+        tr_args(lang, key, &[detail.as_str()])
+    }
+}
+
+/// 给没记渠道 id 的老会话按模型名回填一次。返回是否改过（改过就要存回去）。
+fn backfill_session_providers(storage: &mut StorageData, config: &AppConfig) -> bool {
+    let (default_provider_id, default_model) = config.default_model_selection();
+    let mut changed = false;
+    for session in &mut storage.sessions {
+        if session.provider_id.is_empty() {
+            if let Some(provider) = config
+                .providers
+                .iter()
+                .find(|provider| provider.models.iter().any(|model| model.id == session.model))
+            {
+                session.provider_id = provider.id.clone();
+                changed = true;
+            } else if !default_provider_id.is_empty() {
+                session.provider_id = default_provider_id.clone();
+                session.model = default_model.clone();
+                changed = true;
             }
         }
-        if session_selection_changed {
+    }
+    changed
+}
+
+impl AppState {
+    /// 试读启动数据。失败时返回原因，由 `main.rs` 渲染错误页。
+    ///
+    /// 这一步只做"读"，不碰界面——所以它能在窗口里、也能在窗口外调用。
+    pub fn bootstrap() -> Result<Bootstrap, StartupFailure> {
+        // 先把 tokio 运行时建起来：它平时是懒加载的，但建不起来的话后面每次网络操作
+        // 都会崩在 `runtime()` 里，那时候连错误页都来不及显示。
+        preflight_runtime().map_err(StartupFailure::Runtime)?;
+        let mut storage = StorageData::try_load_or_init().map_err(StartupFailure::Storage)?;
+        let config = AppConfig::try_load().map_err(StartupFailure::Config)?;
+        if backfill_session_providers(&mut storage, &config) {
             storage
                 .save()
-                .unwrap_or_else(|error| panic!("Unable to update chat model selection: {error}"));
+                .map_err(|error| StartupFailure::Storage(error.to_string()))?;
         }
+        Ok(Bootstrap { storage, config })
+    }
+
+    pub fn new(bootstrap: Bootstrap, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let Bootstrap { storage, config } = bootstrap;
         let is_dark = config.is_dark;
         apply_theme(is_dark, Some(window), cx);
         let lang = AppLanguage::from_str(&config.language);
@@ -654,5 +727,53 @@ impl AppState {
             self.toast(ToastLevel::Success, tr(lang, Key::SystemPromptSaved));
         }
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // `#[std::prelude::v1::test]` 而不是 `#[test]`：`gpui_kit::*` 带进来了一个同名的
+    // `test` 属性宏，会顶掉内置的，展开时自我递归。见 AGENTS.md §10 第 9 条。
+    use super::*;
+
+    /// 启动失败页要靠这几条文案把"哪里坏了"讲清楚，所以四种语言都得有实际内容，
+    /// 而且都要带上底层的原因（不然用户只看到一句"启动失败"，无从下手）。
+    #[std::prelude::v1::test]
+    fn startup_failures_explain_themselves_in_every_language() {
+        let cases = [
+            StartupFailure::Runtime("no threads".into()),
+            StartupFailure::Config("bad json".into()),
+            StartupFailure::Storage("file is not a database".into()),
+        ];
+        for failure in cases {
+            for lang in [
+                AppLanguage::ZhCn,
+                AppLanguage::EnUs,
+                AppLanguage::JaJp,
+                AppLanguage::ZhTw,
+            ] {
+                let message = failure.message(lang);
+                assert!(!message.is_empty(), "{failure:?} 在 {lang:?} 下是空的");
+                assert!(
+                    message.contains("no threads")
+                        || message.contains("bad json")
+                        || message.contains("file is not a database"),
+                    "{failure:?} 在 {lang:?} 下没带上底层原因：{message}"
+                );
+            }
+        }
+    }
+
+    /// 三种失败不能长一个样——用户和开发者都要能一眼分出是配置、会话库还是运行时的问题。
+    #[std::prelude::v1::test]
+    fn startup_failures_read_differently_from_each_other() {
+        let lang = AppLanguage::ZhCn;
+        let messages = [
+            StartupFailure::Runtime("x".into()).message(lang),
+            StartupFailure::Config("x".into()).message(lang),
+            StartupFailure::Storage("x".into()).message(lang),
+        ];
+        let unique: std::collections::HashSet<_> = messages.iter().collect();
+        assert_eq!(unique.len(), messages.len(), "三种失败的文案重复了：{messages:?}");
     }
 }

@@ -336,8 +336,10 @@ pub fn load_provider_key(reference: &str) -> keyring::Result<String> {
 }
 
 impl AppConfig {
-    pub fn load() -> Self {
-        Self::load_checked().unwrap_or_else(|error| panic!("Unable to open app configuration: {error}"))
+    /// 读配置。失败时把原因**交给调用方**，不在这里 panic——
+    /// 启动阶段要拿它渲染错误页，panic 掉就没有界面能显示原因了。
+    pub fn try_load() -> Result<Self, String> {
+        Self::load_checked().map_err(|error| error.to_string())
     }
 
     fn load_checked() -> Result<Self, Box<dyn Error + Send + Sync>> {
