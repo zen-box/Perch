@@ -1,0 +1,83 @@
+{
+  "active_provider_id": "mock",
+  "model": "mock-model",
+  "temperature": 0.7,
+  "system_prompt": "You are a helpful assistant.",
+  "is_dark": false,
+  "language": "zh-CN",
+  "local_tools_enabled": true,
+  "command_timeout_secs": 600,
+  "providers": [
+    {
+      "id": "mock",
+      "name": "Mock",
+      "channel_type": "OpenAiChat",
+      "base_url": "http://127.0.0.1:18766/v1",
+      "api_path": "/chat/completions",
+      "api_key_ref": "provider/mock",
+      "enabled": true,
+      "models": [
+        {
+          "id": "mock-model",
+          "name": "Mock Model",
+          "tags": "",
+          "is_pinned": false,
+          "enabled": true,
+          "capabilities": [
+            "tools"
+          ]
+        }
+      ],
+      "timeout_secs": 30,
+      "retries": 0,
+      "proxy": "",
+      "extra_headers": []
+    }
+  ],
+  "mcp_servers": [
+    {
+      "id": "demo",
+      "name": "演示服务器",
+      "enabled": true,
+      "transport": {
+        "kind": "stdio",
+        "command": "python",
+        "args": ["mcp_server.py"],
+        "cwd": "E:\\Personal control\\pc\\tools\\p3-test"
+      },
+      "disabled_tools": ["spam"]
+    },
+    {
+      "id": "pages",
+      "name": "分页服务器",
+      "enabled": true,
+      "transport": {
+        "kind": "stdio",
+        "command": "python",
+        "args": [
+          "E:\\Personal control\\pc\\tools\\p3-test\\mcp_server.py",
+          "paged"
+        ]
+      }
+    },
+    {
+      "id": "dead",
+      "name": "起不来的服务器",
+      "enabled": true,
+      "transport": {
+        "kind": "stdio",
+        "command": "no-such-mcp-server-xyz"
+      }
+    },
+    {
+      "id": "idle",
+      "name": "停用的服务器",
+      "enabled": false,
+      "transport": {
+        "kind": "stdio",
+        "command": "python",
+        "args": ["mcp_server.py", "small"]
+      }
+    }
+  ]
+}

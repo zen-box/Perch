@@ -9,6 +9,22 @@
     PAR   → 一次调两个：run_command + list_directory（测并行调用）
     LOOP  → 每轮都调 list_directory（测轮数上限）
     SLOW  → 回复前先等 3 秒（测生成期间切换对话）
+
+MCP 那一组（**从请求里的工具表按前缀挑，不写死名字**——暴露名里带服务器 id，
+将来还可能带哈希，写死必然过期）。关键词取消息的第一个词，精确匹配：
+    MCPCOUNT → 只报告工具总数和其中 MCP 的个数，不调工具
+    MCP      → 调 echo
+    MCPADD   → 调 add（参数是数字，验证 schema 有没有原样传下去）
+    MCPBOOM  → 调 boom（isError=true）
+    MCPBIG   → 调 big（40000 字符，测结果截断）
+    MCPBLOCKS→ 调 blocks（text + image，测非文本块怎么摘要）
+    MCPSTRUCT→ 调 structured（只有 structuredContent）
+    MCPLONG  → 调那个超长名字的工具（测截断后的名字还能调通）
+    MCPCN    → 调中文名字的工具（测兜底哈希名字还能调通）
+    MCPCOLL  → 把 a.b 和 a_b 两个撞名的工具**都调一遍**（证明两个名字确实区分开了）
+    MCPTWO   → 一次调两个 MCP 工具（测批量执行那条路）
+    MCPBAD   → 调一个不存在的 MCP 工具名（测错误结果怎么落进会话）
+  挑不到工具时回一段说明文字，而不是静默失败。
   最后一条是 tool 消息时（LOOP 除外）回一段总结文字；其余回普通文字。
 """
 import json
@@ -19,6 +35,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = pathlib.Path(__file__).parent / "requests.jsonl"
+MCP_LOG = pathlib.Path(__file__).parent / "mcp-exposed.txt"
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 18766
 
 
@@ -51,6 +68,88 @@ def text_of(msg):
     return content or ""
 
 
+def mcp_names_of(tools):
+    """请求里带 `mcp__` 前缀的工具名。"""
+    return [name for name in tools if name.startswith("mcp__")]
+
+
+def pick_mcp(tools, suffix):
+    for name in mcp_names_of(tools):
+        if name.endswith(suffix):
+            return name
+    return None
+
+
+def pick_mcp_containing(tools, needle):
+    for name in mcp_names_of(tools):
+        if needle in name:
+            return name
+    return None
+
+
+def mcp_scenario(word, tools):
+    """按关键词挑要调的 MCP 工具，返回 (calls, reply)。挑不到就只回文字。"""
+    total = len(mcp_names_of(tools))
+
+    def missing(what):
+        return [], f"请求里没找到{what}（一共 {total} 个 MCP 工具，全部工具 {len(tools)} 个）。"
+
+    if word == "MCPCOUNT":
+        return [], f"本次请求带了 {len(tools)} 个工具，其中 MCP 的有 {total} 个。"
+
+    if word == "MCPBAD":
+        return [("mcp__demo__definitely_not_a_tool", {})], ""
+
+    if word == "MCPCOLL":
+        # a.b 和 a_b 清洗后同名，暴露名里各带一段哈希。两个都调，验证确实区分开了
+        found = [name for name in mcp_names_of(tools) if name.endswith(("_a_b", "_a_b_")) or "__a_b" in name]
+        # 更稳的挑法：把以 a_b 结尾（含哈希）的都收进来
+        found = [name for name in mcp_names_of(tools) if name.split("__")[-1].startswith("a_b")]
+        if len(found) < 2:
+            return missing("撞名的那两个工具（a.b / a_b）")
+        return [(name, {}) for name in found[:2]], ""
+
+    if word == "MCPTWO":
+        echo = pick_mcp(tools, "__echo")
+        add = pick_mcp(tools, "__add")
+        if not echo or not add:
+            return missing("echo 或 add")
+        return [(echo, {"text": "第一个"}), (add, {"a": 10, "b": 20})], ""
+
+    plans = {
+        "MCP": ("__echo", {"text": "来自模型的问候"}),
+        "MCPADD": ("__add", {"a": 3, "b": 4}),
+        "MCPBOOM": ("__boom", {}),
+        "MCPBIG": ("__big", {"chars": 40000}),
+        "MCPBLOCKS": ("__blocks", {}),
+        "MCPSTRUCT": ("__structured", {}),
+    }
+    if word in plans:
+        suffix, args = plans[word]
+        name = pick_mcp(tools, suffix)
+        if name is None:
+            return missing(f"以 {suffix} 结尾的工具")
+        return [(name, args)], ""
+
+    if word == "MCPLONG":
+        name = pick_mcp_containing(tools, "a_tool_name_that_is_definitely")
+        if name is None:
+            return missing("名字超长的那个工具")
+        return [(name, {})], ""
+
+    if word == "MCPCN":
+        # 中文名清洗后什么都不剩，暴露名是 `t<哈希>`，认不出来——用描述里的关键字反查不了，
+        # 所以按"既不是已知英文名也不是哈希"来挑不现实。改成让服务端工具表顺序说话：
+        # 中文工具名排在长名字后面。
+        candidates = mcp_names_of(tools)
+        long_index = next((i for i, n in enumerate(candidates) if "a_tool_name_that_is" in n), None)
+        if long_index is None or long_index + 1 >= len(candidates):
+            return missing("中文名字的那个工具")
+        return [(candidates[long_index + 1], {})], ""
+
+    return [], f"未知的 MCP 关键词 {word}。"
+
+
 class Handler(BaseHTTPRequestHandler):
     counter = 0
 
@@ -77,12 +176,19 @@ class Handler(BaseHTTPRequestHandler):
         last_user = next((text_of(m) for m in reversed(messages) if m.get("role") == "user"), "")
         last_role = messages[-1].get("role") if messages else ""
         tools = [t["function"]["name"] for t in body.get("tools", [])]
+        # 关键词取第一个词，精确匹配——MCPADD 里也含 "MCP"，用 in 判断会串台
+        first_word = last_user.strip().split()[0].upper() if last_user.strip() else ""
+        if mcp_names_of(tools):
+            with MCP_LOG.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(mcp_names_of(tools), ensure_ascii=False) + "\n")
         if "SLOW" in last_user and last_role == "user":
             time.sleep(3)
 
         calls = []
         reply = ""
-        if "LOOP" in last_user:
+        if first_word.startswith("MCP") and last_role == "user":
+            calls, reply = mcp_scenario(first_word, tools)
+        elif "LOOP" in last_user:
             calls = [("list_directory", {"path": "."})]
         elif last_role == "tool":
             results = []

@@ -9,4 +9,8 @@ __pycache__/
 
 # 端到端实测（tools/p3-test）跑起来时生成的隔离数据目录与请求日志，属运行时产物
 tools/p3-test/appdata/
+tools/p3-test/appdata-keep/
 tools/p3-test/requests.jsonl
+# 实测脚本在仓库里留下的核对用中间文件（需要留档时复制到 shots/ 再提交）
+tools/p3-test/mcp-exposed.txt
+tools/p3-test/mcp_calls.jsonl

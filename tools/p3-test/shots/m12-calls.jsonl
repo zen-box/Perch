@@ -1,0 +1,12 @@
+{"time": "12:31:41", "tool": "echo", "arguments": {"text": "来自模型的问候"}}
+{"time": "12:32:35", "tool": "a.b", "arguments": {}}
+{"time": "12:32:52", "tool": "a_b", "arguments": {}}
+{"time": "12:33:13", "tool": "boom", "arguments": {}}
+{"time": "12:33:21", "tool": "blocks", "arguments": {}}
+{"time": "12:34:03", "tool": "structured", "arguments": {}}
+{"time": "12:35:01", "tool": "echo", "arguments": {"text": "第一个"}}
+{"time": "12:35:05", "tool": "add", "arguments": {"a": 10, "b": 20}}
+{"time": "12:35:12", "tool": "big", "arguments": {"chars": 40000}}
+{"time": "12:36:03", "tool": "a_tool_name_that_is_definitely_longer_than_the_sixty_four_character_limit_and_therefore_has_to_be_shortened_by_the_client", "arguments": {}}
+{"time": "12:36:11", "tool": "中文工具名", "arguments": {}}
+{"time": "12:36:18", "tool": "add", "arguments": {"a": 3, "b": 4}}
