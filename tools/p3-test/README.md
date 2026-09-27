@@ -59,11 +59,25 @@ P3-2（Agent 循环）当初是用这套东西实测的，不是单测——单�
 
 ## 坑
 
+- ⚠️ **Windows 上 `SO_REUSEADDR` 允许两个 mock 同时绑同一个端口**（Linux 不允许）。
+  所以"第二个 mock 启动成功"不代表它接得到请求——请求会落到先绑的那个上，
+  `requests.jsonl` 也就写在它那边，你这边永远是空的。实测踩过一次：
+  一个从 `target/p3-test/` 遗留的旧 mock 还在跑，请求全被它接走了。
+  现在 `mock.py` 启动前会探测端口，占用了就直接报错退出；**仍要留意有没有旧实例**。
 - **`t.sh` 一 `source` 就 `cd` 到自己所在目录**（`tools/p3-test/`），
   之后相对路径都是相对那儿的。要回仓库根得自己 `cd`。
 - **`t.sh` 里的坐标是写死的**（输入框 `1080,1188`）。换窗口尺寸就得重算，
   用 `findbtn.py` 扫一张截图重新定位。
-- `mock.py` 的 `requests.jsonl` 写在它**自己旁边**（不是当前目录），跑完记得看一眼。
+- **本机 PowerShell 默认禁止执行 `.ps1`**（`running scripts is disabled`），
+  直接 `& win.ps1` 会失败。绕法：
+  ```powershell
+  $sb = [scriptblock]::Create((Get-Content -Raw "tools/p3-test/win.ps1"))
+  & $sb -Action shot -Out "tools/p3-test/shots/x.png"
+  ```
+  另外**别从 bash 里调 `powershell`**，会被安全策略拦（"bypasses PowerShell security checks"），
+  要用专门的 PowerShell 工具；那个工具**不回显 stdout**，要拿输出就 `Out-File` 到文件再读。
+- `mock.py` 的 `requests.jsonl` 写在它**自己旁边**（不是当前目录），跑完记得看一眼；
+  启动时它会把完整路径打出来。
 - `mock.py` 有状态：`call_N` 的计数器在进程里，重启服务会从头开始编号。
 - 关键词场景（`LIST` / `RUN` / `SLEEP` / `PAR` / `LOOP` / `SLOW`）见 `mock.py` 文件头，
   改场景直接改那里。

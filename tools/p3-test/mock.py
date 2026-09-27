@@ -13,6 +13,7 @@
 """
 import json
 import pathlib
+import socket
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -133,6 +134,27 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+def port_is_taken(port):
+    """端口上已经有东西在应答。
+
+    **Windows 上 SO_REUSEADDR 允许两个进程同时绑同一个端口**（Linux 不允许），
+    所以"第二个 mock 启动成功"并不代表它接得到请求——请求会落到先绑的那个上，
+    requests.jsonl 也就写在它那边。宁可启动失败，也不要对着一个空的日志排查半天。
+    """
+    with socket.socket() as probe:
+        probe.settimeout(0.3)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
 if __name__ == "__main__":
+    if port_is_taken(PORT):
+        print(
+            f"端口 {PORT} 上已经有服务在跑（多半是上一次留下的 mock）。\n"
+            f"先结束它再启动：请求会被它接走，requests.jsonl 写在它那边，你这边永远是空的。",
+            flush=True,
+        )
+        raise SystemExit(1)
     print(f"mock listening on 127.0.0.1:{PORT}", flush=True)
+    # 把日志路径打出来：mock 可能从别的目录启动，requests.jsonl 跟着它自己走
+    print(f"requests log: {LOG}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
