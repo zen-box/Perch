@@ -17,7 +17,7 @@ use crate::app::AppState;
 use crate::config::{AppConfig, McpServerConfig};
 use crate::llm_tools::ToolSpec;
 use crate::mcp_ops::McpState;
-use crate::model::{ChatSession, LegacyTools, SessionMode, SessionTools, ToolSource};
+use crate::model::{ChatSession, LegacyTools, Permission, SessionMode, SessionTools, ToolSource};
 use crate::model_info::Capability;
 
 /// 选择器里的一条来源下挂着的工具（只在「高级」折叠里显示）。
@@ -323,6 +323,9 @@ impl AppState {
     /// 切到智能体时**补上本机来源**：对话模式下那一行根本不显示，用户没机会对它表过态。
     /// 不补的话「切到智能体」这个动作看着就像没生效——它还是碰不到文件。
     pub(crate) fn set_session_mode(&mut self, agent: bool, cx: &mut Context<Self>) {
+        // 切模式时确认态作废：它描述的是"这个会话要不要放开本机工具"，
+        // 而模式一换，那段警告讲的事就变了
+        self.agent.permission_prompt = false;
         self.edit_session_tools(cx, move |tools| {
             // 先算来源、再改模式：算的时候要看的是"切之前是什么模式"
             tools.sources = sources_after_mode_change(tools, agent);
@@ -380,6 +383,40 @@ impl AppState {
                 None => tools.disabled_tools.push(name),
             }
         });
+    }
+
+    /// 当前会话给智能体的本机权限档。没设过就是默认档。
+    pub(crate) fn session_permission(&self) -> Permission {
+        self.storage
+            .get_active_session()
+            .map_or(Permission::Default, ChatSession::tool_permission)
+    }
+
+    /// 改权限档。
+    ///
+    /// **调用方负责先做二次确认**——这里只写状态。把确认塞进来会让这个函数依赖
+    /// `Window`，而它现在只需要 `Context`，测起来也干净。
+    pub(crate) fn set_session_permission(&mut self, permission: Permission, cx: &mut Context<Self>) {
+        // 档位一落地，确认态就该收起来：留着它，下次打开面板还得先点一次「取消」
+        self.agent.permission_prompt = false;
+        self.edit_session_tools(cx, move |tools| tools.permission = permission);
+    }
+
+    /// 用户拨开了「完全权限」的开关：先摆出警告和两个按钮，等一次确认。
+    pub(crate) fn ask_full_permission(&mut self, cx: &mut Context<Self>) {
+        self.agent.permission_prompt = true;
+        cx.notify();
+    }
+
+    /// 用户在警告里点了「取消」，或者干脆把面板关掉了：收起确认态，**不动档位**。
+    ///
+    /// 幂等：面板每次关闭都会调一次，没开着的时候不该白白触发重绘。
+    pub(crate) fn dismiss_full_permission(&mut self, cx: &mut Context<Self>) {
+        if !self.agent.permission_prompt {
+            return;
+        }
+        self.agent.permission_prompt = false;
+        cx.notify();
     }
 
     /// 改当前会话的工具状态，然后落盘。

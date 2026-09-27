@@ -774,6 +774,13 @@ impl ChatSession {
             .and_then(crate::local_tools::ProjectDir::parse)
     }
 
+    /// 这个会话给智能体的本机权限档。没设过就是默认档（写文件 / 跑命令每次问）。
+    pub fn tool_permission(&self) -> Permission {
+        self.tools
+            .as_ref()
+            .map_or(Permission::Default, |tools| tools.permission)
+    }
+
     pub fn resolved_params(&self, global_prompt: &str, global_temperature: f32) -> ResolvedParams {
         let params = self.params.clone().unwrap_or_default();
         ResolvedParams {

@@ -635,6 +635,13 @@ i18n! {
     WorkspaceHint => { "智能体只在这个目录里干活，目录之外的读写每次都要你确认。", "The agent works inside this folder; reading or writing outside it needs your approval each time.", "エージェントはこのフォルダの中だけで作業します。外側の読み書きは毎回確認が必要です。", "智能體只在這個資料夾裡幹活，資料夾之外的讀寫每次都要你確認。" },
     WorkspaceMissing => { "先选项目目录", "Pick a folder first", "先にフォルダを選択", "先選專案資料夾" },
     LocalToolsOffNote => { "本机工具已关闭", "Local tools off", "ローカルツールは無効", "本機工具已關閉" },
+    SessionPermission => { "完全权限", "Full permission", "完全な権限", "完全權限" },
+    SessionPermissionHint => { "打开后本机工具全部直接执行，不再逐次确认。", "When on, local tools run without asking each time.", "オンにするとローカルツールは毎回確認せず実行されます。", "打開後本機工具全部直接執行，不再逐次確認。" },
+    FullPermissionWarning => { "完全权限：模型可以在你机器上做任何事（Perch 自己的数据目录除外）。", "Full permission: the model can do anything on your machine, except Perch's own data folder.", "完全な権限：モデルはあなたのマシン上で何でもできます（Perch 自身のデータフォルダを除く）。", "完全權限：模型可以在你機器上做任何事（Perch 自己的資料夾除外）。" },
+    NotASandbox => { "Perch 不是沙盒。要跑不受信任的代码，请在虚拟机或容器里跑。", "Perch is not a sandbox. Run untrusted code in a virtual machine or container instead.", "Perch はサンドボックスではありません。信頼できないコードは仮想マシンやコンテナで実行してください。", "Perch 不是沙盒。要跑不受信任的程式碼，請在虛擬機或容器裡跑。" },
+    FullPermissionTitle => { "打开完全权限？", "Turn on full permission?", "完全な権限を有効にしますか？", "打開完全權限？" },
+    FullPermissionDesc => { "模型将可以在你的机器上做任何事：任意读写文件、执行任意命令，都不再逐次确认。Perch 自己的数据目录仍然会拦。Perch 不是沙盒——要跑不受信任的代码，请在虚拟机或容器里跑。", "The model will be able to do anything on your machine: reading and writing any file, running any command, with no per-call confirmation. Perch's own data folder is still guarded. Perch is not a sandbox — run untrusted code in a virtual machine or container instead.", "モデルはあなたのマシン上で何でもできるようになります：ファイルの読み書きもコマンドの実行も、毎回の確認なしで行えます。Perch 自身のデータフォルダは引き続き保護されます。Perch はサンドボックスではありません。信頼できないコードは仮想マシンやコンテナで実行してください。", "模型將可以在你機器上做任何事：任意讀寫檔案、執行任意命令，都不再逐次確認。Perch 自己的資料夾仍然會攔。Perch 不是沙盒——要跑不受信任的程式碼，請在虛擬機或容器裡跑。" },
+    FullPermissionEnable => { "仍然打开", "Turn it on anyway", "それでも有効にする", "仍然打開" },
 }
 
 /// 按顺序替换文案里的 `{}` 占位符。

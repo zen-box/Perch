@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::llm_tools::{ToolCall, ToolResult, ToolSpec};
+use crate::model::Permission;
 
 /// 命令最长能跑多久，到点就结束整个进程树，把"超时"回传给模型。
 ///
@@ -327,11 +328,37 @@ impl PendingTool {
     /// 2. **路径落在工作目录之外**——这才是真正的边界。以前只有下面那条"敏感文件判断"，
     ///    那只是防呆：模型换个路径就绕过去了；
     /// 3. 读的是敏感文件（`.env`、密钥之类），即使就在工作目录里也问一次。
-    pub fn needs_approval(&self, workspace: Option<&ProjectDir>) -> bool {
+    ///
+    /// **完全权限**（`Permission::Full`）把这三道一起跳过——除了第 4 条硬底线：
+    /// 带 `path` 参数、而且指向 Perch 自己的数据目录，仍然要问。数据目录里放着渠道配置、
+    /// 会话库和 API Key 的引用，让模型改这些等于让模型控制程序本身的行为
+    /// （产品决策，见 AGENTS.md §11 第 2 条）。
+    pub fn needs_approval(&self, workspace: Option<&ProjectDir>, permission: Permission) -> bool {
+        if permission == Permission::Full {
+            return self.touches_the_data_dir(workspace);
+        }
         match guard_for(&self.name) {
             Guard::NeedsApproval => true,
             Guard::Free => self.touches_path_outside(workspace) || self.reads_a_sensitive_path(),
         }
+    }
+
+    /// 参数里的路径是否落在 Perch 自己的数据目录里。
+    ///
+    /// ⚠️ 只对**带 `path` 参数的工具**有效。`run_command` 里手写一个数据目录的路径照样
+    /// 绕得过去——所以「完全权限」的提示语必须说清「模型可以在你机器上做任何事」，
+    /// 不能靠这一条兜底。它拦的是"顺手改配置"这类最容易被想到的做法。
+    fn touches_the_data_dir(&self, workspace: Option<&ProjectDir>) -> bool {
+        let Some(raw) = self.string_arg("path") else {
+            return false;
+        };
+        let data_dir = crate::paths::data_dir();
+        let resolved = match workspace {
+            Some(dir) => dir.resolve(raw),
+            // 没有工作目录就没法解析相对路径，按原样比——数据目录基本都是绝对路径写死的
+            None => normalize(Path::new(raw)),
+        };
+        is_under(&resolved, data_dir)
     }
 
     /// 参数里的路径是否落在工作目录之外。
@@ -906,8 +933,8 @@ pub fn environment_preamble(workspace: &ProjectDir) -> String {
          - Project folder (working directory): {dir}\n\
          \n\
          Relative paths in tool arguments are resolved against the project folder. \
-         Reading or writing anything outside it asks the user for permission first, \
-         so keep your work inside it unless the user asks otherwise.",
+         Keep your work inside it unless the user asks otherwise; touching anything \
+         outside it may require the user's approval.",
         os = std::env::consts::OS,
         dir = workspace.root().display(),
     )
@@ -1136,13 +1163,15 @@ mod tests {
     fn read_and_list_are_free_but_execution_is_not() {
         let dir = test_dir();
         let inside = Some(&dir);
-        assert!(!pending("list_directory", json!({"path": "src"})).needs_approval(inside));
-        assert!(!pending("read_file", json!({"path": "src/main.rs"})).needs_approval(inside));
-        assert!(!pending("git_status", json!({})).needs_approval(inside));
-        assert!(pending("write_file", json!({"path": "a.txt", "content": "x"})).needs_approval(inside));
-        assert!(pending("run_command", json!({"command": "ls"})).needs_approval(inside));
+        assert!(!pending("list_directory", json!({"path": "src"})).needs_approval(inside, Permission::Default));
+        assert!(!pending("read_file", json!({"path": "src/main.rs"})).needs_approval(inside, Permission::Default));
+        assert!(!pending("git_status", json!({})).needs_approval(inside, Permission::Default));
+        assert!(
+            pending("write_file", json!({"path": "a.txt", "content": "x"})).needs_approval(inside, Permission::Default)
+        );
+        assert!(pending("run_command", json!({"command": "ls"})).needs_approval(inside, Permission::Default));
         // 读敏感文件也要点头，哪怕它就在项目目录里
-        assert!(pending("read_file", json!({"path": "~/.ssh/id_rsa"})).needs_approval(inside));
+        assert!(pending("read_file", json!({"path": "~/.ssh/id_rsa"})).needs_approval(inside, Permission::Default));
     }
 
     #[test]
@@ -1154,15 +1183,15 @@ mod tests {
         let outside = outside.to_str().expect("临时目录是 UTF-8");
 
         assert!(
-            !pending("read_file", json!({ "path": "src/main.rs" })).needs_approval(inside),
+            !pending("read_file", json!({ "path": "src/main.rs" })).needs_approval(inside, Permission::Default),
             "目录里的普通文件不该问"
         );
         assert!(
-            pending("read_file", json!({ "path": outside })).needs_approval(inside),
+            pending("read_file", json!({ "path": outside })).needs_approval(inside, Permission::Default),
             "目录之外的文件该问"
         );
         assert!(
-            pending("list_directory", json!({ "path": outside })).needs_approval(inside),
+            pending("list_directory", json!({ "path": outside })).needs_approval(inside, Permission::Default),
             "列目录同样是在看你机器上的东西，也要问"
         );
     }
@@ -1170,9 +1199,49 @@ mod tests {
     #[test]
     fn without_a_project_folder_every_path_counts_as_outside() {
         // 没有工作目录就没有基准，保守方向：一律当成在外
-        assert!(pending("read_file", json!({"path": "src/main.rs"})).needs_approval(None));
+        assert!(pending("read_file", json!({"path": "src/main.rs"})).needs_approval(None, Permission::Default));
         // `path` 留空表示"就是工作目录自己"，这种情况不算越界
-        assert!(!pending("list_directory", json!({"path": ""})).needs_approval(None));
+        assert!(!pending("list_directory", json!({"path": ""})).needs_approval(None, Permission::Default));
+    }
+
+    #[test]
+    fn full_permission_skips_every_approval_except_the_data_dir() {
+        let dir = test_dir();
+        let inside = Some(&dir);
+        let outside = std::env::temp_dir().join("perch-outside.txt");
+        let outside = outside.to_str().expect("临时目录是 UTF-8");
+
+        // 默认档下要问的，完全权限下都直接放行
+        for (name, args) in [
+            ("write_file", json!({"path": "a.txt", "content": "x"})),
+            ("run_command", json!({"command": "ls"})),
+            ("read_file", json!({"path": outside})),
+            ("read_file", json!({"path": "~/.ssh/id_rsa"})),
+        ] {
+            assert!(
+                !pending(name, args.clone()).needs_approval(inside, Permission::Full),
+                "完全权限下 {name} 不该再问：{args}"
+            );
+        }
+
+        // 硬底线：Perch 自己的数据目录仍然拦
+        let config = crate::paths::data_dir().join("perch-config.json");
+        assert!(
+            pending(
+                "write_file",
+                json!({"path": config.display().to_string(), "content": "{}"})
+            )
+            .needs_approval(inside, Permission::Full),
+            "完全权限下改 Perch 自己的配置仍然要问"
+        );
+        assert!(
+            pending(
+                "read_file",
+                json!({"path": crate::paths::data_dir().join("perch.db").display().to_string()})
+            )
+            .needs_approval(inside, Permission::Full),
+            "读会话库也要问"
+        );
     }
 
     #[test]

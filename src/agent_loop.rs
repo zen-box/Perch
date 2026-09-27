@@ -37,7 +37,7 @@ use crate::llm_tools::{ToolCall, ToolResult};
 use crate::local_tools::{self, ExecControl, PendingTool, ProjectDir};
 use crate::mcp::{self, Connection};
 use crate::mcp_ops::Route;
-use crate::model::{ChatMessage, ChatSession, ToolSource};
+use crate::model::{ChatMessage, ChatSession, Permission, ToolSource};
 use crate::reply_ops::JobSpec;
 
 /// 一轮用户提问最多允许模型连着续跑几次。
@@ -119,6 +119,11 @@ pub struct AgentState {
     next_run_id: u64,
     /// 界面上展开了全文的工具结果（消息 id）
     pub expanded_results: HashSet<String>,
+    /// 权限档的二次确认：用户把「完全权限」拨开了，但还没点「仍然打开」。
+    ///
+    /// 放在这里而不是工具选择器自己身上，是因为面板是个无状态的 `Popover`，
+    /// 存不下东西；而档位本身就是 Agent 的事。
+    pub(crate) permission_prompt: bool,
 }
 
 impl AgentState {
@@ -160,12 +165,14 @@ pub(crate) enum RoundAction {
 /// - `round`：已经续跑过几次
 /// - `workspace`：这次干活的项目目录。**目录之外的读写一律要用户点头**，
 ///   所以"免确认"这件事离了它判断不了；`None` 时按「全在外面」处理（保守方向）。
+/// - `permission`：用户给的权限档。`Full` 时除了数据目录一律直接放行。
 pub(crate) fn next_action(
     calls: &[ToolCall],
     answered: &HashSet<String>,
     round: usize,
     tools_enabled: bool,
     workspace: Option<&ProjectDir>,
+    permission: Permission,
 ) -> RoundAction {
     if calls.is_empty() {
         return RoundAction::Finish;
@@ -201,7 +208,7 @@ pub(crate) fn next_action(
                 // 工具表里当然查不到，那样会被误判成"模型编的名字"直接放行。
                 false
             } else if local_tools::is_known(&tool.name) {
-                !tool.needs_approval(workspace)
+                !tool.needs_approval(workspace, permission)
             } else {
                 true
             }
@@ -264,9 +271,19 @@ impl AppState {
         };
 
         let tools_live = self.session_tools_live(&origin.session_id);
-        // 判断「免确认还是要授权」要知道项目目录在哪——目录之外的读写一律要问
-        let workspace = self.session(&origin.session_id).and_then(ChatSession::workspace);
-        match next_action(&calls, &answered, self.agent.round, tools_live, workspace.as_ref()) {
+        // 判断「免确认还是要授权」要知道项目目录在哪（目录之外的读写一律要问）
+        // 和用户给的权限档（完全权限下除数据目录外一律放行）
+        let session = self.session(&origin.session_id);
+        let workspace = session.and_then(ChatSession::workspace);
+        let permission = session.map_or(Permission::default(), ChatSession::tool_permission);
+        match next_action(
+            &calls,
+            &answered,
+            self.agent.round,
+            tools_live,
+            workspace.as_ref(),
+            permission,
+        ) {
             RoundAction::Finish => {
                 self.agent.end_loop();
                 false
@@ -751,7 +768,7 @@ mod tests {
     #[std::prelude::v1::test]
     fn no_calls_means_finish() {
         assert_eq!(
-            next_action(&[], &HashSet::new(), 0, true, Some(&test_dir())),
+            next_action(&[], &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default),
             RoundAction::Finish
         );
     }
@@ -762,7 +779,7 @@ mod tests {
         let calls = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
         let answered: HashSet<String> = ["c1".to_string()].into_iter().collect();
         assert_eq!(
-            next_action(&calls, &answered, 0, true, Some(&test_dir())),
+            next_action(&calls, &answered, 0, true, Some(&test_dir()), Permission::Default),
             RoundAction::Continue
         );
     }
@@ -770,7 +787,7 @@ mod tests {
     #[std::prelude::v1::test]
     fn read_only_tools_run_without_asking() {
         let calls = vec![call("c1", "read_file", json!({"path": "src/main.rs"}))];
-        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default) {
             RoundAction::RunTools(tools) => {
                 assert_eq!(tools.len(), 1);
                 assert_eq!(tools[0].name, "read_file");
@@ -782,7 +799,7 @@ mod tests {
     #[std::prelude::v1::test]
     fn dangerous_tools_stop_for_approval() {
         let calls = vec![call("c1", "run_command", json!({"command": "rm -rf /"}))];
-        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.name, "run_command"),
             other => panic!("危险工具应当挂起等授权，得到 {other:?}"),
         }
@@ -796,7 +813,7 @@ mod tests {
             call("c1", "run_command", json!({"command": "cargo test"})),
             call("c2", "read_file", json!({"path": "a.rs"})),
         ];
-        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default) {
             RoundAction::RunTools(tools) => {
                 assert_eq!(tools.len(), 1);
                 assert_eq!(tools[0].id, "c2");
@@ -805,7 +822,7 @@ mod tests {
         }
         // 读文件有结果之后，才轮到命令
         let answered: HashSet<String> = ["c2".to_string()].into_iter().collect();
-        match next_action(&calls, &answered, 0, true, Some(&test_dir())) {
+        match next_action(&calls, &answered, 0, true, Some(&test_dir()), Permission::Default) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.id, "c1"),
             other => panic!("接着应当问命令，得到 {other:?}"),
         }
@@ -817,12 +834,12 @@ mod tests {
             call("c1", "run_command", json!({"command": "echo 1"})),
             call("c2", "run_command", json!({"command": "echo 2"})),
         ];
-        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.id, "c1"),
             other => panic!("应当只挂第一条，得到 {other:?}"),
         }
         let answered: HashSet<String> = ["c1".to_string()].into_iter().collect();
-        match next_action(&calls, &answered, 0, true, Some(&test_dir())) {
+        match next_action(&calls, &answered, 0, true, Some(&test_dir()), Permission::Default) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.id, "c2"),
             other => panic!("第一条处理完应当轮到第二条，得到 {other:?}"),
         }
@@ -832,7 +849,7 @@ mod tests {
     fn sensitive_reads_also_stop_for_approval() {
         let calls = vec![call("c1", "read_file", json!({"path": "~/.ssh/id_rsa"}))];
         assert!(matches!(
-            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())),
+            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default),
             RoundAction::AskApproval(_)
         ));
     }
@@ -840,13 +857,27 @@ mod tests {
     #[std::prelude::v1::test]
     fn round_limit_stops_the_loop() {
         let calls = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
-        match next_action(&calls, &HashSet::new(), MAX_AGENT_ROUNDS, true, Some(&test_dir())) {
+        match next_action(
+            &calls,
+            &HashSet::new(),
+            MAX_AGENT_ROUNDS,
+            true,
+            Some(&test_dir()),
+            Permission::Default,
+        ) {
             RoundAction::HitLimit(waiting) => assert_eq!(waiting.len(), 1, "没执行的调用要交出来补结果"),
             other => panic!("到上限应当停下，得到 {other:?}"),
         }
         // 差一轮的时候还能继续
         assert!(matches!(
-            next_action(&calls, &HashSet::new(), MAX_AGENT_ROUNDS - 1, true, Some(&test_dir())),
+            next_action(
+                &calls,
+                &HashSet::new(),
+                MAX_AGENT_ROUNDS - 1,
+                true,
+                Some(&test_dir()),
+                Permission::Default
+            ),
             RoundAction::RunTools(_)
         ));
     }
@@ -855,7 +886,14 @@ mod tests {
     fn disabled_tools_still_report_back() {
         // 工具没开也要回结果：不回的话历史里留着没回的调用，下一次请求会被拒绝
         let calls = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
-        match next_action(&calls, &HashSet::new(), 0, false, Some(&test_dir())) {
+        match next_action(
+            &calls,
+            &HashSet::new(),
+            0,
+            false,
+            Some(&test_dir()),
+            Permission::Default,
+        ) {
             RoundAction::Disabled(tools) => assert_eq!(tools.len(), 1),
             other => panic!("工具停用时也该产出结果，得到 {other:?}"),
         }
@@ -867,7 +905,7 @@ mod tests {
         let calls = vec![call("c1", "delete_everything", json!({}))];
         assert!(!local_tools::is_known("delete_everything"));
         assert!(matches!(
-            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())),
+            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default),
             RoundAction::RunTools(_)
         ));
         let result = local_tools::execute(&PendingTool::from_call(&calls[0]), &ExecControl::default());
@@ -886,7 +924,7 @@ mod tests {
         // 调用跑在别人的服务器上，只能每次确认
         let calls = vec![call("c1", "mcp__files__read_file", json!({"path": "a.rs"}))];
         assert!(!local_tools::is_known("mcp__files__read_file"));
-        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())) {
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default) {
             RoundAction::AskApproval(tool) => assert_eq!(tool.name, "mcp__files__read_file"),
             other => panic!("MCP 工具应当每次都问，得到 {other:?}"),
         }
@@ -909,7 +947,14 @@ mod tests {
         let inside = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
         assert!(
             matches!(
-                next_action(&inside, &HashSet::new(), 0, true, Some(&test_dir())),
+                next_action(
+                    &inside,
+                    &HashSet::new(),
+                    0,
+                    true,
+                    Some(&test_dir()),
+                    Permission::Default
+                ),
                 RoundAction::RunTools(_)
             ),
             "目录里的文件该免确认"
@@ -918,7 +963,14 @@ mod tests {
         let outside = vec![call("c1", "read_file", json!({"path": outside_path()}))];
         assert!(
             matches!(
-                next_action(&outside, &HashSet::new(), 0, true, Some(&test_dir())),
+                next_action(
+                    &outside,
+                    &HashSet::new(),
+                    0,
+                    true,
+                    Some(&test_dir()),
+                    Permission::Default
+                ),
                 RoundAction::AskApproval(_)
             ),
             "目录之外的文件该问一次"
@@ -930,7 +982,7 @@ mod tests {
         // 「读」不只是 read_file：列目录同样是在看你机器上的东西
         let calls = vec![call("c1", "list_directory", json!({"path": outside_path()}))];
         assert!(matches!(
-            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir())),
+            next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Default),
             RoundAction::AskApproval(_)
         ));
     }
@@ -941,8 +993,41 @@ mod tests {
         // 正常流程走不到这里——没目录时本机工具根本不会交给模型（闸门在 tool_ops）。
         let calls = vec![call("c1", "read_file", json!({"path": "a.rs"}))];
         assert!(matches!(
-            next_action(&calls, &HashSet::new(), 0, true, None),
+            next_action(&calls, &HashSet::new(), 0, true, None, Permission::Default),
             RoundAction::AskApproval(_)
         ));
+    }
+
+    #[std::prelude::v1::test]
+    fn full_permission_runs_everything_without_asking() {
+        // 完全权限 = 本机工具全部直接执行。写文件、跑命令、读目录之外的文件，全都不问。
+        let calls = vec![
+            call("c1", "write_file", json!({"path": "a.txt", "content": "x"})),
+            call("c2", "run_command", json!({"command": "echo hi"})),
+            call("c3", "read_file", json!({"path": outside_path()})),
+        ];
+        match next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Full) {
+            RoundAction::RunTools(tools) => assert_eq!(tools.len(), 3, "三条都该直接跑"),
+            other => panic!("完全权限下不该再问，得到 {other:?}"),
+        }
+    }
+
+    #[std::prelude::v1::test]
+    fn full_permission_still_guards_perchs_own_data() {
+        // 硬底线（AGENTS.md §11 第 2 条）：数据目录里放着渠道配置、会话库和 API Key 的
+        // 引用，让模型改这些等于让模型控制程序本身的行为。
+        let target = crate::paths::data_dir().join("perch-config.json");
+        let calls = vec![call(
+            "c1",
+            "write_file",
+            json!({"path": target.display().to_string(), "content": "{}"}),
+        )];
+        assert!(
+            matches!(
+                next_action(&calls, &HashSet::new(), 0, true, Some(&test_dir()), Permission::Full),
+                RoundAction::AskApproval(_)
+            ),
+            "完全权限下改 Perch 自己的配置仍然要问"
+        );
     }
 }

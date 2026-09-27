@@ -385,6 +385,8 @@ cx.spawn(async move |this, cx| {
 10. Debug 构建主线程栈溢出：不要删 `build.rs` 里的 8MB 栈设置。
 11. **GPUI 先按快捷键分发动作，最后才把按键交给 `on_key_down` / `capture_key_down`。** 输入框已经绑定的键（Ctrl+V、Ctrl+C 等）用按键监听拦截不到。要改输入框的粘贴，用 `Input` / `Textarea` 的 `on_paste`；要加窗口级快捷键，在 `main.rs` 里给 `Perch` 上下文绑定动作（输入框自己的绑定上下文更深，会优先生效）。
 12. `ClipboardItem::text()` 在剪贴板里没有文字时，会返回复制的文件的路径。判断剪贴板里是什么要看 `entries()`，统一用 `clipboard::classify`。
+13. **不要在 `Popover` / 下拉菜单的 `content` 里弹 `open_dialog` / `open_alert_dialog`：弹出来的框会被面板自己盖住。** `gpui_base::Popup`（`Popover` 的底座）用的是 `deferred()`，而弹窗层是 `ui/mod.rs` 里 `Root::render_dialog_layer` 返回的**普通子元素**；deferred 永远画在普通元素上面，于是确认框既看不见也点不着。需要"在面板里再确认一次"时，就地把确认内容渲染在面板里（`ui/tool_picker.rs` 的完全权限开关就是这么做）。
+14. `Button::xsmall()` / `small()` / `large()` 在 **`Sizable`** trait 上，`ghost()` / `danger()` / `primary()` 在 **`ButtonVariants`** 上，两个都要显式 `use … as _;` 才调得到。`PopupMenuItem` **不是**元素，不能 `.child()`，只能进 `PopupMenu` / `DropdownMenu` 构建器（或 `Button::dropdown_menu_with_anchor`）。
 
 ## 11. 安全与隐私
 
@@ -406,7 +408,7 @@ cx.spawn(async move |this, cx| {
 - 模板变量（`{{clipboard}}` 等）只在插入模板时展开，发送消息时不展开，避免剪贴板内容被悄悄发出去。
 - OpenAI 渠道上的推理模型不发送默认温度（会报 400）。
 
-**2026-09-27 新增（Chat/Agent 重新定义，方案见 `AGENT_MODE_PLAN.md`，未动工）：**
+**2026-09-27 新增（Chat/Agent 重新定义，方案见 `AGENT_MODE_PLAN.md`；A~D 已落地，E~G 未动工）：**
 
 - **对话与智能体的区别是「有没有本机文件权限」，不是「带不带工具」。**
   对话可以带 MCP 和 Skills（用户要能在对话里挂一个搜索 MCP 提高回答质量），
@@ -418,6 +420,8 @@ cx.spawn(async move |this, cx| {
   Windows 桌面上没有便宜的进程级沙盒（各方案的实际成本见 `AGENT_MODE_PLAN.md` 第七节），
   第一期只做「工作目录 + 授权 + 审计日志 + 完全权限开关」这套**边界**。
   ⚠️ 不能让用户以为有沙盒——他会在那个心理预期下让模型跑脚本。
+  已落地位置：工具选择器面板里打开完全权限时的常驻警示（`Key::FullPermissionWarning` +
+  `Key::NotASandbox`），以及内联确认块里的 `Key::FullPermissionDesc`。
 
 > **以下四条 2026-09-27 已与用户确认，可以直接动手**（原为"待拍板"，已全部定案）：
 >
@@ -434,21 +438,35 @@ cx.spawn(async move |this, cx| {
 > 另有两条非产品决定：**加 MCP 服务器时默认启用**（不连上就不知道它有哪些工具），
 > **"默认不用"靠会话里不勾实现**；`rmcp` 是否含 Streamable HTTP 客户端**动工前核实**。
 
-> **授权的分级口径（2026-09-26 与用户确认）。**
+> **授权的分级口径（2026-09-26 与用户确认，2026-09-27 加两道边界）。**
 > "每次授权"按字面执行会让模型读一个文件都要点一次确认，Agent 就没法用了，
 > 所以按操作的危险程度分两级，实现见 `local_tools.rs::Guard`：
 >
 > | 级别 | 工具 | 行为 |
 > | --- | --- | --- |
-> | `Free` | `list_directory`、`git_status`、`read_file`（普通路径） | 直接执行，不弹卡片 |
+> | `Free` | `list_directory`、`git_status`、`read_file`（目录内且不敏感） | 直接执行，不弹卡片 |
 > | `NeedsApproval` | `write_file`、`run_command`、`read_file`（敏感路径） | 每次弹卡片，用户同意才跑 |
 >
 > **敏感路径**指：`~/.ssh/id_rsa`、`.env`、`credentials*`、`*.pem` / `*.key` / `*.pfx`、
-> 数据目录内的任何文件、以及工作目录之外的 `.env`。
+> 数据目录内的任何文件、以及项目目录之外的 `.env`。
 > ⚠️ 这是**防呆不是安全边界**——模型换个路径绕过去拦不住。
-> 真正的边界是"敏感读取必须用户点一次"。
 > 另外**工具名不认识时按最严处理**（`Guard::NeedsApproval`），
 > 因为模型可能编一个不存在的工具名，不能因为"查不到"就当成只读放行。
+>
+> **两道新边界（2026-09-27，`local_tools::PendingTool::needs_approval`）：**
+>
+> 1. **项目目录之外，一律弹卡片**，连 `Guard::Free` 的 `list_directory` 也一样。
+>    这才是真正的边界——旧的 `is_sensitive_path` 只挡得住认得出来的那几个文件名。
+>    项目目录存在 `ChatSession.tools.workspace`，是绝对路径；相对路径按它算，
+>    `run_command` 的 `current_dir` 也是它。**智能体模式下没设目录就不给本机工具**
+>    （`tool_ops::session_tool_specs` 的第三道闸门），免得隐式落在安装目录里。
+>    包含判断按**路径组件**比（`is_under`），不是字符串前缀：`/work2` 不算 `/work` 里面，
+>    Windows 上忽略大小写。
+> 2. **`Permission::Full`（会话级"完全权限"）跳过上面全部**，
+>    **唯一例外是 Perch 自己的数据目录**（`touches_the_data_dir`）。
+>    档位存在 `ChatSession.tools.permission`，界面入口在工具选择器面板里，
+>    拨开要先过一道内联确认（面板里就地确认，不弹窗——原因见 `ui/tool_picker.rs` 的注释）。
+>    ⚠️ `touches_the_data_dir` 只看 `path` 参数，**`run_command` 里手写数据目录路径照样绕得过去**。
 >
 > 还有一条兜底：**一轮用户提问最多 12 轮工具调用**（`agent_loop::MAX_AGENT_ROUNDS`），
 > 超了就停下并提示。没有上限的话模型卡住时会一直转，每轮都在花 token。
