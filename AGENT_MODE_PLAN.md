@@ -248,7 +248,9 @@ pub enum ToolSource {
 
 ---
 
-## 十、MCP 的第二种传输（Streamable HTTP）
+## 十、MCP 的第二种传输（Streamable HTTP）—— ✅ 已完成（2026-09-27）
+
+> 实际做法与下面这版方案的差异，逐条记在末尾。方案原文保留，方便对照。
 
 - `McpTransport` 加 `Http { url, headers }` 变体。
   枚举是按 `kind` 标签设计的，**加变体不破坏老配置**（`config.rs` 的注释里已经写了这一条）。
@@ -258,6 +260,44 @@ pub enum ToolSource {
 - 连接管理复用 stdio 那套：重连退避、工具清单缓存、`notifications/tools/list_changed`。
 - ⚠️ **动工前先核实**：当前 `rmcp` 版本是否已含 Streamable HTTP 客户端。
   没有的话要么升版本、要么自己写 HTTP 那一层（JSON-RPC over HTTP 不难，但分帧规则和 stdio 不同）。
+
+### 落地时和方案不一样的地方
+
+1. **请求头不放进 `Http` 变体**，改成只留 `Http { url }`，头走 `secrets()`。
+   方案里写的是 `Http { url, headers }`。分开存会多出一个"哪个头算密钥"的选择题，
+   而答案只能靠猜；统一走凭据管理器就只有一条规则：**值都不进配置文件**。
+   代价是 `secrets()` 这个名字在 HTTP 下读起来别扭（它装的是请求头），
+   界面上按连接方式换标签（`环境变量` / `请求头`）把这件事说清楚了。
+2. **代理没做。** 方案里写"走渠道代理"，实际没接 `AppConfig.proxy`——
+   `StreamableHttpClientTransport::from_config` 用的是它自己 `default_http_client()` 造的
+   reqwest client，要接代理得换成 `with_client` 自己造 client 并套 `reqwest::Proxy`。
+   记在 `TODO.md` 里，别当成已完成。
+3. **TLS feature 是个坑。** `rmcp` 自己的 reqwest 是 `default-features = false`、**不带 TLS**；
+   只开 `transport-streamable-http-client-reqwest` 的话 https 的服务器连不上，
+   报的是握手阶段的 TLS 错，看不出是缺 feature。必须再显式开一个 TLS 后端
+   （这里选 `reqwest` = rustls，和渠道那条路同一个后端）。
+4. **`http = "1"` 是新增的直接依赖。** `custom_headers` 收的是
+   `HashMap<HeaderName, HeaderValue>`，这两个类型在 `http` 里，而 `rmcp` 没有 re-export。
+   版本跟着 rmcp 自己依赖的那个走，不会编出两份。
+5. `notifications/tools/list_changed` 在 HTTP 下**没单独验**。它走的是同一个
+   `RunningService`，传输层已经由 `initialize` / `tools/list` / `tools/call` 三条路验过了。
+
+### 实测证据（`tools/p3-test/`）
+
+靶子是新写的 `mcp_http_server.py`（Streamable HTTP，端口 8770），
+和 stdio 那个 `mcp_server.py` 是一对。五条链路全部验到：
+
+| 验的什么 | 怎么看 |
+| --- | --- |
+| 加一台 HTTP 服务器能连上 | `shots/g2-mcp.png`：`HTTP 演示服务器 · 已连接 · 5 个工具`，摘要就是那个 URL |
+| 工具清单正确 | 同上，5 个 = `echo` / `add` / `headers` / `boom` / `slow` |
+| 调一次工具能跑通 | `shots/g17-http-call.png`（授权卡片）→ `shots/g19-after-allow.png`（`echo: 来自模型的问候`） |
+| 自定义请求头能到达服务器 | `mcp_http_calls.jsonl`：`tools/call` 那条带着 `x-perch-test: hello-from-header` |
+| 编辑器两种连接方式 | `shots/g3-editor-http.png` / `g4-editor-stdio.png`；切来切去不清空已填内容（`g6` → `g8`） |
+
+⚠️ **查那个日志时大小写必须不区分**：`http` crate 的 `HeaderName` 会把名字规范成小写，
+所以收到的是 `x-perch-test` 而不是 `X-Perch-Test`。用 `headers['X-Perch-Test']` 查会
+什么都查不到，看着就像"自定义头没到"——实测被骗过一次。
 
 ---
 
@@ -274,7 +314,7 @@ pub enum ToolSource {
 | **D** | 权限档位（默认 / 完全）+ 二次确认 + 界面标记 | 约 265 行 | 4 改 / 0 新 | ✅ 已定 |
 | **E** | Skills（最独立，可插空做） | 约 860 行 | 4 改 / 3 新 | 否 |
 | **F** | 审计日志（`%APPDATA%\Perch\logs\`） | 约 270 行 | 4 改 / 1 新 | 否 |
-| **G** | MCP Streamable HTTP | 约 645 行 | 5 改 / 0 新 | ⏳ 依赖核实 |
+| **G** | MCP Streamable HTTP | 约 645 行 | 5 改 / 0 新 | ✅ 已完成（代理除外，见第十节） |
 | — | ~~进程沙盒~~ | — | — | ❌ 不做，只做边界（第七节） |
 
 **A~G 合计：约 3200 行净改动，20 个文件（14 改 + 6 新建）。**
@@ -315,7 +355,7 @@ A 是地基（B / C / D 都建在它上面）；E 最独立，可以和 C/D 并�
 | 3 | 完全权限下，工作目录之外要不要放行？ | ✅ **放行**，但记审计日志（否则"完全"没意义） |
 | 4 | 智能体模式下没设项目目录时：不给本机工具 / 给只读 / 用安装目录兜底？ | ✅ **不给**，界面提示"先选项目目录"（兜底正是现在最坑的地方） |
 | 5 | 加 MCP 服务器时默认启用还是默认停用？ | ✅ **默认启用**，"默认不用"靠会话里不勾 |
-| 6 | `rmcp` 是否已含 Streamable HTTP 客户端？ | ⏳ **动工前核实**（阶段 G 的前置，不是产品决定） |
+| 6 | `rmcp` 是否已含 Streamable HTTP 客户端？ | ✅ **已核实：含**（3.4.1，feature `transport-streamable-http-client-reqwest`）。⚠️ 还要额外开一个 TLS feature，见第十节第 3 条 |
 
 结论已回填 `AGENTS.md §11 已确认的产品决策`（那是权威）和 `TODO.md` 第十一节。
 **阶段 A~D 可以直接动手，不用再等确认。**

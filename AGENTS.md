@@ -26,10 +26,13 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 
 - 技术栈：Rust（edition 2024）+ GPUI（`gpui-kit` 0.6.6，组件来自 gpui-component）。主要平台是 Windows。
 - 产品优先级：普通对话 → 多模态（图片、附件）→ MCP / Agent。
-  **2026-09-27 进度**：前两块已完成；MCP（stdio）已完成，Skills 与 Agent 安全收尾未做。
-  下一步是 **Chat/Agent 重新定义**，方案见 `AGENT_MODE_PLAN.md`（**动手前先读**）。
+  **2026-09-27 进度**：这四块都已做完。MCP 的 stdio 和 Streamable HTTP 两条传输都完成了
+  （**HTTP 没接渠道代理**，是唯一漏项）；Skills（阶段 E）与 Agent 的安全收尾
+  （审计日志、权限档位、项目目录）也已完成。
+  **Chat/Agent 重新定义的 A~G 七个阶段已全部落地并推送**，方案见 `AGENT_MODE_PLAN.md`
+  （**动手前先读**，第十节记了落地时和方案的差异）。
 - 文档分工：本文件是**权威开发规范**；`ROADMAP.md` 是进度；`TODO.md` 是待办总表；
-  `TECH_DEBT.md` 是技术债工单；`AGENT_MODE_PLAN.md` 是 Chat/Agent 方案（未动工）；
+  `TECH_DEBT.md` 是技术债工单；`AGENT_MODE_PLAN.md` 是 Chat/Agent 方案（已实施，保留作记录）；
   `I18N_PLAN.md` 是国际化结项记录。
 - 用户数据在 `%APPDATA%\Perch\`：
 
@@ -436,7 +439,8 @@ cx.spawn(async move |this, cx| {
 >    留个隐式兜底会让用户以为在项目里操作、实际在安装目录里写文件。
 >
 > 另有两条非产品决定：**加 MCP 服务器时默认启用**（不连上就不知道它有哪些工具），
-> **"默认不用"靠会话里不勾实现**；`rmcp` 是否含 Streamable HTTP 客户端**动工前核实**。
+> **"默认不用"靠会话里不勾实现**；`rmcp` **已核实含** Streamable HTTP 客户端
+> （3.4.1，feature `transport-streamable-http-client-reqwest`，另需显式开 TLS feature）。
 
 > **授权的分级口径（2026-09-26 与用户确认，2026-09-27 加两道边界）。**
 > "每次授权"按字面执行会让模型读一个文件都要点一次确认，Agent 就没法用了，
