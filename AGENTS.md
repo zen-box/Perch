@@ -51,6 +51,7 @@ Perch 是一个 API 聚合的 AI 对话桌面客户端。
 
 - 程序运行时 exe 被占用，编译前先执行 `taskkill /IM perch.exe /F`。
 - `build.rs` 把 Windows 主线程栈设为 8MB（Debug 构建的 GPUI 元素树很深），不要删；它还负责嵌入 `assets/brand/` 下的品牌图标。
+- 界面改动要实际跑起来看。P3-2 的端到端实测环境在 `tools/p3-test/`（模拟模型接口 + 不抢焦点的窗口操作 + 截图），用法见那里的 `README.md`。
 
 ## 3. 架构与分层
 

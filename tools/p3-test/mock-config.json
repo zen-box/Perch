@@ -1,0 +1,37 @@
+{
+  "active_provider_id": "mock",
+  "model": "mock-model",
+  "temperature": 0.7,
+  "system_prompt": "You are a helpful assistant.",
+  "is_dark": false,
+  "language": "zh-CN",
+  "local_tools_enabled": true,
+  "command_timeout_secs": 600,
+  "providers": [
+    {
+      "id": "mock",
+      "name": "Mock",
+      "channel_type": "OpenAiChat",
+      "base_url": "http://127.0.0.1:18766/v1",
+      "api_path": "/chat/completions",
+      "api_key_ref": "provider/mock",
+      "enabled": true,
+      "models": [
+        {
+          "id": "mock-model",
+          "name": "Mock Model",
+          "tags": "",
+          "is_pinned": false,
+          "enabled": true,
+          "capabilities": [
+            "tools"
+          ]
+        }
+      ],
+      "timeout_secs": 30,
+      "retries": 0,
+      "proxy": "",
+      "extra_headers": []
+    }
+  ]
+}
