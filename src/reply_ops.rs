@@ -163,7 +163,7 @@ impl AppState {
     }
 
     /// 找到要调用的渠道和模型。模型被停用或删除时退回同渠道第一个可用模型。
-    fn resolve_model(&self, provider_id: &str, model_id: &str) -> Option<(&ProviderConfig, &ModelConfig)> {
+    pub(crate) fn resolve_model(&self, provider_id: &str, model_id: &str) -> Option<(&ProviderConfig, &ModelConfig)> {
         let provider = self
             .config
             .providers

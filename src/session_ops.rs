@@ -82,6 +82,9 @@ impl AppState {
             return;
         }
         let targets = self.compare_targets();
+        if self.block_unsupported_attachments(self.pending_attachments.clone(), &targets, cx) {
+            return;
+        }
         if !self.compare_selection.is_empty() && targets.len() >= 2 {
             self.send_compare(window, cx);
             return;
@@ -110,6 +113,10 @@ impl AppState {
         if targets.len() < 2 {
             self.toast(ToastLevel::Error, tr(lang, Key::CompareNeedModels));
             cx.notify();
+            return;
+        }
+        // 对比模式更要拦：几个模型里可能只有一部分接得住这批附件
+        if self.block_unsupported_attachments(self.pending_attachments.clone(), &targets, cx) {
             return;
         }
         self.compare_selection.clear();

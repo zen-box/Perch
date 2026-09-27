@@ -10,8 +10,10 @@ use gpui_kit_assets::IconName;
 use super::chat::{attachment_badge, preview};
 use super::{CONTENT_MAX_WIDTH, Palette, model_picker};
 use crate::app::AppState;
-use crate::i18n::{AppLanguage, Key, tr};
+use crate::attachment_ops::AttachmentObstacle;
+use crate::i18n::{AppLanguage, Key, tr, tr_args};
 use crate::model::Attachment;
+use crate::model_info::Capability;
 
 // ================= 输入框 =================
 
@@ -98,34 +100,26 @@ fn render_pending_attachments(
         }))
 }
 
-fn is_current_model_vision_capable(state: &AppState) -> bool {
-    let session = state.storage.get_active_session();
-    let provider_id = session
-        .map(|s| s.provider_id.as_str())
-        .filter(|id| !id.is_empty())
-        .unwrap_or(&state.config.active_provider_id);
-    let default_model = state.config.default_model_selection().1;
-    let model_id = session
-        .map(|s| s.model.as_str())
-        .filter(|id| !id.is_empty() && *id != "default")
-        .unwrap_or(&default_model);
-    let model_config = state
-        .config
-        .providers
-        .iter()
-        .find(|p| p.id == provider_id)
-        .or_else(|| state.config.get_active_provider())
-        .and_then(|p| p.models.iter().find(|m| m.id == model_id));
-
-    if let Some(model) = model_config {
-        model
-            .effective_capabilities()
-            .contains(&crate::model_info::Capability::Vision)
-    } else {
-        crate::model_info::detect(model_id, "")
-            .capabilities
-            .contains(&crate::model_info::Capability::Vision)
-    }
+/// 「这批附件有模型接不住」的提示条。
+///
+/// 发送时还会再拦一道（`session_ops::send_message`）。这里是**提前**告诉用户，
+/// 别等点了发送才被弹回来；反过来，用户换掉模型或者删掉附件后这条也会立刻消失。
+fn render_attachment_warning(obstacle: &AttachmentObstacle, p: &Palette, lang: AppLanguage) -> impl IntoElement {
+    h_flex()
+        .gap_1p5()
+        .px_3()
+        .py_1p5()
+        .mx_2()
+        .mb_1()
+        .rounded_md()
+        .bg(p.warning.opacity(0.12))
+        .items_center()
+        .child(Icon::new(IconName::Info).size(px(13.)).text_color(p.warning))
+        .child(div().text_xs().text_color(p.warning).child(tr_args(
+            lang,
+            Key::AttachmentUnsupported,
+            &[&obstacle.model, obstacle.capability.label(lang)],
+        )))
 }
 
 pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
@@ -133,8 +127,17 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
     let is_streaming = state.is_streaming;
     let draft = state.chat_input.read(cx).value().to_string();
     let has_attachments = !state.pending_attachments.is_empty();
-    let has_images = state.pending_attachments.iter().any(|a| a.is_image());
-    let is_vision = is_current_model_vision_capable(state);
+    // 这批附件发给这次要用的模型，有没有接不住的。对比模式下每个模型各查一遍——
+    // 三个模型里可能只有两个能看图
+    let obstacle = state.attachment_obstacle();
+    // 入口本身也要说清楚：模型只接得住一部分格式时，别让用户以为想传什么都能传
+    let capabilities = state.common_capabilities();
+    let attachment_tooltip = if capabilities.contains(&Capability::Vision) && capabilities.contains(&Capability::Files)
+    {
+        tr(lang, Key::AddAttachment)
+    } else {
+        tr(lang, Key::AddAttachmentLimited)
+    };
     let input_empty = draft.trim().is_empty() && !has_attachments;
     let slash = slash_matches(state, &draft);
     let quote = state.pending_quote.clone();
@@ -158,25 +161,8 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                 .when(has_attachments, |this| {
                     this.child(render_pending_attachments(&state.pending_attachments, p, lang, cx))
                 })
-                .when(has_images && !is_vision, |this| {
-                    this.child(
-                        h_flex()
-                            .gap_1p5()
-                            .px_3()
-                            .py_1p5()
-                            .mx_2()
-                            .mb_1()
-                            .rounded_md()
-                            .bg(p.warning.opacity(0.12))
-                            .items_center()
-                            .child(Icon::new(IconName::Info).size(px(13.)).text_color(p.warning))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(p.warning)
-                                    .child(tr(lang, Key::VisionNotSupportedHint)),
-                            ),
-                    )
+                .when_some(obstacle, |this, obstacle| {
+                    this.child(render_attachment_warning(&obstacle, p, lang))
                 })
                 .child({
                     let app = cx.entity();
@@ -207,7 +193,7 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                         .ghost()
                                         .small()
                                         .icon(IconName::Paperclip)
-                                        .tooltip(tr(lang, Key::AddAttachment))
+                                        .tooltip(attachment_tooltip)
                                         .on_click(cx.listener(|this, _, _, cx| this.pick_attachments(cx))),
                                 )
                                 .child(model_picker::render_model_picker(state, p, cx))
