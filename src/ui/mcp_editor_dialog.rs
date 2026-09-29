@@ -35,12 +35,13 @@ pub fn open_mcp_editor_dialog(app: Entity<AppState>, window: &mut Window, cx: &m
         };
         let editing = editor.editing_id.is_some();
         let kind = editor.kind;
-        let (name, command, args, cwd, url, env) = (
+        let (name, command, args, cwd, url, proxy, env) = (
             editor.name.clone(),
             editor.command.clone(),
             editor.args.clone(),
             editor.cwd.clone(),
             editor.url.clone(),
+            editor.proxy.clone(),
             editor.env.clone(),
         );
 
@@ -97,6 +98,7 @@ pub fn open_mcp_editor_dialog(app: Entity<AppState>, window: &mut Window, cx: &m
                             Input::new(&url),
                             &p,
                         ))
+                        .child(field(tr(lang, Key::Proxy), None, Input::new(&proxy), &p))
                     })
                     // 同一个输入框，两种用途：stdio 下是子进程的环境变量、
                     // HTTP 下是请求头。格式都是 `NAME: VALUE`，值都存在凭据管理器里。

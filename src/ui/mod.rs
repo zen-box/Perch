@@ -22,6 +22,7 @@ mod settings_prompts;
 mod settings_providers;
 mod settings_skills;
 mod sidebar;
+mod skill_picker;
 mod tool_picker;
 mod workspace_picker;
 

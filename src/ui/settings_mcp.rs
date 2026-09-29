@@ -18,7 +18,7 @@ use super::mcp_editor_dialog::open_mcp_editor_dialog;
 use super::settings::page;
 use crate::app::AppState;
 use crate::config::{McpServerConfig, McpTransport};
-use crate::i18n::{AppLanguage, Key, tr, tr_args};
+use crate::i18n::{AppLanguage, Key, tr, tr_args, tr_count};
 use crate::mcp_ops::ServerStatus;
 
 pub(super) fn render_mcp(state: &AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
@@ -257,7 +257,11 @@ fn status_badge(status: &ServerStatus, tool_count: usize, p: &Palette, lang: App
             format!(
                 "{} · {}",
                 tr(lang, Key::McpStatusReady),
-                tr_args(lang, Key::McpToolCount, &[&tool_count.to_string()])
+                tr_args(
+                    lang,
+                    tr_count(lang, tool_count, Key::McpToolCountOne, Key::McpToolCountMany),
+                    &[&tool_count.to_string()],
+                )
             ),
         ),
         ServerStatus::Failed(_) => (p.danger, tr(lang, Key::McpStatusFailed).to_string()),

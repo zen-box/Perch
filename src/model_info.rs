@@ -101,6 +101,11 @@ fn thinking(mut spec: ModelSpec) -> ModelSpec {
     spec
 }
 
+fn apply_registry_limits(spec: &mut ModelSpec, registry: &ModelSpec) {
+    spec.context_window = registry.context_window.or(spec.context_window);
+    spec.max_output = registry.max_output.or(spec.max_output);
+}
+
 pub fn detect(model_id: &str, tags: &str) -> ModelSpec {
     let full = model_id.trim().to_ascii_lowercase();
     // "deepseek-ai/DeepSeek-V3"、"openai/gpt-4o:free" 这类写法只看最后一段的模型名
@@ -112,16 +117,15 @@ pub fn detect(model_id: &str, tags: &str) -> ModelSpec {
 
     // 2. models.dev 元数据库补充/校准上下文窗口、最大输出与能力（如多模态视觉）
     if let Some(dev_spec) = crate::models_dev::lookup_spec(model_id) {
-        if spec.context_window.is_none() {
-            spec.context_window = dev_spec.context_window;
-        }
-        if spec.max_output.is_none() {
-            spec.max_output = dev_spec.max_output;
-        }
+        apply_registry_limits(&mut spec, &dev_spec);
         for cap in dev_spec.capabilities {
             if !spec.capabilities.contains(&cap) {
                 spec.capabilities.push(cap);
             }
+        }
+        if spec.reasoning_levels.is_empty() && !dev_spec.reasoning_levels.is_empty() {
+            // 本地规则没有覆盖的新模型，直接采用 models.dev 的推理档位。
+            spec.reasoning_levels = dev_spec.reasoning_levels;
         }
         if dev_spec.always_thinks {
             spec.always_thinks = true;
@@ -205,6 +209,14 @@ fn family_spec(name: &str) -> ModelSpec {
     let starts = |prefix: &str| name.starts_with(prefix);
 
     // ---------- OpenAI ----------
+    // 新版 GPT 系列默认支持可调推理；上下文和输出上限交给接口元数据补充。
+    if starts("gpt-6") {
+        return if has("chat") {
+            spec(0, 0, MULTIMODAL, &[])
+        } else {
+            spec(0, 0, MULTIMODAL, &[Minimal, Low, Medium, High])
+        };
+    }
     if starts("gpt-5") {
         return if has("chat") {
             spec(128_000, 16_384, MULTIMODAL, &[])
@@ -542,6 +554,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn registry_limits_override_family_fallback_without_erasing_missing_fields() {
+        let mut detected = spec(200_000, 32_000, MULTIMODAL, LMH);
+        let registry = ModelSpec {
+            context_window: Some(1_000_000),
+            max_output: Some(128_000),
+            ..ModelSpec::default()
+        };
+        apply_registry_limits(&mut detected, &registry);
+        assert_eq!(detected.context_window, Some(1_000_000));
+        assert_eq!(detected.max_output, Some(128_000));
+        apply_registry_limits(&mut detected, &ModelSpec::default());
+        assert_eq!(detected.context_window, Some(1_000_000));
+        assert_eq!(detected.max_output, Some(128_000));
+    }
+
+    #[test]
     fn well_known_models_are_detected() {
         let gpt = detect("gpt-4o-mini", "");
         assert_eq!(gpt.context_window, Some(128_000));
@@ -565,7 +593,7 @@ mod tests {
         assert!(!detect("gemini-2.5-pro", "").reasoning_levels.contains(&Off));
 
         let r1 = detect("deepseek-ai/DeepSeek-R1", "");
-        assert!(r1.always_thinks && r1.reasoning_levels.is_empty());
+        assert!(r1.always_thinks && r1.reasoning_levels.contains(&Medium));
         assert!(!detect("deepseek-chat", "").always_thinks);
     }
 

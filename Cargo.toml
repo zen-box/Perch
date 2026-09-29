@@ -1,7 +1,10 @@
 [package]
 name = "perch"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
+
+[features]
+video-demo = []
 
 [dependencies]
 gpui-kit = { version = "0.6.6", features = ["tree-sitter-rust", "tree-sitter-python", "tree-sitter-javascript", "tree-sitter-typescript", "tree-sitter-bash"] }

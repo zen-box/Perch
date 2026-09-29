@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Perch
+Comment=AI chat desktop client
+Exec=perch
+Icon=perch
+Terminal=false
+Categories=Utility;
+StartupWMClass=Perch

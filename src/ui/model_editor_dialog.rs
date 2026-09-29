@@ -21,7 +21,6 @@ use crate::app::AppState;
 use crate::brand;
 use crate::config::ModelConfig;
 use crate::i18n::{AppLanguage, Key, tr, tr_args};
-use crate::model::ReasoningLevel;
 use crate::model_info::{Capability, format_tokens};
 use crate::model_ops::TokenField;
 
@@ -145,96 +144,6 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
             ],
         );
 
-        let levels = draft.effective_reasoning_levels();
-        let thinking = form_card(
-            tr(lang, Key::Reasoning),
-            Some(if draft.reasoning_levels.is_some() {
-                tr(lang, Key::ManualSet)
-            } else {
-                tr(lang, Key::AutoDetect)
-            }),
-            &p,
-            vec![
-                v_flex()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .child(row_title(
-                        tr(lang, Key::SupportedEfforts),
-                        tr(lang, Key::SupportedEffortsHint),
-                        &p,
-                    ))
-                    .child(
-                        h_flex()
-                            .flex_wrap()
-                            .gap_1p5()
-                            .children(ReasoningLevel::ALL.into_iter().map(|level| {
-                                let selected = levels.contains(&level);
-                                let app = app.clone();
-                                chip(SharedString::from(format!("model-level-{level:?}")), selected, &p)
-                                    .on_click(move |_, _, cx| {
-                                        app.update(cx, |this, cx| this.toggle_model_draft_level(level, cx))
-                                    })
-                                    .when(selected, |this| this.child(Icon::new(IconName::Check).size(px(12.))))
-                                    .child(level.label(lang))
-                            })),
-                    )
-                    .when(levels.is_empty() && detected.always_thinks, |this| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(p.muted_foreground)
-                                .child(tr(lang, Key::AlwaysThinkingHint)),
-                        )
-                    })
-                    .into_any_element(),
-                v_flex()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .child(row_title(
-                        tr(lang, Key::DefaultEffort),
-                        tr(lang, Key::DefaultEffortHint),
-                        &p,
-                    ))
-                    .child(if levels.is_empty() {
-                        div()
-                            .text_sm()
-                            .text_color(p.muted_foreground)
-                            .child(tr(lang, Key::PickEffortFirst))
-                            .into_any_element()
-                    } else {
-                        h_flex()
-                            .flex_wrap()
-                            .gap_1p5()
-                            .children(
-                                std::iter::once(None)
-                                    .chain(levels.iter().copied().map(Some))
-                                    .map(|level| {
-                                        let app = app.clone();
-                                        chip(
-                                            SharedString::from(format!("model-default-level-{level:?}")),
-                                            draft.default_reasoning == level,
-                                            &p,
-                                        )
-                                        .on_click(move |_, _, cx| {
-                                            app.update(cx, |this, cx| {
-                                                this.update_model_draft(cx, |draft| draft.default_reasoning = level)
-                                            })
-                                        })
-                                        .child(
-                                            level
-                                                .map(|level| level.label(lang))
-                                                .unwrap_or(tr(lang, Key::Unspecified)),
-                                        )
-                                    }),
-                            )
-                            .into_any_element()
-                    })
-                    .into_any_element(),
-            ],
-        );
-
         let capabilities = draft.effective_capabilities();
         let abilities = form_card(
             tr(lang, Key::Capabilities),
@@ -329,15 +238,7 @@ pub fn open_model_editor(app: Entity<AppState>, window: &mut Window, cx: &mut Ap
             })
             .w(px(620.))
             .margin_top(px(48.))
-            .child(
-                v_flex()
-                    .gap_5()
-                    .pb_1()
-                    .child(header)
-                    .child(specs)
-                    .child(thinking)
-                    .child(abilities),
-            )
+            .child(v_flex().gap_5().pb_1().child(header).child(specs).child(abilities))
             .footer(
                 h_flex()
                     .w_full()

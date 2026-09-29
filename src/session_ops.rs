@@ -82,6 +82,10 @@ impl AppState {
             return;
         }
         let targets = self.compare_targets();
+        let active_id = self.storage.active_session_id.clone();
+        if self.block_unsupported_history_attachments(&active_id, cx) {
+            return;
+        }
         if self.block_unsupported_attachments(self.pending_attachments.clone(), &targets, cx) {
             return;
         }
@@ -116,6 +120,10 @@ impl AppState {
             return;
         }
         // 对比模式更要拦：几个模型里可能只有一部分接得住这批附件
+        let active_id = self.storage.active_session_id.clone();
+        if self.block_unsupported_history_attachments(&active_id, cx) {
+            return;
+        }
         if self.block_unsupported_attachments(self.pending_attachments.clone(), &targets, cx) {
             return;
         }
@@ -138,6 +146,9 @@ impl AppState {
             return;
         }
         let active_id = self.storage.active_session_id.clone();
+        if self.block_unsupported_history_attachments(&active_id, cx) {
+            return;
+        }
         let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
             return;
         };
@@ -167,6 +178,9 @@ impl AppState {
             return;
         }
         let active_id = self.storage.active_session_id.clone();
+        if self.block_unsupported_history_attachments(&active_id, cx) {
+            return;
+        }
         let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
             return;
         };
@@ -273,6 +287,9 @@ impl AppState {
             return false;
         }
         let active_id = self.storage.active_session_id.clone();
+        if self.block_unsupported_history_attachments(&active_id, cx) {
+            return false;
+        }
         let Some(session) = self.storage.sessions.iter_mut().find(|session| session.id == active_id) else {
             return false;
         };

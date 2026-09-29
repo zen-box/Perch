@@ -167,16 +167,37 @@ impl ModelConfig {
             None => self.detected().capabilities,
         }
     }
-
-    /// 可以选择的思考强度（按从弱到强排序）
+    /// 可以选择的思考强度（按从关闭到最强排序）。支持推理的模型始终提供「关闭」档位。
     pub fn effective_reasoning_levels(&self) -> Vec<ReasoningLevel> {
         let mut levels = match &self.reasoning_levels {
             Some(levels) => levels.clone(),
             None => self.detected().reasoning_levels,
         };
+        if !levels.is_empty() && !levels.contains(&ReasoningLevel::Off) {
+            levels.push(ReasoningLevel::Off);
+        }
         levels.sort();
         levels.dedup();
         levels
+    }
+
+    /// 对话没有明确选择时使用的强度：优先中档，避免默认关闭，也避免一上来就用最高预算。
+    pub fn effective_default_reasoning(&self) -> Option<ReasoningLevel> {
+        let levels = self.effective_reasoning_levels();
+        self.default_reasoning
+            .filter(|level| levels.contains(level))
+            .or_else(|| {
+                [
+                    ReasoningLevel::Medium,
+                    ReasoningLevel::Low,
+                    ReasoningLevel::Minimal,
+                    ReasoningLevel::High,
+                    ReasoningLevel::XHigh,
+                    ReasoningLevel::Max,
+                ]
+                .into_iter()
+                .find(|level| levels.contains(level))
+            })
     }
 
     pub fn supports_reasoning(&self) -> bool {
@@ -271,6 +292,9 @@ pub struct McpServerConfig {
     #[serde(default)]
     pub enabled: bool,
     pub transport: McpTransport,
+    /// HTTP MCP 的代理地址；stdio 不使用。留空表示直连。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub proxy: String,
     /// 凭据管理器里的条目名。为空时按 `mcp/<id>` 取，见 [`Self::secret_reference`]
     #[serde(default)]
     pub secret_ref: String,
@@ -328,6 +352,9 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default)]
     pub local_tools_enabled: bool,
+    /// 用户主动允许从 GitHub 检查并下载更新；旧配置默认关闭。
+    #[serde(default)]
+    pub updates_enabled: bool,
     /// 单条本地命令最多跑多久（秒）。写进配置而不是写死，
     /// 因为"多久算卡住"因项目和机器而异。
     #[serde(default = "default_command_timeout_secs")]
@@ -381,6 +408,7 @@ impl Default for AppConfig {
             language: "zh-CN".to_string(),
             local_tools_enabled: false,
             command_timeout_secs: default_command_timeout_secs(),
+            updates_enabled: false,
             providers: Vec::new(),
             mcp_servers: Vec::new(),
             disabled_skills: Vec::new(),
@@ -434,6 +462,9 @@ fn has_plain_api_key(content: &str) -> bool {
 /// 名字里不带 provider：MCP 服务器的环境变量也走这里，机制完全一样
 /// （同一个凭据服务、不同的条目名），没必要为它再写一套。
 pub fn load_secret(reference: &str) -> keyring::Result<String> {
+    if crate::video_demo::active() {
+        return Err(keyring::Error::NoEntry);
+    }
     let entry = keyring::Entry::new(APP_NAME, reference)?;
     match entry.get_password() {
         Ok(secret) => Ok(secret),
@@ -459,6 +490,9 @@ pub fn load_provider_key(reference: &str) -> keyring::Result<String> {
 
 /// 写入某个引用对应的密钥。空字符串表示删除这条凭据。
 pub fn store_secret(reference: &str, secret: &str) -> keyring::Result<()> {
+    if crate::video_demo::active() {
+        return Ok(());
+    }
     let entry = keyring::Entry::new(APP_NAME, reference)?;
     if secret.is_empty() {
         match entry.delete_credential() {
@@ -693,6 +727,7 @@ mod tests {
         let config: AppConfig = serde_json::from_str(json).unwrap();
         assert!(config.audit_log_enabled, "老配置读进来必须是开着的");
         assert!(AppConfig::default().audit_log_enabled, "新建配置也默认开着");
+        assert!(!config.updates_enabled, "老配置不能静默开启新的网络服务");
     }
 
     #[test]
@@ -705,6 +740,18 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let back: AppConfig = serde_json::from_str(&json).unwrap();
         assert!(!back.audit_log_enabled);
+    }
+
+    #[test]
+    fn update_opt_in_survives_reload() {
+        let config = AppConfig {
+            updates_enabled: true,
+            ..AppConfig::default()
+        };
+        let saved = serde_json::to_string(&config).unwrap();
+        let loaded: AppConfig = serde_json::from_str(&saved).unwrap();
+        assert!(loaded.updates_enabled);
+        assert!(!AppConfig::default().updates_enabled);
     }
 
     #[test]
@@ -762,8 +809,17 @@ mod tests {
         model.reasoning_levels = Some(vec![ReasoningLevel::High, ReasoningLevel::Low]);
         assert_eq!(
             model.effective_reasoning_levels(),
-            vec![ReasoningLevel::Low, ReasoningLevel::High]
+            vec![ReasoningLevel::Off, ReasoningLevel::Low, ReasoningLevel::High]
         );
+        assert_eq!(model.effective_default_reasoning(), Some(ReasoningLevel::Low));
+
+        let future_gpt = ModelConfig::new("gpt-6-sol", "GPT-6 Sol");
+        assert!(
+            future_gpt
+                .effective_reasoning_levels()
+                .contains(&ReasoningLevel::Medium)
+        );
+        assert_eq!(future_gpt.effective_default_reasoning(), Some(ReasoningLevel::Medium));
         let json = serde_json::to_string(&ModelConfig::new("a", "b")).unwrap();
         assert!(!json.contains("context_window"), "unset fields are not written: {json}");
     }
@@ -787,6 +843,7 @@ mod tests {
                 args: vec!["-y".into(), "@modelcontextprotocol/server-everything".into()],
                 cwd: None,
             },
+            proxy: String::new(),
             secret_ref: String::new(),
             disabled_tools: Vec::new(),
         }
@@ -832,6 +889,7 @@ mod tests {
             transport: McpTransport::Http {
                 url: "https://mcp.example.test/mcp".into(),
             },
+            proxy: String::new(),
             secret_ref: String::new(),
             disabled_tools: Vec::new(),
         };
@@ -862,6 +920,7 @@ mod tests {
             transport: McpTransport::Http {
                 url: "https://mcp.example.test/mcp".into(),
             },
+            proxy: String::new(),
             secret_ref: String::new(),
             disabled_tools: Vec::new(),
         })

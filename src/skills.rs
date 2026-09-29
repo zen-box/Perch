@@ -61,7 +61,8 @@ pub struct Skill {
 ///
 /// **缓存而不是每次现扫**：`tool_ops::source_groups` 在渲染期间跑，那里做文件 I/O 会把
 /// 界面拖住；而工具执行在后台线程上，又拿不到 `AppState`。两边共用这一份快照，
-/// 由 `skill_ops::reload_skills` 在启动、导入、开关之后重建。
+/// 由 `skill_ops::reload_skills` 重建：启动、导入之后，以及打开输入框上的「技能」、
+/// 切到技能设置页的时候（手工拷进目录的技能靠这两处才会被看到）。
 ///
 /// 正文也一起缓存：一个 SKILL.md 通常几 KB，全装进来也就几百 KB，
 /// 换来的是 `load_skill` 和「手动插入」都不用再读盘。
@@ -109,6 +110,23 @@ impl SkillCatalog {
         self.items
             .iter()
             .filter(move |skill| !disabled.iter().any(|id| id == &skill.id))
+    }
+
+    /// 这次对话真正能用的技能：会话里勾了的、而且没被全局停用的。
+    ///
+    /// 勾过、后来又被删掉的技能自然不在里面（快照里没有它），不用另做清理。
+    pub fn picked<'a>(&'a self, picked: &'a [String], disabled: &'a [String]) -> impl Iterator<Item = &'a Skill> + 'a {
+        self.enabled(disabled)
+            .filter(move |skill| picked.iter().any(|id| id == &skill.id))
+    }
+
+    /// 只含 [`Self::picked`] 那几个技能的快照，交给后台执行 `load_skill` / `read_skill_file`。
+    ///
+    /// 执行时只认这一份：这次对话没勾的技能，模型就算猜到名字也读不到。
+    pub fn picked_only(&self, picked: &[String], disabled: &[String]) -> Self {
+        Self {
+            items: self.picked(picked, disabled).cloned().collect(),
+        }
     }
 }
 

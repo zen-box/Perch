@@ -35,12 +35,26 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
             collect_stats(
                 &state.storage.sessions,
                 &state.config.default_model_selection().1,
-                &|model, input, output| crate::models_dev::calculate_cost(model, input, output, 0).0,
+                &|model, input, output| crate::models_dev::calculate_cost(model, input, output, 0).map(|(usd, _)| usd),
                 current_range,
             )
         };
 
         let max_daily_tokens = summary.daily.iter().map(|d| d.total_tokens).max().unwrap_or(1).max(1);
+        let estimated_cost = if summary.unknown_costs > 0 {
+            tr(lang, Key::Unknown).to_string()
+        } else {
+            format!("${:.2}", summary.total_cost_usd)
+        };
+        let estimated_cost_sub = if summary.unknown_costs > 0 {
+            tr(lang, Key::Unknown).to_string()
+        } else {
+            tr_args(
+                lang,
+                Key::CostCny,
+                &[&format!("{:.2}", summary.total_cost_usd * USD_TO_CNY_RATE)],
+            )
+        };
 
         let tab_overview_app = app.clone();
         let tab_models_app = app.clone();
@@ -189,12 +203,8 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                             ))
                             .child(metric_card(
                                 tr(lang, Key::EstimatedCost),
-                                &format!("${:.2}", summary.total_cost_usd),
-                                tr_args(
-                                    lang,
-                                    Key::CostCny,
-                                    &[&format!("{:.2}", summary.total_cost_usd * USD_TO_CNY_RATE)],
-                                ),
+                                &estimated_cost,
+                                estimated_cost_sub,
                                 &p,
                             ))
                             .child(metric_card(
@@ -235,7 +245,16 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                         let total_tok = day.total_tokens;
                                         let day_in = day.input_tokens;
                                         let day_out = day.output_tokens;
-                                        let cost_val = day.cost_usd;
+                                        let cost_text = if day.cost_known {
+                                            format!("{:.4}", day.cost_usd)
+                                        } else {
+                                            tr(lang, Key::Unknown).to_string()
+                                        };
+                                        let cny_text = if day.cost_known {
+                                            format!("{:.3}", day.cost_usd * USD_TO_CNY_RATE)
+                                        } else {
+                                            tr(lang, Key::Unknown).to_string()
+                                        };
 
                                         v_flex().flex_1().h_full().justify_end().items_center().gap_1().child(
                                             div()
@@ -255,8 +274,8 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                                             &format_tokens(total_tok as u32),
                                                             &format_tokens(day_in as u32),
                                                             &format_tokens(day_out as u32),
-                                                            &format!("{cost_val:.4}"),
-                                                            &format!("{:.3}", cost_val * USD_TO_CNY_RATE),
+                                                            &cost_text,
+                                                            &cny_text,
                                                         ],
                                                     ))
                                                     .build(window, cx)
@@ -357,10 +376,13 @@ pub fn open_analytics_dialog(app: Entity<AppState>, window: &mut Window, cx: &mu
                                                                 ),
                                                             )
                                                             .child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .font_weight(FontWeight::MEDIUM)
-                                                                    .child(format!("${:.2}", stat.cost_usd)),
+                                                                div().text_xs().font_weight(FontWeight::MEDIUM).child(
+                                                                    if stat.cost_known {
+                                                                        format!("${:.2}", stat.cost_usd)
+                                                                    } else {
+                                                                        tr(lang, Key::Unknown).to_string()
+                                                                    },
+                                                                ),
                                                             )
                                                             .child(
                                                                 div()

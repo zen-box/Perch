@@ -7,8 +7,8 @@ use uuid::Uuid;
 use crate::app::{AppState, ToastLevel, ViewMode, runtime, update_state};
 use crate::clipboard::{self, PastePayload};
 use crate::file_store;
-use crate::i18n::{AppLanguage, Key, tr, tr_args};
-use crate::model::{Attachment, AttachmentKind};
+use crate::i18n::{AppLanguage, Key, tr, tr_args, tr_count};
+use crate::model::{Attachment, AttachmentKind, ChatMessage};
 use crate::model_info::{self, Capability};
 
 /// 文件对话框里能选到的扩展名，**按能力拆成三组**：模型看不懂图片就不摆图片过滤器，
@@ -102,6 +102,24 @@ const TEXT_EXTS: &[&str] = &[
 /// ⚠️ 这里刻意**不包含** Word / Excel / PPT：它们压根不会被塞进请求体
 /// （`llm_request.rs` 只挑 `Image || is_pdf()`），拿 `Files` 去卡等于用一个假理由拦人。
 /// 新加的这类文件在入口就被拒收了（[`refusal_by_type`]），这里只会碰到旧消息里存下的。
+/// 找出历史消息里仍保存着、但请求协议不会发送的 Office 附件。
+///
+/// 新入口已经拒收这几类文件；这里只处理旧数据，避免重发时附件无声消失。
+pub(crate) fn history_office_attachment_names(messages: &[ChatMessage]) -> Vec<String> {
+    let mut names = Vec::new();
+    for message in messages {
+        for attachment in &message.attachments {
+            let (kind, mime) = file_store::detect_kind_and_mime(&attachment.name);
+            let office = (attachment.kind == AttachmentKind::Document || kind == AttachmentKind::Document)
+                && mime != "application/pdf"
+                && !attachment.is_pdf();
+            if office && !names.iter().any(|name| name == &attachment.name) {
+                names.push(attachment.name.clone());
+            }
+        }
+    }
+    names
+}
 pub(crate) fn required_capabilities(attachments: &[Attachment]) -> Vec<Capability> {
     let mut needed = Vec::new();
     for attachment in attachments {
@@ -377,6 +395,23 @@ impl AppState {
         cx.notify();
         true
     }
+    /// 历史 Office 附件不会进入任何渠道的请求体，重发前必须明确告诉用户。
+    pub(crate) fn block_unsupported_history_attachments(&mut self, session_id: &str, cx: &mut Context<Self>) -> bool {
+        let Some(session) = self.storage.sessions.iter().find(|session| session.id == session_id) else {
+            return false;
+        };
+        let names = history_office_attachment_names(&session.messages);
+        if names.is_empty() {
+            return false;
+        }
+        let lang = self.language();
+        self.toast(
+            ToastLevel::Error,
+            tr_args(lang, Key::AttachmentHistoryOffice, &[&names.join(", ")]),
+        );
+        cx.notify();
+        true
+    }
 
     /// 把本地文件加入待发送的附件。读取、计算哈希、复制都在后台线程做，大文件不会卡住界面。
     ///
@@ -425,7 +460,11 @@ impl AppState {
         if added > 0 {
             self.toast(
                 ToastLevel::Success,
-                tr_args(lang, Key::AttachmentsAdded, &[&added.to_string()]),
+                tr_args(
+                    lang,
+                    tr_count(lang, added, Key::AttachmentsAddedOne, Key::AttachmentsAddedMany),
+                    &[&added.to_string()],
+                ),
             );
         }
         if !refusals.is_empty() {
@@ -882,5 +921,33 @@ mod tests {
         assert_eq!(content.mime, "image/png");
         assert_eq!(content.name, "scan.png");
         assert!(content.bytes.starts_with(b"\x89PNG"));
+    }
+    #[std::prelude::v1::test]
+    fn historical_office_attachments_are_listed_once() {
+        let mut message = ChatMessage::new_user("旧消息".into());
+        message.attachments = vec![
+            attachment(
+                "notes.docx",
+                AttachmentKind::Document,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            attachment(
+                "notes.docx",
+                AttachmentKind::Document,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            attachment(
+                "sheet.xlsx",
+                AttachmentKind::Document,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            attachment("manual.pdf", AttachmentKind::Document, "application/pdf"),
+            attachment("readme.txt", AttachmentKind::Text, "text/plain"),
+        ];
+
+        assert_eq!(
+            history_office_attachment_names(&[message]),
+            vec!["notes.docx".to_string(), "sheet.xlsx".to_string()]
+        );
     }
 }

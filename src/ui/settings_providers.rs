@@ -14,7 +14,7 @@ use super::brand_icon::{model_avatar, model_badges, provider_avatar};
 use super::settings::{PAGE_MAX_WIDTH, section};
 use super::{Palette, dialogs, icon_tile, model_editor_dialog};
 use crate::app::AppState;
-use crate::i18n::{Key, tr, tr_args};
+use crate::i18n::{Key, tr, tr_args, tr_count};
 
 // ================= 模型渠道 =================
 
@@ -114,7 +114,16 @@ pub(super) fn render_providers(state: &AppState, p: &Palette, cx: &mut Context<A
                                                 .child(provider.name.clone()),
                                         )
                                         .child(div().truncate().text_xs().text_color(p.muted_foreground).child(
-                                            tr_args(lang, Key::ModelCount, &[&provider.models.len().to_string()]),
+                                            tr_args(
+                                                lang,
+                                                tr_count(
+                                                    lang,
+                                                    provider.models.len(),
+                                                    Key::ModelCountOne,
+                                                    Key::ModelCountMany,
+                                                ),
+                                                &[&provider.models.len().to_string()],
+                                            ),
                                         )),
                                 )
                                 .child(div().flex_none().size(px(8.)).rounded_full().bg(if provider.enabled {

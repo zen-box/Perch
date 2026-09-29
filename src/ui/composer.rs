@@ -162,7 +162,11 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
     let slash = slash_matches(state, &draft);
     let quote = state.pending_quote.clone();
 
+    let app_for_drop = cx.entity();
     v_flex()
+        .on_drop(move |paths: &ExternalPaths, _window, cx| {
+            app_for_drop.update(cx, |this, cx| this.add_attachment_paths(paths.paths().to_vec(), cx));
+        })
         .w_full()
         .max_w(CONTENT_MAX_WIDTH)
         .gap_2()
@@ -234,7 +238,11 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                         // 这排按钮贴着窗口底边，菜单往上开（跟旁边的模型、参数一致）。
                                         // 箭头必须画：点下去开的是菜单不是对话框，得让用户先看出来
                                         None => button
-                                            .dropdown_caret(true)
+                                            .child(
+                                                Icon::new(IconName::ChevronDown)
+                                                    .size(px(12.))
+                                                    .text_color(p.muted_foreground),
+                                            )
                                             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
                                                 available.iter().copied().fold(menu, |menu, filter| {
                                                     let app = app.clone();
@@ -253,17 +261,25 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                     }
                                 })
                                 .child(model_picker::render_model_picker(state, p, cx))
+                                .when_some(super::params::render_reasoning_button(state, cx), |this, button| {
+                                    this.child(button)
+                                })
                                 .child(super::params::render_params_button(lang, cx))
                                 .child(super::params::render_compare_button(state, cx)),
                         )
-                        // 右边管「怎么答」：对话还是智能体、在哪个目录干活、带哪些工具，最后是发送。
-                        // 这三样挨着发送按钮，发之前扫一眼就知道这一轮会不会动用本机
+                        // 右边管「怎么答」：对话还是智能体、在哪个目录干活、带哪些工具和技能，最后是发送。
+                        // 这几样挨着发送按钮，发之前扫一眼就知道这一轮会不会动用本机
                         .child(
                             h_flex()
                                 .flex_none()
                                 .items_center()
                                 .gap_1()
                                 .child(super::tool_picker::render_mode_switch(state, p, cx))
+                                // 权限只对 Agent 的本机工具生效，独立于 MCP 工具选择器。
+                                .when_some(
+                                    super::tool_picker::render_permission_button(state, p, cx),
+                                    |this, button| this.child(button),
+                                )
                                 // 项目目录只在智能体模式下出现（对话模式返回 None），
                                 // 它是本机工具的"从哪算"——没它本机工具一个都不会带
                                 .when_some(
@@ -271,6 +287,7 @@ pub(super) fn render_composer(state: &AppState, p: &Palette, cx: &mut Context<Ap
                                     |this, button| this.child(button),
                                 )
                                 .child(super::tool_picker::render_tool_picker(state, p, cx))
+                                .child(super::skill_picker::render_skill_picker(state, p, cx))
                                 .child(render_send_button(state, is_streaming, input_empty, lang, cx)),
                         ),
                 ),

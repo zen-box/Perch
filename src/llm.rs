@@ -1,7 +1,7 @@
 use crate::config::ChannelType;
 use crate::i18n::{AppLanguage, Key, tr, tr_args};
 use crate::llm_request::build_request;
-use crate::llm_stream::{emit_complete, emit_delta};
+use crate::llm_stream::{UsageCounts, emit_complete, emit_delta};
 use crate::llm_tools::ToolCallState;
 use crate::model::{Attachment, ReasoningLevel};
 use futures::StreamExt;
@@ -134,22 +134,32 @@ pub(crate) struct BuiltRequest {
     pub(crate) headers: Vec<(String, String)>,
 }
 
-pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>, mut cancel_rx: Option<Receiver<()>>) {
+pub async fn stream_chat(
+    mut request: ChatRequest,
+    tx: UnboundedSender<StreamEvent>,
+    mut cancel_rx: Option<Receiver<()>>,
+) {
     if request.base_url.trim().is_empty() {
         let _ = tx.send(StreamEvent::Error(tr(request.lang, Key::ErrNoBaseUrl).into()));
         let _ = tx.send(StreamEvent::Done);
         return;
     }
+    let recording = crate::video_demo::is_official_claude(request.channel_type, &request.base_url);
+    if recording {
+        request.api_key.clear();
+        request.extra_headers.clear();
+        request.proxy.clear();
+    }
     let is_local = request.base_url.contains("localhost")
         || request.base_url.contains("127.0.0.1")
         || request.base_url.contains("11434");
-    if request.api_key.trim().is_empty() && !is_local {
+    if request.api_key.trim().is_empty() && !is_local && !recording {
         let _ = tx.send(StreamEvent::Error(tr(request.lang, Key::ErrNoApiKey).into()));
         let _ = tx.send(StreamEvent::Done);
         return;
     }
 
-    let built = match build_request(&request) {
+    let mut built = match build_request(&request) {
         Ok(built) => built,
         Err(error) => {
             let _ = tx.send(StreamEvent::Error(error));
@@ -157,6 +167,20 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
             return;
         }
     };
+    if recording {
+        match crate::video_demo::redirect_url(&built.url, request.channel_type, &request.base_url) {
+            Some(url) => built.url = url,
+            None => {
+                let _ = tx.send(StreamEvent::Error(tr_args(
+                    request.lang,
+                    Key::ErrInvalidBaseUrl,
+                    &[&built.url],
+                )));
+                let _ = tx.send(StreamEvent::Done);
+                return;
+            }
+        }
+    }
 
     // 超时按「多久没有收到数据」计算，而不是整个请求的总时长：
     // 总时长会把正常输出中的长回答截断。
@@ -185,6 +209,7 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
     let client = client_builder.build().unwrap_or_else(|_| Client::new());
     let start_time = Instant::now();
     let mut completion_chars = 0usize;
+    let mut usage = UsageCounts::default();
     let attempts = request.retries.saturating_add(1).clamp(1, 6);
 
     for attempt in 1..=attempts {
@@ -199,13 +224,22 @@ pub async fn stream_chat(request: ChatRequest, tx: UnboundedSender<StreamEvent>,
         match http.send().await {
             Ok(response) if response.status().is_success() => {
                 if request.stream {
-                    if let Err(error) = read_sse(response, &mut cancel_rx, &request, &tx, &mut completion_chars).await {
+                    if let Err(error) = read_sse(
+                        response,
+                        &mut cancel_rx,
+                        &request,
+                        &tx,
+                        &mut completion_chars,
+                        &mut usage,
+                    )
+                    .await
+                    {
                         let _ = tx.send(StreamEvent::Error(error));
                     }
-                } else if let Err(error) = read_json(response, &request, &tx, &mut completion_chars).await {
+                } else if let Err(error) = read_json(response, &request, &tx, &mut completion_chars, &mut usage).await {
                     let _ = tx.send(StreamEvent::Error(error));
                 }
-                finish(&request, &tx, start_time, completion_chars);
+                finish(&request, &tx, start_time, completion_chars, usage);
                 return;
             }
             Ok(response) => {
@@ -272,18 +306,28 @@ fn transport_error(request: &ChatRequest, built: &BuiltRequest, error: &reqwest:
     )
 }
 
-fn finish(request: &ChatRequest, tx: &UnboundedSender<StreamEvent>, start_time: Instant, completion_chars: usize) {
+fn finish(
+    request: &ChatRequest,
+    tx: &UnboundedSender<StreamEvent>,
+    start_time: Instant,
+    completion_chars: usize,
+    usage: UsageCounts,
+) {
     let elapsed = start_time.elapsed();
     let total_secs = elapsed.as_secs_f32().max(0.1);
-    let _ = tx.send(StreamEvent::Metrics {
-        tokens_prompt: request
+    let prompt = usage.prompt.unwrap_or_else(|| {
+        request
             .messages
             .iter()
             .map(|message| message.content.chars().count())
             .sum::<usize>()
-            / 2,
-        tokens_completion: completion_chars,
-        speed_tps: (completion_chars as f32 / total_secs).max(0.0),
+            / 2
+    });
+    let completion = usage.completion.unwrap_or(completion_chars);
+    let _ = tx.send(StreamEvent::Metrics {
+        tokens_prompt: prompt,
+        tokens_completion: completion,
+        speed_tps: (completion as f32 / total_secs).max(0.0),
         latency_ms: elapsed.as_millis() as u64,
     });
     let _ = tx.send(StreamEvent::Done);
@@ -315,11 +359,13 @@ async fn read_json(
     request: &ChatRequest,
     tx: &UnboundedSender<StreamEvent>,
     completion_chars: &mut usize,
+    usage: &mut UsageCounts,
 ) -> Result<(), String> {
     let value: Value = response
         .json()
         .await
         .map_err(|error| tr_args(request.lang, Key::ErrBadJson, &[&error.to_string()]))?;
+    usage.update(request.channel_type, "", &value);
     emit_complete(request.channel_type, &value, tx, completion_chars);
     Ok(())
 }
@@ -330,6 +376,7 @@ pub(crate) async fn read_sse(
     request: &ChatRequest,
     tx: &UnboundedSender<StreamEvent>,
     completion_chars: &mut usize,
+    usage: &mut UsageCounts,
 ) -> Result<(), String> {
     let mut stream = response.bytes_stream();
     // 按字节缓存，凑齐一整行再解码：网络分块可能正好切在一个汉字的中间
@@ -365,7 +412,15 @@ pub(crate) async fn read_sse(
         while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = buffer.drain(..=pos).collect();
             let line = String::from_utf8_lossy(&line).into_owned();
-            if handle_sse_line(&line, &mut event_name, request, tx, completion_chars, &mut tool_state) {
+            if handle_sse_line(
+                &line,
+                &mut event_name,
+                request,
+                tx,
+                completion_chars,
+                &mut tool_state,
+                usage,
+            ) {
                 return Ok(());
             }
         }
@@ -378,6 +433,7 @@ pub(crate) async fn read_sse(
         tx,
         completion_chars,
         &mut tool_state,
+        usage,
     );
     tool_state.flush(|call| {
         let _ = tx.send(StreamEvent::ToolCall(call));
@@ -396,6 +452,7 @@ fn handle_sse_line(
     tx: &UnboundedSender<StreamEvent>,
     completion_chars: &mut usize,
     tool_state: &mut ToolCallState,
+    usage: &mut UsageCounts,
 ) -> bool {
     let trimmed = line.trim_end_matches(['\r', '\n']).trim_start();
     if trimmed.is_empty() {
@@ -421,6 +478,7 @@ fn handle_sse_line(
         return false;
     }
     if let Ok(value) = serde_json::from_str::<Value>(payload) {
+        usage.update(request.channel_type, event_name, &value);
         *completion_chars += emit_delta(request.channel_type, event_name, &value, tx, tool_state);
     }
     false
@@ -499,9 +557,17 @@ mod tests {
         let response = reqwest::Response::from(gpui_kit::http_client::http::Response::new(body));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut chars = 0;
-        read_sse(response, &mut None, &request(ChannelType::OpenAiChat), &tx, &mut chars)
-            .await
-            .unwrap();
+        let mut usage = UsageCounts::default();
+        read_sse(
+            response,
+            &mut None,
+            &request(ChannelType::OpenAiChat),
+            &tx,
+            &mut chars,
+            &mut usage,
+        )
+        .await
+        .unwrap();
         let mut received = String::new();
         while let Ok(event) = rx.try_recv() {
             if let StreamEvent::Content(content) = event {
@@ -510,5 +576,97 @@ mod tests {
         }
         assert_eq!(received, text);
         assert_eq!(chars, text.chars().count());
+    }
+    #[tokio::test]
+    async fn official_usage_reaches_metrics_for_streaming_channels() {
+        let cases = [
+            (
+                ChannelType::Claude,
+                "event: message_start\ndata: {\"message\":{\"usage\":{\"input_tokens\":37,\"output_tokens\":1}}}\n\nevent: message_delta\ndata: {\"usage\":{\"output_tokens\":91}}\n\n",
+                37,
+                91,
+            ),
+            (
+                ChannelType::OpenAiChat,
+                "data: {\"usage\":{\"prompt_tokens\":23,\"completion_tokens\":42}}\n\ndata: [DONE]\n\n",
+                23,
+                42,
+            ),
+            (
+                ChannelType::OpenAiResponses,
+                "event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":34}}}\n\n",
+                12,
+                34,
+            ),
+            (
+                ChannelType::Gemini,
+                "data: {\"usageMetadata\":{\"promptTokenCount\":51,\"candidatesTokenCount\":28}}\n\n",
+                51,
+                28,
+            ),
+        ];
+        for (channel, payload, expected_prompt, expected_completion) in cases {
+            let body = reqwest::Body::from(payload.to_string());
+            let response = reqwest::Response::from(gpui_kit::http_client::http::Response::new(body));
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut chars = 0;
+            let mut usage = UsageCounts::default();
+            let request = request(channel);
+            read_sse(response, &mut None, &request, &tx, &mut chars, &mut usage)
+                .await
+                .unwrap();
+            finish(&request, &tx, Instant::now(), chars, usage);
+            assert!(
+                matches!(rx.try_recv(), Ok(StreamEvent::Metrics { tokens_prompt, tokens_completion, .. })
+                if tokens_prompt == expected_prompt && tokens_completion == expected_completion),
+                "{channel:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn non_streaming_usage_and_missing_usage_fallback() {
+        for channel in [ChannelType::Claude, ChannelType::OpenAiResponses] {
+            let value = if channel == ChannelType::Claude {
+                json!({"content": [{"type": "text", "text": "hello"}], "usage": {"input_tokens": 16, "output_tokens": 9}})
+            } else {
+                json!({"output": [{"type": "message", "content": [{"type": "output_text", "text": "hello"}]}], "usage": {"input_tokens": 16, "output_tokens": 9}})
+            };
+            let body = reqwest::Body::from(value.to_string());
+            let response = reqwest::Response::from(gpui_kit::http_client::http::Response::new(body));
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut chars = 0;
+            let mut usage = UsageCounts::default();
+            let request = request(channel);
+            read_json(response, &request, &tx, &mut chars, &mut usage)
+                .await
+                .unwrap();
+            finish(&request, &tx, Instant::now(), chars, usage);
+            assert!(matches!(rx.try_recv(), Ok(StreamEvent::Content(text)) if text == "hello"));
+            assert!(matches!(
+                rx.try_recv(),
+                Ok(StreamEvent::Metrics {
+                    tokens_prompt: 16,
+                    tokens_completion: 9,
+                    ..
+                })
+            ));
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        finish(
+            &request(ChannelType::OpenAiChat),
+            &tx,
+            Instant::now(),
+            7,
+            UsageCounts::default(),
+        );
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(StreamEvent::Metrics {
+                tokens_prompt: 1,
+                tokens_completion: 7,
+                ..
+            })
+        ));
     }
 }

@@ -12,7 +12,6 @@ use crate::i18n::{Key, tr};
 pub(super) const PAGE_MAX_WIDTH: Pixels = px(720.);
 
 pub fn render_settings(state: &mut AppState, p: &Palette, cx: &mut Context<AppState>) -> impl IntoElement {
-    let lang = state.language();
     div()
         .flex()
         .size_full()
@@ -23,7 +22,7 @@ pub fn render_settings(state: &mut AppState, p: &Palette, cx: &mut Context<AppSt
             SettingsTab::Prompts => settings_prompts::render_prompts(state, p, cx).into_any_element(),
             SettingsTab::Skills => settings_skills::render_skills(state, p, cx).into_any_element(),
             SettingsTab::McpServers => settings_mcp::render_mcp(state, p, cx).into_any_element(),
-            SettingsTab::About => settings_misc::render_about(p, lang).into_any_element(),
+            SettingsTab::About => settings_misc::render_about(state, p, cx).into_any_element(),
         })
 }
 

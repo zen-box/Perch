@@ -1,12 +1,15 @@
 //! 会话级的工具来源：composer 上那个「对话 / 智能体」开关，以及「本次对话用哪些工具」。
 //!
-//! 状态只有一份，存在 `ChatSession::tools`（见 [`crate::model::SessionTools`]）。这里只是
+//! 状态只有一份，存在 `ChatSession::tools`（见 [`crate::session_tools::SessionTools`]）。这里只是
 //! 把它读写出来给界面用，**不另建缓存**——两份状态迟早会出现「模式说对话、清单却还在发」
 //! 这种自相矛盾。
 //!
 //! **粒度是「来源」不是「工具」**：勾一台 MCP 服务器就是把它的全部工具交给模型，
 //! 具体用哪个功能由模型按用户的问题自己挑。逐个工具勾选对普通人是门槛，
 //! 想精细控制的走「高级」那一层（`disabled_tools`）。
+//!
+//! **技能不算来源，单独按会话逐个勾**（`SessionTools::skills`）：技能是一段一段的做法说明，
+//! 用户要的是「这次对话用哪几个」，一整条「技能」开关管不到这个粒度。
 //!
 //! 这里做的全是「用户明确点了才发生」的改动。模型自己不能决定用不用工具，也不能决定
 //! 用哪些——那是用户在这次对话开始前选好的（产品决策，见 AGENTS.md §11）。
@@ -17,8 +20,9 @@ use crate::app::AppState;
 use crate::config::{AppConfig, McpServerConfig};
 use crate::llm_tools::ToolSpec;
 use crate::mcp_ops::McpState;
-use crate::model::{ChatSession, LegacyTools, Permission, SessionMode, SessionTools, ToolSource};
+use crate::model::ChatSession;
 use crate::model_info::Capability;
+use crate::session_tools::{LegacyTools, Permission, SessionMode, SessionTools, ToolSource};
 use crate::skills::SkillCatalog;
 
 /// 选择器里的一条来源下挂着的工具（只在「高级」折叠里显示）。
@@ -30,27 +34,23 @@ pub(crate) struct ToolOption {
 
 /// 来源的显示名。
 ///
-/// 本机和 Skills 那两项要跟着界面语言走，所以只在这里留个标记，文案由界面层渲染；
+/// 本机那一项要跟着界面语言走，所以只在这里留个标记，文案由界面层渲染；
 /// 服务器名是用户自己起的，原样显示。
 pub(crate) enum SourceLabel {
     Local,
-    /// 装进数据目录的 Skills。
-    Skill,
     McpServer(String),
 }
 
 /// 这一行来源**为什么现在给不出工具**。
 ///
-/// 只有本机那一行和 Skills 那一行用得上。MCP 服务器给不出工具的原因（没连上、
-/// 一个工具都没暴露）已经显示在服务器名旁边了，不用在这里再说一遍。
+/// 只有本机那一行用得上。MCP 服务器给不出工具的原因（没连上、一个工具都没暴露）
+/// 已经显示在服务器名旁边了，不用在这里再说一遍。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SourceNote {
     /// 设置里的「允许智能体读写本机文件」关着
     LocalToolsOff,
     /// 还没选项目目录——本机工具没有"从哪算"的基准，所以一个都不给
     NeedsWorkspace,
-    /// 装是装了，但全被停用了
-    NoSkills,
 }
 
 /// 选择器里的一行来源。
@@ -98,10 +98,11 @@ pub(crate) fn session_tool_specs(
         specs.extend(crate::local_tools::specs());
     }
 
-    // Skills。**对话模式也能用**——它读的只有 Perch 自己的 skills 目录，碰不到用户的文件系统
-    // （见 `AGENT_MODE_PLAN.md` 第九节）。一个都没装、或者全被停用时一个工具都不给：
+    // Skills：这次对话勾了、而且还能用（装着、没被全局停用）的技能至少有一个才给。
+    // **对话模式也能用**——它读的只有 Perch 自己的 skills 目录，碰不到用户的文件系统
+    // （见 `AGENT_MODE_PLAN.md` 第九节）。一个能用的都没有时一个工具都不给：
     // 模型拿着 `load_skill` 却没有任何 skill 可读，只会白试一轮。
-    if wants(&ToolSource::Skill) && skills.enabled(disabled_skills).next().is_some() {
+    if skills.picked(session.picked_skills(), disabled_skills).next().is_some() {
         specs.extend(crate::skills::specs());
     }
 
@@ -187,6 +188,38 @@ pub(crate) fn migrate_legacy_tool_state(sessions: &mut [ChatSession], config: &A
         };
         sources.dedup();
         tools.sources = Some(sources);
+        changed = true;
+    }
+    changed
+}
+
+/// 把老数据里勾的「技能」一整条来源（`ToolSource::Skill`）展开成具体的技能。
+///
+/// 当时那条来源的意思是「装了的、没停用的全带」，所以展开成**现在**启用的全部技能，
+/// 用户什么都没改，对话里能用的技能也不变。之后再装的技能不会自动加进来——
+/// 技能现在按会话逐个勾，这正是改这一步的目的。
+///
+/// **必须在技能目录扫完之后调**（要知道装了哪些）。返回是否改动过；改动过就要落盘。
+pub(crate) fn migrate_legacy_skill_source(
+    sessions: &mut [ChatSession],
+    skills: &SkillCatalog,
+    disabled_skills: &[String],
+) -> bool {
+    let enabled: Vec<String> = skills.enabled(disabled_skills).map(|skill| skill.id.clone()).collect();
+    let mut changed = false;
+    for tools in sessions.iter_mut().filter_map(|session| session.tools.as_mut()) {
+        let Some(sources) = tools.sources.as_mut() else {
+            continue;
+        };
+        if !sources.contains(&ToolSource::Skill) {
+            continue;
+        }
+        sources.retain(|source| source != &ToolSource::Skill);
+        for id in &enabled {
+            if !tools.skills.contains(id) {
+                tools.skills.push(id.clone());
+            }
+        }
         changed = true;
     }
     changed
@@ -289,30 +322,6 @@ impl AppState {
             }
         }
 
-        // Skills：**对话和智能体都出现**。它读的只有 Perch 自己的 skills 目录，碰不到用户的
-        // 文件系统，所以对话模式用它没有风险——这正是它和本机工具的区别（AGENT_MODE_PLAN 第九节）。
-        // 一个都没装时整行不显示：摆一行空的说"还没装"，不如让用户去设置页装。
-        if !self.skills.all().is_empty() {
-            let any_enabled = self.skills.enabled(&self.config.disabled_skills).next().is_some();
-            let note = (!any_enabled).then_some(SourceNote::NoSkills);
-            groups.push(SourceGroup {
-                source: ToolSource::Skill,
-                label: SourceLabel::Skill,
-                note,
-                tools: if note.is_none() {
-                    crate::skills::specs()
-                        .into_iter()
-                        .map(|spec| ToolOption {
-                            name: spec.name,
-                            description: spec.description,
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                },
-            });
-        }
-
         for (server, tools) in self.mcp.usable_by_server(&self.config.mcp_servers) {
             groups.push(SourceGroup {
                 source: ToolSource::Mcp {
@@ -361,9 +370,6 @@ impl AppState {
     /// 切到智能体时**补上本机来源**：对话模式下那一行根本不显示，用户没机会对它表过态。
     /// 不补的话「切到智能体」这个动作看着就像没生效——它还是碰不到文件。
     pub(crate) fn set_session_mode(&mut self, agent: bool, cx: &mut Context<Self>) {
-        // 切模式时确认态作废：它描述的是"这个会话要不要放开本机工具"，
-        // 而模式一换，那段警告讲的事就变了
-        self.agent.permission_prompt = false;
         self.edit_session_tools(cx, move |tools| {
             // 先算来源、再改模式：算的时候要看的是"切之前是什么模式"
             tools.sources = sources_after_mode_change(tools, agent);
@@ -410,6 +416,58 @@ impl AppState {
         });
     }
 
+    /// 这个技能在当前会话里勾上了没有。
+    pub(crate) fn is_skill_picked(&self, id: &str) -> bool {
+        self.storage
+            .get_active_session()
+            .is_some_and(|session| session.picked_skills().iter().any(|item| item == id))
+    }
+
+    /// 当前会话真正能用的技能个数（勾了、装着、没被全局停用），用来做按钮角标。
+    pub(crate) fn picked_skill_count(&self) -> usize {
+        self.storage.get_active_session().map_or(0, |session| {
+            self.skills
+                .picked(session.picked_skills(), &self.config.disabled_skills)
+                .count()
+        })
+    }
+
+    /// 勾上 / 取消一个技能。和 MCP 一样**不自动切模式**：技能在对话模式下也能用。
+    pub(crate) fn toggle_session_skill(&mut self, id: &str, cx: &mut Context<Self>) {
+        let id = id.to_string();
+        self.edit_session_tools(cx, move |tools| {
+            match tools.skills.iter().position(|item| item == &id) {
+                Some(ix) => {
+                    tools.skills.remove(ix);
+                }
+                None => tools.skills.push(id),
+            }
+        });
+    }
+
+    /// 技能全选 / 全不选。
+    ///
+    /// 全选只选**列出来的**那些（装着、没被全局停用的）；全不选连带清掉已经失效的记录
+    /// （勾过、后来被删掉的技能），反正它们在清单里已经看不见了。
+    pub(crate) fn set_all_session_skills(&mut self, picked: bool, cx: &mut Context<Self>) {
+        let listed: Vec<String> = self
+            .skills
+            .enabled(&self.config.disabled_skills)
+            .map(|skill| skill.id.clone())
+            .collect();
+        self.edit_session_tools(cx, move |tools| {
+            if picked {
+                for id in listed {
+                    if !tools.skills.contains(&id) {
+                        tools.skills.push(id);
+                    }
+                }
+            } else {
+                tools.skills.clear();
+            }
+        });
+    }
+
     /// 单独停用 / 恢复一个工具（「高级」那一层）。
     pub(crate) fn toggle_disabled_tool(&mut self, name: &str, cx: &mut Context<Self>) {
         let name = name.to_string();
@@ -435,26 +493,7 @@ impl AppState {
     /// **调用方负责先做二次确认**——这里只写状态。把确认塞进来会让这个函数依赖
     /// `Window`，而它现在只需要 `Context`，测起来也干净。
     pub(crate) fn set_session_permission(&mut self, permission: Permission, cx: &mut Context<Self>) {
-        // 档位一落地，确认态就该收起来：留着它，下次打开面板还得先点一次「取消」
-        self.agent.permission_prompt = false;
         self.edit_session_tools(cx, move |tools| tools.permission = permission);
-    }
-
-    /// 用户拨开了「完全权限」的开关：先摆出警告和两个按钮，等一次确认。
-    pub(crate) fn ask_full_permission(&mut self, cx: &mut Context<Self>) {
-        self.agent.permission_prompt = true;
-        cx.notify();
-    }
-
-    /// 用户在警告里点了「取消」，或者干脆把面板关掉了：收起确认态，**不动档位**。
-    ///
-    /// 幂等：面板每次关闭都会调一次，没开着的时候不该白白触发重绘。
-    pub(crate) fn dismiss_full_permission(&mut self, cx: &mut Context<Self>) {
-        if !self.agent.permission_prompt {
-            return;
-        }
-        self.agent.permission_prompt = false;
-        cx.notify();
     }
 
     /// 改当前会话的工具状态，然后落盘。
@@ -501,6 +540,7 @@ mod tests {
                 cwd: None,
             },
             secret_ref: String::new(),
+            proxy: String::new(),
             disabled_tools: Vec::new(),
         }
     }
@@ -640,7 +680,7 @@ mod tests {
         let catalog = one_skill();
         let chat = ChatSession {
             tools: Some(SessionTools {
-                sources: Some(vec![ToolSource::Skill]),
+                skills: vec!["weekly".into()],
                 ..SessionTools::default()
             }),
             ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
@@ -656,9 +696,70 @@ mod tests {
         let disabled = vec!["weekly".to_string()];
         assert!(session_tool_specs(&chat, false, &catalog, &disabled, &McpState::default(), &[]).is_empty());
 
-        // 没勾 Skill 来源：也不给（对话的默认是「什么都不带」）
+        // 一个技能都没勾：也不给（对话的默认是「什么都不带」）
         let bare = ChatSession::new("t".into(), "f".into(), "m".into(), "p".into());
         assert!(session_tool_specs(&bare, false, &catalog, &[], &McpState::default(), &[]).is_empty());
+    }
+
+    #[std::prelude::v1::test]
+    fn only_the_skills_picked_for_this_chat_count() {
+        // 勾的是一个已经被删掉的技能：装着的那个没勾，所以一个工具都不给
+        let catalog = one_skill();
+        let chat = ChatSession {
+            tools: Some(SessionTools {
+                skills: vec!["gone".into()],
+                ..SessionTools::default()
+            }),
+            ..ChatSession::new("t".into(), "f".into(), "m".into(), "p".into())
+        };
+        assert!(session_tool_specs(&chat, false, &catalog, &[], &McpState::default(), &[]).is_empty());
+        assert_eq!(catalog.picked(chat.picked_skills(), &[]).count(), 0);
+
+        // 后台执行也只认勾了的：没勾的技能，模型猜到名字也读不到
+        let only = catalog.picked_only(&["weekly".to_string()], &[]);
+        assert!(only.get("weekly").is_some());
+        assert!(catalog.picked_only(&[], &[]).get("weekly").is_none());
+    }
+
+    #[std::prelude::v1::test]
+    fn the_legacy_skill_source_expands_to_the_enabled_skills() {
+        // 老数据勾的是「技能」一整条（当时 = 装了的、没停用的全带）：展开成现在启用的那些，
+        // 用户什么都没改，能用的技能也不该变
+        let tools = SessionTools {
+            sources: Some(vec![
+                ToolSource::Mcp {
+                    server_id: "fetch".into(),
+                },
+                ToolSource::Skill,
+            ]),
+            ..SessionTools::default()
+        };
+        let mut sessions = session_with(tools);
+
+        assert!(migrate_legacy_skill_source(&mut sessions, &one_skill(), &[]));
+        let tools = sessions[0].tools.as_ref().unwrap();
+        assert_eq!(tools.skills, vec!["weekly".to_string()]);
+        assert_eq!(
+            tools.sources,
+            Some(vec![ToolSource::Mcp {
+                server_id: "fetch".into()
+            }]),
+            "老的「技能」来源要去掉，MCP 那条原样留着"
+        );
+        // 只迁一次：用户之后取消勾选，下次启动不该又被加回来
+        assert!(!migrate_legacy_skill_source(&mut sessions, &one_skill(), &[]));
+
+        // 全局停用了的技能不带进来
+        let mut sessions = session_with(SessionTools {
+            sources: Some(vec![ToolSource::Skill]),
+            ..SessionTools::default()
+        });
+        assert!(migrate_legacy_skill_source(
+            &mut sessions,
+            &one_skill(),
+            &["weekly".to_string()]
+        ));
+        assert!(sessions[0].tools.as_ref().unwrap().skills.is_empty());
     }
 
     #[std::prelude::v1::test]

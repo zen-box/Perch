@@ -9,6 +9,13 @@ use crate::i18n::{AppLanguage, Key, tr, tr_args};
 /// 拉取渠道的模型列表。`lang` 只影响失败时返回的提示文案，不影响请求本身。
 pub async fn fetch_models(provider: &ProviderConfig, lang: AppLanguage) -> Result<Vec<(String, String)>, String> {
     let url = models_url(provider, lang)?;
+    let recording = crate::video_demo::is_official_claude(provider.channel_type, &provider.base_url);
+    let url = if recording {
+        crate::video_demo::redirect_url(url.as_str(), provider.channel_type, &provider.base_url)
+            .ok_or_else(|| tr_args(lang, Key::ErrInvalidBaseUrl, &[url.as_str()]))?
+    } else {
+        url.to_string()
+    };
     let client = Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -22,7 +29,7 @@ pub async fn fetch_models(provider: &ProviderConfig, lang: AppLanguage) -> Resul
         }
         ChannelType::Claude => {
             request = request.header("anthropic-version", "2023-06-01");
-            if !provider.api_key.is_empty() {
+            if !recording && !provider.api_key.is_empty() {
                 request = request.header("x-api-key", &provider.api_key);
             }
         }

@@ -3,6 +3,7 @@ use super::brand_icon::model_avatar;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::switch::Switch;
@@ -12,7 +13,8 @@ use gpui_kit::*;
 use gpui_kit_assets::IconName;
 
 use crate::app::AppState;
-use crate::i18n::{AppLanguage, Key, tr, tr_args};
+use crate::config::ModelConfig;
+use crate::i18n::{AppLanguage, Key, tr, tr_args, tr_count};
 
 pub fn render_params_button(lang: AppLanguage, cx: &mut Context<AppState>) -> impl IntoElement {
     let app = cx.entity();
@@ -28,6 +30,70 @@ pub fn render_params_button(lang: AppLanguage, cx: &mut Context<AppState>) -> im
         )
         .content(move |_, _, cx| render_params(&app, cx))
 }
+fn active_model(state: &AppState) -> Option<ModelConfig> {
+    let session = state.storage.get_active_session()?;
+    state
+        .config
+        .providers
+        .iter()
+        .find(|provider| provider.id == session.provider_id)
+        .and_then(|provider| provider.models.iter().find(|model| model.id == session.model))
+        .cloned()
+}
+
+/// 对话工具栏里的快速推理强度入口；模型不支持推理时不显示。
+pub(super) fn render_reasoning_button(state: &AppState, cx: &mut Context<AppState>) -> Option<AnyElement> {
+    let model = active_model(state)?;
+    let levels = model.effective_reasoning_levels();
+    if levels.is_empty() {
+        return None;
+    }
+    let lang = state.language();
+    let explicit = state
+        .storage
+        .get_active_session()
+        .and_then(|session| session.params.as_ref())
+        .and_then(|params| params.reasoning)
+        .filter(|level| levels.contains(level));
+    let label = explicit
+        .or_else(|| model.effective_default_reasoning())
+        .map(|level| level.label(lang))
+        .unwrap_or(tr(lang, Key::DefaultValue));
+    let default_label = tr(lang, Key::DefaultValue).to_string();
+    let app = cx.entity();
+    Some(
+        Button::new("reasoning-picker")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Brain)
+            .child(label)
+            .child(Icon::new(IconName::ChevronDown).size(px(12.)))
+            .tooltip(tr(lang, Key::ReasoningEffort))
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                let default_app = app.clone();
+                let menu = menu.item(
+                    PopupMenuItem::new(default_label.clone())
+                        .checked(explicit.is_none())
+                        .on_click(move |_, _, cx| {
+                            default_app.update(cx, |this, cx| this.patch_params(cx, |params| params.reasoning = None));
+                        }),
+                );
+                levels.iter().copied().fold(menu, |menu, level| {
+                    let app = app.clone();
+                    menu.item(
+                        PopupMenuItem::new(level.label(lang))
+                            .checked(explicit == Some(level))
+                            .on_click(move |_, _, cx| {
+                                app.update(cx, |this, cx| {
+                                    this.patch_params(cx, |params| params.reasoning = Some(level));
+                                });
+                            }),
+                    )
+                })
+            })
+            .into_any_element(),
+    )
+}
 
 fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl IntoElement + use<> {
     let p = Palette::new(cx);
@@ -36,19 +102,16 @@ fn render_params(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> impl
         let state = app.read(cx);
         let session = state.storage.get_active_session();
         let params = session.and_then(|session| session.params.clone()).unwrap_or_default();
-        let model = session.and_then(|session| {
-            state
-                .config
-                .providers
-                .iter()
-                .find(|provider| provider.id == session.provider_id)
-                .and_then(|provider| provider.models.iter().find(|model| model.id == session.model).cloned())
-        });
+        let model = active_model(state);
         let levels = model
             .as_ref()
             .map(|model| model.effective_reasoning_levels())
             .unwrap_or_default();
-        (params, levels, model.and_then(|model| model.default_reasoning))
+        (
+            params,
+            levels,
+            model.and_then(|model| model.effective_default_reasoning()),
+        )
     };
     let prompt = app.read(cx).params_prompt_input.clone();
     let temperature = params.temperature;
@@ -490,7 +553,16 @@ fn render_compare(app: &Entity<AppState>, cx: &mut Context<PopoverState>) -> imp
                 .primary()
                 .small()
                 .label(if can_run {
-                    tr_args(lang, Key::StartCompareWithCount, &[&total_count.to_string()])
+                    tr_args(
+                        lang,
+                        tr_count(
+                            lang,
+                            total_count,
+                            Key::StartCompareWithCountOne,
+                            Key::StartCompareWithCountMany,
+                        ),
+                        &[&total_count.to_string()],
+                    )
                 } else {
                     tr(lang, Key::PleasePickCompareModel).into()
                 })

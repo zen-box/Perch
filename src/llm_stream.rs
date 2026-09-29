@@ -24,6 +24,47 @@ fn gemini_call_id(call: &Value) -> String {
         .map_or_else(fresh_call_id, str::to_string)
 }
 
+#[derive(Default)]
+pub(crate) struct UsageCounts {
+    pub prompt: Option<usize>,
+    pub completion: Option<usize>,
+}
+
+impl UsageCounts {
+    pub(crate) fn update(&mut self, channel: ChannelType, event_name: &str, value: &Value) {
+        let usage = match channel {
+            ChannelType::Claude if event_name == "message_start" => value.pointer("/message/usage"),
+            ChannelType::OpenAiResponses if event_name == "response.completed" => value.pointer("/response/usage"),
+            ChannelType::Gemini => value.get("usageMetadata"),
+            _ => value.get("usage"),
+        };
+        let Some(usage) = usage else { return };
+        let (input, output) = match channel {
+            ChannelType::Claude | ChannelType::OpenAiResponses => ("input_tokens", "output_tokens"),
+            ChannelType::OpenAiChat => ("prompt_tokens", "completion_tokens"),
+            ChannelType::Gemini => ("promptTokenCount", "candidatesTokenCount"),
+        };
+        if let Some(count) = usage.get(input).and_then(Value::as_u64) {
+            let cached = if channel == ChannelType::Claude {
+                ["cache_read_input_tokens", "cache_creation_input_tokens"]
+                    .into_iter()
+                    .filter_map(|key| usage.get(key).and_then(Value::as_u64))
+                    .fold(0u64, u64::saturating_add)
+            } else {
+                0
+            };
+            self.prompt = usize::try_from(count.saturating_add(cached)).ok();
+        }
+        if let Some(count) = usage
+            .get(output)
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok())
+        {
+            self.completion = Some(count);
+        }
+    }
+}
+
 pub(crate) fn emit_complete(
     channel: ChannelType,
     value: &Value,
@@ -393,6 +434,54 @@ mod tests {
     use crate::i18n::AppLanguage;
     use crate::llm::{ChatMessageReq, ChatRequest};
     use crate::model::ReasoningLevel;
+    use serde_json::json;
+
+    #[test]
+    fn usage_counts_follow_each_channels_response_shape() {
+        let mut claude = UsageCounts::default();
+        claude.update(
+            ChannelType::Claude,
+            "message_start",
+            &json!({"message": {"usage": {"input_tokens": 37, "output_tokens": 1}}}),
+        );
+        claude.update(
+            ChannelType::Claude,
+            "message_delta",
+            &json!({"usage": {"output_tokens": 91}}),
+        );
+        assert_eq!((claude.prompt, claude.completion), (Some(37), Some(91)));
+        claude.update(
+            ChannelType::Claude,
+            "message_start",
+            &json!({"message": {"usage": {"input_tokens": 37, "cache_read_input_tokens": 5, "cache_creation_input_tokens": 7}}}),
+        );
+        assert_eq!(claude.prompt, Some(49));
+
+        let mut chat = UsageCounts::default();
+        chat.update(
+            ChannelType::OpenAiChat,
+            "",
+            &json!({"usage": {"prompt_tokens": 23, "completion_tokens": 42}}),
+        );
+        assert_eq!((chat.prompt, chat.completion), (Some(23), Some(42)));
+
+        let mut responses = UsageCounts::default();
+        responses.update(
+            ChannelType::OpenAiResponses,
+            "response.completed",
+            &json!({"response": {"usage": {"input_tokens": 12, "output_tokens": 34}}}),
+        );
+        assert_eq!((responses.prompt, responses.completion), (Some(12), Some(34)));
+
+        let mut gemini = UsageCounts::default();
+        gemini.update(
+            ChannelType::Gemini,
+            "",
+            &json!({"usageMetadata": {"promptTokenCount": 51, "candidatesTokenCount": 28}}),
+        );
+        gemini.update(ChannelType::Gemini, "", &json!({"candidates": []}));
+        assert_eq!((gemini.prompt, gemini.completion), (Some(51), Some(28)));
+    }
 
     fn request(channel: ChannelType) -> ChatRequest {
         ChatRequest {
@@ -442,7 +531,8 @@ mod tests {
         let response = reqwest::Response::from(gpui_kit::http_client::http::Response::new(body));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut chars = 0;
-        crate::llm::read_sse(response, &mut None, &request(channel), &tx, &mut chars)
+        let mut usage = UsageCounts::default();
+        crate::llm::read_sse(response, &mut None, &request(channel), &tx, &mut chars, &mut usage)
             .await
             .unwrap();
         tool_calls_from(&mut rx)
@@ -506,9 +596,17 @@ mod tests {
         let response = reqwest::Response::from(gpui_kit::http_client::http::Response::new(body));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut chars = 0;
-        crate::llm::read_sse(response, &mut None, &request(ChannelType::Claude), &tx, &mut chars)
-            .await
-            .unwrap();
+        let mut usage = UsageCounts::default();
+        crate::llm::read_sse(
+            response,
+            &mut None,
+            &request(ChannelType::Claude),
+            &tx,
+            &mut chars,
+            &mut usage,
+        )
+        .await
+        .unwrap();
         let mut text = String::new();
         while let Ok(event) = rx.try_recv() {
             if let StreamEvent::Content(content) = event {
@@ -541,12 +639,14 @@ mod tests {
         let response = reqwest::Response::from(gpui_kit::http_client::http::Response::new(body));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut chars = 0;
+        let mut usage = UsageCounts::default();
         crate::llm::read_sse(
             response,
             &mut None,
             &request(ChannelType::OpenAiResponses),
             &tx,
             &mut chars,
+            &mut usage,
         )
         .await
         .unwrap();
@@ -616,5 +716,62 @@ mod tests {
     async fn plain_content_emits_no_tool_calls() {
         let payload = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
         assert!(feed_sse(ChannelType::OpenAiChat, payload).await.is_empty());
+    }
+    #[test]
+    fn complete_tool_calls_are_decoded_for_all_non_chat_channels() {
+        let cases = [
+            (
+                ChannelType::OpenAiResponses,
+                json!({
+                    "output": [{
+                        "type": "function_call",
+                        "call_id": "fc_1",
+                        "name": "read_file",
+                        "arguments": "{\"path\":\"a.rs\"}"
+                    }]
+                }),
+                "fc_1",
+            ),
+            (
+                ChannelType::Claude,
+                json!({
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "read_file",
+                        "input": {"path": "a.rs"}
+                    }]
+                }),
+                "toolu_1",
+            ),
+            (
+                ChannelType::Gemini,
+                json!({
+                    "candidates": [{
+                        "content": {
+                            "parts": [{
+                                "functionCall": {"name": "read_file", "args": {"path": "a.rs"}}
+                            }]
+                        }
+                    }]
+                }),
+                "",
+            ),
+        ];
+
+        for (channel, value, expected_id) in cases {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut chars = 0;
+            emit_complete(channel, &value, &tx, &mut chars);
+            let calls = tool_calls_from(&mut rx);
+            assert_eq!(calls.len(), 1, "{channel:?} 应解析出一个工具调用");
+            assert_eq!(calls[0].name, "read_file");
+            assert_eq!(calls[0].arguments["path"], "a.rs");
+            if !expected_id.is_empty() {
+                assert_eq!(calls[0].id, expected_id);
+            } else {
+                assert!(!calls[0].id.is_empty(), "Gemini 没有 id 时要补一个");
+            }
+        }
     }
 }

@@ -3,7 +3,6 @@ use gpui_kit::*;
 use crate::app::{AppState, ToastLevel};
 use crate::config::ModelConfig;
 use crate::i18n::{Key, tr, tr_args};
-use crate::model::ReasoningLevel;
 use crate::model_info::{self, Capability, TokenParseError};
 
 /// 「添加 / 编辑模型」弹窗的草稿，点保存之前不改动配置
@@ -100,15 +99,6 @@ impl AppState {
     pub fn update_model_draft(&mut self, cx: &mut Context<Self>, update: impl FnOnce(&mut ModelConfig)) {
         if let Some(editor) = self.model_editor.as_mut() {
             update(&mut editor.draft);
-            // 默认强度必须是支持的档位之一
-            let levels = editor.draft.effective_reasoning_levels();
-            if editor
-                .draft
-                .default_reasoning
-                .is_some_and(|level| !levels.contains(&level))
-            {
-                editor.draft.default_reasoning = None;
-            }
             cx.notify();
         }
     }
@@ -202,19 +192,6 @@ impl AppState {
                 capabilities.sort();
             }
             draft.capabilities = Some(capabilities);
-        });
-    }
-
-    pub fn toggle_model_draft_level(&mut self, level: ReasoningLevel, cx: &mut Context<Self>) {
-        self.update_model_draft(cx, |draft| {
-            let mut levels = draft.effective_reasoning_levels();
-            if let Some(ix) = levels.iter().position(|item| *item == level) {
-                levels.remove(ix);
-            } else {
-                levels.push(level);
-                levels.sort();
-            }
-            draft.reasoning_levels = Some(levels);
         });
     }
 

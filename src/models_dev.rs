@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+use crate::model::ReasoningLevel;
 use crate::model_info::{Capability, ModelSpec};
 use crate::paths::{MODELS_DEV_CACHE_FILE, data_dir, write_atomic};
 
@@ -237,12 +238,17 @@ pub fn lookup_spec(model_id: &str) -> Option<ModelSpec> {
     let context = entry.limit.as_ref().and_then(|l| l.context).map(|c| c as u32);
     let output = entry.limit.as_ref().and_then(|l| l.output).map(|o| o as u32);
     let always_thinks = entry.reasoning == Some(true);
+    let reasoning_levels = if always_thinks {
+        vec![ReasoningLevel::Low, ReasoningLevel::Medium, ReasoningLevel::High]
+    } else {
+        Vec::new()
+    };
 
     Some(ModelSpec {
         context_window: context,
         max_output: output,
         capabilities,
-        reasoning_levels: Vec::new(),
+        reasoning_levels,
         always_thinks,
     })
 }
@@ -309,6 +315,17 @@ pub fn lookup_cost(model_id: &str) -> Option<ModelCost> {
             input: 10.00,
             output: 30.00,
             cache_read: 5.00,
+            cache_write: 0.0,
+        });
+    }
+
+    // 录制和模型目录使用的 Claude Opus 5.5 价格：输入 $4、输出 $20、缓存读取 $0.20 / 1M token。
+    // 缓存写入价格没有可靠来源，当前费用计算也不计入该项，保持为 0 不伪造价格。
+    if name.contains("claude-opus-5-5") || name.contains("claude-opus-5.5") {
+        return Some(ModelCost {
+            input: 4.00,
+            output: 20.00,
+            cache_read: 0.20,
             cache_write: 0.0,
         });
     }
@@ -428,16 +445,14 @@ pub fn lookup_cost(model_id: &str) -> Option<ModelCost> {
     None
 }
 
-/// 计算指定用量下的预估费用：返回 (美元 $, 人民币 ¥)
+/// 计算指定用量下的预估费用：找不到完整价格时返回 `None`。
 pub fn calculate_cost(
     model_id: &str,
     prompt_tokens: usize,
     completion_tokens: usize,
     cached_tokens: usize,
-) -> (f64, f64) {
-    let Some(cost) = lookup_cost(model_id) else {
-        return (0.0, 0.0);
-    };
+) -> Option<(f64, f64)> {
+    let cost = lookup_cost(model_id)?;
 
     let actual_prompt = prompt_tokens.saturating_sub(cached_tokens);
     let prompt_cost = (actual_prompt as f64 * cost.input) / 1_000_000.0;
@@ -447,7 +462,7 @@ pub fn calculate_cost(
     let total_usd = prompt_cost + cache_cost + completion_cost;
     let total_cny = total_usd * USD_TO_CNY_RATE;
 
-    (total_usd, total_cny)
+    Some((total_usd, total_cny))
 }
 
 fn strip_version_suffix(name: &str) -> Option<&str> {
@@ -497,13 +512,24 @@ mod tests {
 
     #[test]
     fn test_cost_calculation() {
-        let (cost_usd, cost_cny) = calculate_cost("gpt-4o", 1_000_000, 1_000_000, 0);
+        let (cost_usd, cost_cny) = calculate_cost("gpt-4o", 1_000_000, 1_000_000, 0).unwrap();
         // gpt-4o builtin: input $2.5 / M, output $10.0 / M
         assert!((cost_usd - 12.5).abs() < 0.001);
         assert!((cost_cny - 12.5 * 7.2).abs() < 0.01);
 
-        let (cost_usd_mini, _) = calculate_cost("gpt-4o-mini", 1_000_000, 1_000_000, 0);
+        let (cost_usd_mini, _) = calculate_cost("gpt-4o-mini", 1_000_000, 1_000_000, 0).unwrap();
         // gpt-4o-mini builtin: input $0.15 / M, output $0.60 / M
         assert!((cost_usd_mini - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn claude_opus_5_5_uses_the_recording_price() {
+        let (usd, _) = calculate_cost("claude-opus-5-5", 1_000_000, 1_000_000, 500_000).unwrap();
+        assert!((usd - 22.1).abs() < 0.001);
+    }
+
+    #[test]
+    fn unknown_model_has_no_cost() {
+        assert!(calculate_cost("custom-provider/unknown-model", 100, 100, 0).is_none());
     }
 }

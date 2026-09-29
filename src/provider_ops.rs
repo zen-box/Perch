@@ -4,7 +4,7 @@ use gpui_kit::*;
 
 use crate::app::{AppState, ToastLevel, runtime, update_state};
 use crate::config::{AppConfig, ChannelType, ModelConfig, ProviderConfig};
-use crate::i18n::{Key, tr, tr_args};
+use crate::i18n::{Key, tr, tr_args, tr_count};
 use crate::provider_api;
 
 impl AppState {
@@ -121,6 +121,7 @@ impl AppState {
         let base_url = self.new_provider_base_url_input.read(cx).value().trim().to_string();
         let api_key = self.new_provider_api_key_input.read(cx).value().trim().to_string();
         let ct = self.add_channel_type;
+        let recording = crate::video_demo::is_official_claude(ct, &base_url);
 
         if name.is_empty() || base_url.is_empty() {
             self.toast(ToastLevel::Error, tr(lang, Key::ProviderNameUrlRequired));
@@ -136,7 +137,7 @@ impl AppState {
             channel_type: ct,
             base_url,
             api_path: ct.default_api_path().to_string(),
-            api_key,
+            api_key: if recording { String::new() } else { api_key },
             api_key_ref: format!("provider/{provider_id}"),
             enabled: true,
             models: Vec::new(),
@@ -146,7 +147,9 @@ impl AppState {
             extra_headers: Vec::new(),
         };
 
-        if let Err(error) = AppConfig::store_provider_key(&new_provider.api_key_ref, &new_provider.api_key) {
+        if !recording
+            && let Err(error) = AppConfig::store_provider_key(&new_provider.api_key_ref, &new_provider.api_key)
+        {
             self.toast(
                 ToastLevel::Error,
                 tr_args(lang, Key::ApiKeySaveFailed, &[&error.to_string()]),
@@ -157,7 +160,9 @@ impl AppState {
         if let Err(error) = self.config.add_provider(new_provider) {
             // 渠道没加上，把刚存进去的 Key 一起删掉。删不掉也无所谓：
             // 渠道没建起来，这个引用不会再被谁读到。
-            let _ = AppConfig::store_provider_key(&format!("provider/{provider_id}"), "");
+            if !recording {
+                let _ = AppConfig::store_provider_key(&format!("provider/{provider_id}"), "");
+            }
             self.toast(
                 ToastLevel::Error,
                 tr_args(lang, Key::ProviderAddFailed, &[&error.to_string()]),
@@ -278,7 +283,11 @@ impl AppState {
                         state.open_model_picker = true;
                         state.toast(
                             ToastLevel::Info,
-                            tr_args(state.language(), Key::FetchedModels, &[&count.to_string()]),
+                            tr_args(
+                                state.language(),
+                                tr_count(state.language(), count, Key::FetchedModelsOne, Key::FetchedModelsMany),
+                                &[&count.to_string()],
+                            ),
                         );
                     }
                     Err(err) => state.toast(ToastLevel::Error, err),
@@ -339,7 +348,11 @@ impl AppState {
             Ok(()) if added == 0 => self.toast(ToastLevel::Info, tr(lang, Key::ModelsAlreadyAdded)),
             Ok(()) => self.toast(
                 ToastLevel::Success,
-                tr_args(lang, Key::ModelsAdded, &[&added.to_string()]),
+                tr_args(
+                    lang,
+                    tr_count(lang, added, Key::ModelsAddedOne, Key::ModelsAddedMany),
+                    &[&added.to_string()],
+                ),
             ),
             Err(error) => self.toast(
                 ToastLevel::Error,
@@ -383,7 +396,16 @@ impl AppState {
                 match result {
                     Ok(models) => state.toast(
                         ToastLevel::Success,
-                        tr_args(state.language(), Key::ConnectionOk, &[&models.len().to_string()]),
+                        tr_args(
+                            state.language(),
+                            tr_count(
+                                state.language(),
+                                models.len(),
+                                Key::ConnectionOkOne,
+                                Key::ConnectionOkMany,
+                            ),
+                            &[&models.len().to_string()],
+                        ),
                     ),
                     Err(error) => state.toast(ToastLevel::Error, error),
                 }

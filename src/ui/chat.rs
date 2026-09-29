@@ -11,6 +11,7 @@ use gpui_kit_assets::IconName;
 use super::brand_icon::{
     FILE_TYPE_CODE, FILE_TYPE_DOC, FILE_TYPE_PDF, FILE_TYPE_SHEET, FILE_TYPE_SLIDES, model_avatar, model_id_avatar,
 };
+use super::message_assistant::{AVATAR_GAP, AVATAR_SIZE};
 use super::{CONTENT_MAX_WIDTH, Palette, dialogs, icon_tile};
 use super::{composer, empty_state, message_assistant, message_user};
 use crate::agent_loop::PendingToolApproval;
@@ -53,6 +54,9 @@ pub fn render_chat_panel(state: &mut AppState, p: &Palette, cx: &mut Context<App
                         move |ix, window, cx| render_message_row(&app, ix, window, cx)
                     })
                     .with_list_style(StyleRefinement::default().pt_6().pb_4())
+                    // 关掉统一的行距，改由每一行自己出（见 `render_message_row`）：
+                    // 同一轮回复里的续写要贴着上一条，统一的行距做不到
+                    .with_row_style(StyleRefinement::default().pb_0())
                     .with_jump_button_label(tr(lang, Key::JumpToLatest))
                     .with_bottom_fade(p.background),
                 )
@@ -222,8 +226,41 @@ fn render_chat_header(state: &AppState, p: &Palette, cx: &mut Context<AppState>)
 
 // ================= 消息 =================
 
+/// 两条消息之间的距离。
+const MESSAGE_GAP: Pixels = px(32.);
+/// 同一轮智能体回复里，续写和工具结果与上一条之间的距离。
+const TURN_GAP: Pixels = px(12.);
+
+/// 这一条是不是接着同一轮智能体回复往下走的。是的话渲染时并进上一块：
+/// 不再画头像和模型名，间距收窄，工具结果缩进到正文那一列。
+///
+/// 一次提问里模型可能连着调好几轮工具，数据上是「助手（带调用）→ 工具结果 → 助手 → …」
+/// 好几条消息——协议就要求这么存（工具结果之后必须另起一条助手消息），合成一条反而
+/// 发不出去。但给人看的是**一段**回复，每条都画一遍头像和名字就割裂了。
+///
+/// 靠消息顺序就能判断，不用另记轮次（老数据也就不用迁移）：
+/// - 工具结果：往前越过别的工具结果，碰到助手消息 → 属于那一轮；
+///   碰到用户消息 → 是手打命令（`/read` 之类）的结果，自成一块；
+/// - 助手消息：紧跟在工具结果后面，且和这一轮前一段是**同一个模型** → 续写。
+///   在续写上「换个模型重试」过的，那段是别的模型写的，名字得标出来。
+fn continues_turn(messages: &[ChatMessage], ix: usize) -> bool {
+    let Some(msg) = messages.get(ix) else {
+        return false;
+    };
+    let head = messages[..ix].iter().rev().find(|prev| prev.role != "tool");
+    match msg.role.as_str() {
+        "tool" => head.is_some_and(|head| head.role == "assistant"),
+        "assistant" => {
+            ix > 0
+                && messages[ix - 1].role == "tool"
+                && head.is_some_and(|head| head.role == "assistant" && head.model == msg.model)
+        }
+        _ => false,
+    }
+}
+
 fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mut App) -> AnyElement {
-    let (msg, owner, expanded, later, streaming) = {
+    let (msg, owner, expanded, later, streaming, continues) = {
         let state = app.read(cx);
         let Some(session) = state.storage.get_active_session() else {
             return div().into_any_element();
@@ -239,7 +276,8 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
         let expanded = state.expanded_reasoning.contains(&msg.id);
         // 这条消息之后还有几条，重新生成时会被删掉
         let later = session.messages.len().saturating_sub(ix + 1);
-        (msg, owner, expanded, later, state.is_streaming)
+        let continues = continues_turn(&session.messages, ix);
+        (msg, owner, expanded, later, state.is_streaming, continues)
     };
 
     let p = Palette::new(cx);
@@ -255,16 +293,23 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
             )
         };
         let mono_font = cx.theme().mono_font_family.clone();
-        render_tool_result(app, &msg, tool_label, expanded, mono_font, &p, lang)
+        let result = render_tool_result(app, &msg, tool_label, expanded, mono_font, &p, lang);
+        // 同一轮回复里的工具结果缩进到正文那一列，和上下两段回复连成一块
+        div()
+            .when(continues, |this| this.pl(AVATAR_SIZE + AVATAR_GAP))
+            .child(result)
+            .into_any_element()
     } else {
         let (avatar, model_label) = match owner {
-            Some(model) => (model_avatar(&model, px(28.), &p), model.name.clone()),
+            Some(model) => (model_avatar(&model, AVATAR_SIZE, &p), model.name.clone()),
             None if msg.model.is_empty() => (
-                icon_tile(IconName::Sparkles, px(28.), p.primary.opacity(0.12), p.primary).into_any_element(),
+                icon_tile(IconName::Sparkles, AVATAR_SIZE, p.primary.opacity(0.12), p.primary).into_any_element(),
                 "Assistant".to_string(),
             ),
-            None => (model_id_avatar(&msg.model, px(28.), &p), msg.model.clone()),
+            None => (model_id_avatar(&msg.model, AVATAR_SIZE, &p), msg.model.clone()),
         };
+        // 续写不画头像（见 `continues_turn`）；名字还要给用量统计算价钱用，照样传
+        let avatar = (!continues).then_some(avatar);
         message_assistant::render_assistant_message(app, ix, msg, avatar, model_label, expanded, later, &p, cx)
             .into_any_element()
     };
@@ -274,6 +319,8 @@ fn render_message_row(app: &Entity<AppState>, ix: usize, _: &mut Window, cx: &mu
         .flex()
         .justify_center()
         .px_3()
+        // 行距由每一行自己出（上边距），第一行不留
+        .when(ix > 0, |this| this.pt(if continues { TURN_GAP } else { MESSAGE_GAP }))
         .child(div().w_full().max_w(CONTENT_MAX_WIDTH).child(content))
         .into_any_element()
 }
@@ -753,7 +800,67 @@ pub(super) fn preview(text: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_tool_duration;
+    use super::{continues_turn, format_tool_duration};
+    use crate::model::ChatMessage;
+
+    fn assistant(model: &str) -> ChatMessage {
+        let mut msg = ChatMessage::new_assistant();
+        msg.model = model.to_string();
+        msg
+    }
+
+    fn tool_result() -> ChatMessage {
+        ChatMessage::tool_placeholder("call_1", "list_directory", false)
+    }
+
+    /// 一次提问里的几轮工具调用并成一块：只有开头那条画头像，后面的工具结果和续写都接上去；
+    /// 下一次提问重新起头。
+    #[test]
+    fn an_agent_turn_is_drawn_as_one_block() {
+        let messages = vec![
+            ChatMessage::new_user("看看目录".into()),
+            assistant("gpt"),
+            tool_result(),
+            // 并行调用的第二个结果
+            tool_result(),
+            assistant("gpt"),
+            tool_result(),
+            assistant("gpt"),
+            ChatMessage::new_user("再看看".into()),
+            assistant("gpt"),
+        ];
+
+        let continues: Vec<bool> = (0..messages.len()).map(|ix| continues_turn(&messages, ix)).collect();
+        assert_eq!(
+            continues,
+            vec![false, false, true, true, true, true, true, false, false]
+        );
+    }
+
+    /// 手打命令（`/read` 之类）的结果跟在用户消息后面，不属于哪一轮回复，自成一块。
+    #[test]
+    fn a_manual_command_result_stands_alone() {
+        let messages = vec![
+            ChatMessage::new_user("/read .env".into()),
+            ChatMessage::tool_placeholder("", "read_file", true),
+        ];
+
+        assert!(!continues_turn(&messages, 1));
+    }
+
+    /// 在续写上换了个模型重试：那段是另一个模型写的，得重新标出名字。
+    #[test]
+    fn a_continuation_by_another_model_gets_its_own_header() {
+        let messages = vec![
+            ChatMessage::new_user("q".into()),
+            assistant("gpt"),
+            tool_result(),
+            assistant("claude"),
+        ];
+
+        assert!(!continues_turn(&messages, 3));
+        assert!(continues_turn(&messages, 2), "工具结果仍然属于 gpt 那一轮");
+    }
 
     #[test]
     fn durations_read_naturally() {

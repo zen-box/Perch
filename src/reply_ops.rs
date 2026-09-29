@@ -40,6 +40,9 @@ pub(crate) struct JobSpec<'a> {
 impl AppState {
     pub(crate) fn start_reply(&mut self, override_model: Option<(String, String)>, cx: &mut Context<Self>) {
         let active_id = self.storage.active_session_id.clone();
+        if self.block_unsupported_history_attachments(&active_id, cx) {
+            return;
+        }
         let (default_provider, default_model) = self.config.default_model_selection();
         let (provider_id, model) = override_model.unwrap_or_else(|| {
             self.storage
@@ -102,6 +105,9 @@ impl AppState {
 
     pub(crate) fn start_compare(&mut self, targets: &[(String, String)], cx: &mut Context<Self>) {
         let active_id = self.storage.active_session_id.clone();
+        if self.block_unsupported_history_attachments(&active_id, cx) {
+            return;
+        }
         let history = self.history_messages(&active_id);
         let mut variants = Vec::new();
         let mut jobs = Vec::new();
@@ -212,9 +218,12 @@ impl AppState {
         }
         // 带了 Skills 工具才附清单。清单里只有「名字 + 一句描述」，正文要模型自己调
         // `load_skill` 取——这正是 Skills 平时不占上下文的原因。
-        // 停用过的 skill 不列：列了模型会去调，然后拿到一句「没这个 skill」白跑一轮。
+        // 只列这次对话勾了的（停用过的也不列）：列了别的，模型会去调，然后被拒白跑一轮。
         if tools.iter().any(|tool| crate::skills::is_skill_tool(&tool.name))
-            && let Some(text) = crate::skills::catalog_prompt(self.skills.enabled(&self.config.disabled_skills))
+            && let Some(text) = crate::skills::catalog_prompt(
+                self.skills
+                    .picked(session.picked_skills(), &self.config.disabled_skills),
+            )
         {
             attach_system_text(&mut messages, &text);
         }
@@ -449,7 +458,7 @@ fn stream_key(message_id: &str, variant_id: Option<&str>) -> String {
 /// 1. **模型的 `Capability::Tools`**：不支持函数调用的模型（比如部分纯推理模型）收到
 ///    `tools` 字段可能直接报错，而「用户开了工具但选了个不支持的模型」是很常见的组合。
 /// 2. **会话的模式与来源**：对话模式不带本机工具（这条是结构性的，见
-///    `model::SessionTools::effective_sources`），MCP 按服务器粒度勾。
+///    `session_tools::SessionTools::effective_sources`），MCP 按服务器粒度勾。
 /// 3. **全局的本机开关**：只管本机工具，**不管 MCP**。
 ///
 /// MCP 工具排在本机那 5 个后面，顺序由服务器配置顺序决定——同一份工具集每次序列化出来
@@ -510,10 +519,10 @@ fn chat_request(
     lang: AppLanguage,
 ) -> ChatRequest {
     let levels = model.effective_reasoning_levels();
-    // 对话没指定时用模型的默认强度；模型不支持的档位不发送
+    // 对话没指定时用模型的默认强度；模型不支持的档位不发送。
     let reasoning = params
         .reasoning
-        .or(model.default_reasoning)
+        .or_else(|| model.effective_default_reasoning())
         .filter(|level| levels.contains(level));
     let max_output = model.effective_max_output();
     // OpenAI 的推理模型只接受默认温度：没有在对话参数里专门设置过就不发送
@@ -621,7 +630,7 @@ fn apply_to_variant(variant: &mut MessageVariant, event: &StreamEvent) {
 mod tests {
     use super::*;
     use crate::config::HeaderPair;
-    use crate::model::{SessionMode, SessionTools, ToolSource};
+    use crate::session_tools::{SessionMode, SessionTools, ToolSource};
 
     /// 造一个只关心「带哪些工具」的会话。
     fn session(tools: Option<SessionTools>) -> ChatSession {
@@ -794,6 +803,7 @@ mod tests {
                     cwd: None,
                 },
                 secret_ref: String::new(),
+                proxy: String::new(),
                 disabled_tools: Vec::new(),
             }],
         )

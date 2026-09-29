@@ -16,7 +16,7 @@ use crate::i18n::{Key, tr_args};
 use crate::llm::{BuiltRequest, ChatMessageReq, ChatRequest};
 use crate::llm_tools::{
     claude_message, claude_tools, gemini_function_call_parts, gemini_tool_response, gemini_tools,
-    needs_claude_special_case, openai_tool_calls, openai_tools,
+    needs_claude_special_case, openai_responses_tools, openai_tool_calls, openai_tools,
 };
 use crate::model::{AttachmentKind, ReasoningLevel};
 
@@ -56,13 +56,22 @@ pub(crate) fn effective_message_text(msg: &ChatMessageReq) -> String {
 pub(crate) fn build_request(request: &ChatRequest) -> Result<BuiltRequest, String> {
     let mut headers = vec![("Content-Type".into(), "application/json".into())];
     let (url, body) = match request.channel_type {
-        ChannelType::OpenAiChat | ChannelType::OpenAiResponses => {
+        ChannelType::OpenAiChat => {
             if !request.api_key.trim().is_empty() {
                 headers.push(("Authorization".into(), format!("Bearer {}", request.api_key.trim())));
             }
             (
-                openai_url(&request.base_url, request.channel_type),
-                openai_body(request),
+                openai_url(&request.base_url, ChannelType::OpenAiChat),
+                openai_chat_body(request),
+            )
+        }
+        ChannelType::OpenAiResponses => {
+            if !request.api_key.trim().is_empty() {
+                headers.push(("Authorization".into(), format!("Bearer {}", request.api_key.trim())));
+            }
+            (
+                openai_url(&request.base_url, ChannelType::OpenAiResponses),
+                openai_responses_body(request),
             )
         }
         ChannelType::Claude => {
@@ -96,7 +105,7 @@ fn openai_url(base_url: &str, channel: ChannelType) -> String {
     }
 }
 
-fn openai_body(request: &ChatRequest) -> Value {
+fn openai_chat_body(request: &ChatRequest) -> Value {
     let messages: Vec<Value> = request
         .messages
         .iter()
@@ -177,6 +186,96 @@ fn openai_body(request: &ChatRequest) -> Value {
     }
     if let Some(max_tokens) = request.max_tokens {
         body["max_tokens"] = json!(max_tokens);
+    }
+    body
+}
+
+fn responses_message(msg: &ChatMessageReq) -> Value {
+    let text_type = if msg.role == "assistant" {
+        "output_text"
+    } else {
+        "input_text"
+    };
+    let text_content = effective_message_text(msg);
+    let mut content = Vec::new();
+    if !text_content.is_empty() {
+        content.push(json!({"type": text_type, "text": text_content}));
+    }
+    for att in msg
+        .attachments
+        .iter()
+        .filter(|a| a.kind == AttachmentKind::Image || a.is_pdf())
+    {
+        let Some(b64) = read_attachment_base64(&att.path) else {
+            continue;
+        };
+        if att.is_pdf() {
+            content.push(json!({
+                "type": "input_file",
+                "filename": att.name,
+                "file_data": format!("data:application/pdf;base64,{b64}"),
+            }));
+        } else {
+            let mime = if att.mime.is_empty() { "image/jpeg" } else { &att.mime };
+            content.push(json!({
+                "type": "input_image",
+                "image_url": format!("data:{mime};base64,{b64}"),
+            }));
+        }
+    }
+    if content.is_empty() {
+        content.push(json!({"type": text_type, "text": ""}));
+    }
+    json!({"type": "message", "role": msg.role, "content": content})
+}
+
+fn openai_responses_input(request: &ChatRequest) -> Vec<Value> {
+    let mut input = Vec::new();
+    for msg in &request.messages {
+        if msg.role == "tool" {
+            input.push(json!({
+                "type": "function_call_output",
+                "call_id": msg.tool_call_id,
+                "output": msg.content,
+            }));
+            continue;
+        }
+        if !msg.content.trim().is_empty() || msg.tool_calls.is_empty() {
+            input.push(responses_message(msg));
+        }
+        for call in &msg.tool_calls {
+            input.push(json!({
+                "type": "function_call",
+                "call_id": call.id,
+                "name": call.name,
+                "arguments": crate::llm_tools::arguments_text(&call.arguments),
+            }));
+        }
+    }
+    input
+}
+
+fn openai_responses_body(request: &ChatRequest) -> Value {
+    let mut body = json!({
+        "model": request.model,
+        "input": openai_responses_input(request),
+        "stream": request.stream,
+    });
+    if !request.tools.is_empty() {
+        body["tools"] = json!(openai_responses_tools(&request.tools));
+    }
+    if let Some(level) = request.reasoning {
+        body["reasoning"] = json!({"effort": level.openai_effort()});
+    } else {
+        if let Some(temperature) = request.temperature {
+            body["temperature"] = json!(sampling_value(temperature));
+        }
+        if let Some(top_p) = request.top_p {
+            body["top_p"] = json!(sampling_value(top_p));
+        }
+    }
+    if let Some(max_tokens) = request.max_tokens {
+        body["max_output_tokens"] = json!(max_tokens);
     }
     body
 }
@@ -573,6 +672,21 @@ mod tests {
         );
 
         // Claude
+        // Responses：图片要用 `input_image`，不是 Chat Completions 的 `image_url`。
+        let mut req_responses = request(ChannelType::OpenAiResponses);
+        req_responses.messages = req.messages.clone();
+        let built_responses = build_request(&req_responses).unwrap();
+        let responses_content = &built_responses.body["input"][1]["content"];
+        assert_eq!(responses_content[0]["type"], "input_text");
+        assert_eq!(responses_content[1]["type"], "input_image");
+        assert!(
+            responses_content[1]["image_url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
+
+        // Claude
         let mut req_claude = request(ChannelType::Claude);
         req_claude.messages = req.messages.clone();
         let built_claude = build_request(&req_claude).unwrap();
@@ -617,6 +731,18 @@ mod tests {
         let claude_pdf_parts = built_claude_pdf.body["messages"][0]["content"].as_array().unwrap();
         assert_eq!(claude_pdf_parts[1]["type"], "document");
         assert_eq!(claude_pdf_parts[1]["source"]["media_type"], "application/pdf");
+        let mut req_responses_pdf = request(ChannelType::OpenAiResponses);
+        req_responses_pdf.messages = req_pdf.messages.clone();
+        let built_responses_pdf = build_request(&req_responses_pdf).unwrap();
+        let responses_pdf_content = &built_responses_pdf.body["input"][0]["content"];
+        assert_eq!(responses_pdf_content[1]["type"], "input_file");
+        assert_eq!(responses_pdf_content[1]["filename"], "test_doc.pdf");
+        assert!(
+            responses_pdf_content[1]["file_data"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:application/pdf;base64,")
+        );
 
         // Test Text attachment prompt injection
         let txt_path = temp_dir.join("snippet.rs");
@@ -663,6 +789,46 @@ mod tests {
                 "{channel:?} 在没挂工具时不该出现 tool_choice 字段"
             );
         }
+    }
+
+    #[test]
+    fn responses_uses_native_input_and_function_items() {
+        let call = ToolCall {
+            id: "call_1".into(),
+            name: "read_file".into(),
+            arguments: json!({"path": "a.rs"}),
+        };
+        let result = ToolResult {
+            id: "call_1".into(),
+            name: "read_file".into(),
+            content: "fn main() {}".into(),
+            ..Default::default()
+        };
+        let mut request = request(ChannelType::OpenAiResponses);
+        request.messages = vec![
+            ChatMessageReq::new("system", "be brief"),
+            ChatMessageReq::new("user", "read a.rs"),
+            ChatMessageReq::assistant_tool_calls("", vec![call]),
+            ChatMessageReq::tool_result(result),
+        ];
+        request.tools = vec![ToolSpec::no_args("list_sessions", "List sessions")];
+
+        let body = build_request(&request).unwrap().body;
+        assert_eq!(body["input"][0]["type"], "message");
+        assert_eq!(body["input"][0]["role"], "system");
+        assert_eq!(body["input"][1]["content"][0]["type"], "input_text");
+        assert_eq!(body["input"][2]["type"], "function_call");
+        assert_eq!(body["input"][2]["call_id"], "call_1");
+        assert_eq!(body["input"][2]["arguments"], "{\"path\":\"a.rs\"}");
+        assert_eq!(body["input"][3]["type"], "function_call_output");
+        assert_eq!(body["input"][3]["output"], "fn main() {}");
+        assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["tools"][0]["name"], "list_sessions");
+        assert!(body["tools"][0].get("function").is_none());
+        assert_eq!(body["reasoning"]["effort"], "low");
+        assert_eq!(body["max_output_tokens"], 128);
+        assert!(body.get("messages").is_none());
+        assert!(body.get("max_completion_tokens").is_none());
     }
 
     #[test]

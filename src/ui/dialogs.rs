@@ -12,6 +12,7 @@ use super::{Palette, channel_icon};
 use crate::app::AppState;
 use crate::config::ChannelType;
 use crate::i18n::{AppLanguage, Key, current, tr, tr_args};
+use crate::session_tools::Permission;
 
 /// 弹窗里的表单项：标签 + 输入框 + 可选说明
 pub(super) fn field(
@@ -210,6 +211,21 @@ fn danger_props(ok_text: &'static str, lang: AppLanguage) -> DialogButtonProps {
         .ok_variant(ButtonVariant::Danger)
         .cancel_text(tr(lang, Key::Cancel))
         .show_cancel(true)
+}
+
+pub fn confirm_full_permission(app: Entity<AppState>, window: &mut Window, cx: &mut App) {
+    let lang = current(cx);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let app = app.clone();
+        alert
+            .title(tr(lang, Key::FullPermissionTitle))
+            .description(tr(lang, Key::FullPermissionDesc))
+            .button_props(danger_props(tr(lang, Key::FullPermissionEnable), lang))
+            .on_ok(move |_, _, cx| {
+                app.update(cx, |this, cx| this.set_session_permission(Permission::Full, cx));
+                true
+            })
+    });
 }
 
 pub fn confirm_delete_session(

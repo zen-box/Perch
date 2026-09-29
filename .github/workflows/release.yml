@@ -1,0 +1,195 @@
+name: CI and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: check
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: python tools/release/manifest.py check-version Cargo.toml "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
+      - run: python -m unittest discover -s tools/release -p 'test_*.py'
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2025, platform: windows-x86_64, shell: pwsh }
+          - { os: windows-11-arm, platform: windows-aarch64, shell: pwsh }
+          - { os: ubuntu-24.04, platform: linux-x86_64, shell: bash }
+          - { os: ubuntu-24.04-arm, platform: linux-aarch64, shell: bash }
+          - { os: macos-15-intel, platform: macos-x86_64, shell: bash }
+          - { os: macos-15, platform: macos-aarch64, shell: bash }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux native build dependencies
+        if: startsWith(matrix.platform, 'linux-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config gcc g++ clang libssl-dev libzstd-dev libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libfontconfig1-dev libfreetype6-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-dev libx11-xcb-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libvulkan-dev libvulkan1 libdbus-1-dev
+      - name: Build
+        run: cargo build --release --locked
+      - name: Test
+        run: cargo test --locked
+      - name: Stage Windows executable
+        if: startsWith(matrix.platform, 'windows-') && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          New-Item -ItemType Directory -Force -Path native | Out-Null
+          Copy-Item -LiteralPath target/release/perch.exe -Destination native/perch.exe
+      - name: Stage Unix executable
+        if: (!startsWith(matrix.platform, 'windows-')) && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p native
+          cp target/release/perch native/perch
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: native-${{ matrix.platform }}
+          path: native/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-installers:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build]
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-windows-x86_64
+          path: native/windows-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-windows-aarch64
+          path: native/windows-aarch64
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+      - name: Package per-user installers
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ./tools/release/package_windows.ps1 -Version $env:VERSION -Architecture x86_64 -Binary native/windows-x86_64/perch.exe -OutputDir dist
+          ./tools/release/package_windows.ps1 -Version $env:VERSION -Architecture aarch64 -Binary native/windows-aarch64/perch.exe -OutputDir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/*
+          if-no-files-found: error
+
+  linux-appimage:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, arch: x86_64 }
+          - { os: ubuntu-24.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-linux-${{ matrix.arch }}
+          path: native
+      - name: Package and smoke-test AppImage
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: bash tools/release/package_linux.sh "$VERSION" "$ARCH" native/perch dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  macos-app:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15-intel, arch: x86_64 }
+          - { os: macos-15, arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-macos-${{ matrix.arch }}
+          path: native
+      - name: Package unsigned app (manual install)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: python tools/release/package_macos.py "$VERSION" "$ARCH" native/perch dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, windows-installers, linux-appimage, macos-app]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Verify six assets and generate update manifest
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python tools/release/manifest.py check-version Cargo.toml "$RELEASE_TAG"
+          python tools/release/manifest.py generate "$VERSION" dist dist/update.json
+          test -s docs/media/perch-tour.mp4
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*
+            docs/media/perch-tour.mp4
+          body: |
+            Six native builds (Windows per-user installers, Linux AppImages, macOS unsigned apps).
+            macOS apps are unsigned and must be installed manually; macOS may require opening them via the context menu.

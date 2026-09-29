@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::{env, fs};
 
 fn main() {
@@ -10,6 +11,7 @@ fn main() {
         println!("cargo:rustc-link-arg=/STACK:8388608");
     }
     embed_brand_icons();
+    embed_windows_icon();
 }
 
 /// 把 assets/brand 下的品牌 SVG 嵌入程序，生成 `BRAND_ICONS` 列表。
@@ -54,4 +56,54 @@ fn embed_brand_icons() {
     }
     code.push_str("];\n");
     fs::write(out_dir.join("brand_icons.rs"), code).expect("write brand_icons.rs");
+}
+
+fn embed_windows_icon() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    println!("cargo:rerun-if-changed=assets/perch.rc");
+    println!("cargo:rerun-if-changed=assets/perch.ico");
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
+    let resource = out_dir.join("perch.res");
+    let compiler = find_resource_compiler()
+        .unwrap_or_else(|| panic!("Windows SDK resource compiler rc.exe was not found; cannot embed assets/perch.ico"));
+    let status = Command::new(&compiler)
+        .current_dir("assets")
+        .args(["/nologo", "/fo"])
+        .arg(&resource)
+        .arg("perch.rc")
+        .status()
+        .expect("run Windows resource compiler");
+    if !status.success() {
+        panic!("Windows resource compiler failed with status {status}");
+    }
+    println!("cargo:rustc-link-arg={}", resource.display());
+}
+
+fn find_resource_compiler() -> Option<PathBuf> {
+    if let Ok(path) = env::var("RC") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    if Command::new("rc.exe").arg("/?").output().is_ok() {
+        return Some(PathBuf::from("rc.exe"));
+    }
+
+    let sdk_root = Path::new(r"C:\Program Files (x86)\Windows Kits\10\bin");
+    let mut candidates = Vec::new();
+    let entries = fs::read_dir(sdk_root).ok()?;
+    for entry in entries.flatten() {
+        for architecture in ["x64", "x86"] {
+            let candidate = entry.path().join(architecture).join("rc.exe");
+            if candidate.exists() {
+                candidates.push(candidate);
+            }
+        }
+    }
+    candidates.sort();
+    candidates.pop()
 }

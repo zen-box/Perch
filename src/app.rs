@@ -111,6 +111,8 @@ pub struct AppState {
     /// MCP 服务器：连接、工具清单、连接状态（见 `mcp_ops.rs`）
     pub mcp: McpState,
 
+    /// Release 更新检查和安装状态；不在启动时访问 GitHub。
+    pub updates: crate::update_ops::UpdateState,
     /// 助手正在忙：流式生成回答，或者在后台执行工具。
     /// 忙的时候输入框显示停止按钮，不能发新消息、不能重新生成。
     pub is_streaming: bool,
@@ -192,6 +194,7 @@ pub struct AppState {
 pub struct Bootstrap {
     pub storage: StorageData,
     pub config: AppConfig,
+    pub skills: SkillCatalog,
 }
 
 /// 启动阶段读不出数据的原因。
@@ -254,24 +257,37 @@ impl AppState {
         preflight_runtime().map_err(StartupFailure::Runtime)?;
         let mut storage = StorageData::try_load_or_init().map_err(StartupFailure::Storage)?;
         let config = AppConfig::try_load().map_err(StartupFailure::Config)?;
-        // 两处一次性回填，都是「老数据要跟上新模型」：
+        // 技能目录在这里就扫：下面展开老数据要知道装了哪些技能
+        let skills = SkillCatalog::reload();
+        // 三处一次性回填，都是「老数据要跟上新模型」：
         // ① 会话没记渠道 id 的，按当前默认渠道补上；
         // ② 老格式的会话工具状态（`enabled` + `picked`）展开成「模式 + 来源」。
         //    这一步**必须在配置读完之后**：老数据里 `picked: null` 表示「当时能用的全带」，
         //    要知道配置里有哪些服务器才展开得出来，所以只能放在这里，不能塞进反序列化。
-        // 用 `|` 而不是 `||`：两处都要跑，不能短路。
+        // ③ 老数据里勾的「技能」一整条来源，展开成具体的技能（技能现在按会话逐个勾）。
+        //    排在 ② 后面：② 展开出来的来源表里不会有它，但顺序反了读着别扭。
+        // 用 `|` 而不是 `||`：几处都要跑，不能短路。
         let migrated = backfill_session_providers(&mut storage, &config)
-            | crate::tool_ops::migrate_legacy_tool_state(&mut storage.sessions, &config);
+            | crate::tool_ops::migrate_legacy_tool_state(&mut storage.sessions, &config)
+            | crate::tool_ops::migrate_legacy_skill_source(&mut storage.sessions, &skills, &config.disabled_skills);
         if migrated {
             storage
                 .save()
                 .map_err(|error| StartupFailure::Storage(error.to_string()))?;
         }
-        Ok(Bootstrap { storage, config })
+        Ok(Bootstrap {
+            storage,
+            config,
+            skills,
+        })
     }
 
     pub fn new(bootstrap: Bootstrap, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let Bootstrap { storage, config } = bootstrap;
+        let Bootstrap {
+            storage,
+            config,
+            skills,
+        } = bootstrap;
         let is_dark = config.is_dark;
         apply_theme(is_dark, Some(window), cx);
         let lang = AppLanguage::from_str(&config.language);
@@ -366,7 +382,6 @@ impl AppState {
         let folder_name_input = cx.new(|cx| InputState::new(window, cx));
         let model_fetch_search = cx.new(|cx| InputState::new(window, cx));
         let prompts = PromptLibrary::load(lang);
-        let skills = SkillCatalog::reload();
 
         let subscriptions = vec![
             cx.subscribe_in(&chat_input, window, |this, _, event: &InputEvent, window, cx| {
@@ -433,6 +448,7 @@ impl AppState {
             agent: AgentState::default(),
             mcp: McpState::default(),
             is_streaming: false,
+            updates: crate::update_ops::UpdateState::default(),
             active_streams: HashMap::new(),
             pending_toasts: Vec::new(),
             prompts,
@@ -494,6 +510,9 @@ impl AppState {
                 ToastLevel::Error,
                 tr_args(lang, Key::MigrationFailed, &[&failure.message(lang)]),
             );
+        }
+        if crate::update_install::take_helper_failure() {
+            state.toast(ToastLevel::Error, tr(lang, Key::UpdateInstallFailed));
         }
         state.refresh_placeholders(window, cx);
         state
@@ -601,6 +620,10 @@ impl AppState {
         self.focus_handle.focus(window, cx);
         if tab == SettingsTab::Providers {
             self.ensure_settings_provider_selected(window, cx);
+        }
+        // 进技能页先重扫一遍：手工拷进目录的技能程序不会自己知道（见 `reload_skills`）
+        if tab == SettingsTab::Skills {
+            self.reload_skills(cx);
         }
         cx.notify();
     }

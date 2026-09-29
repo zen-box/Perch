@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
+use reqwest::{Client, Proxy};
 use rmcp::RoleClient;
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, Tool};
@@ -411,7 +412,17 @@ impl Connection {
         if !headers.is_empty() {
             config = config.custom_headers(headers);
         }
-        let transport = StreamableHttpClientTransport::from_config(config);
+        let mut client_builder = Client::builder()
+            .pool_max_idle_per_host(0)
+            .redirect(reqwest::redirect::Policy::none());
+        if !server.proxy.trim().is_empty() {
+            let proxy = Proxy::all(server.proxy.trim()).map_err(|error| format!("invalid MCP proxy: {error}"))?;
+            client_builder = client_builder.proxy(proxy);
+        }
+        let client = client_builder
+            .build()
+            .map_err(|error| format!("failed to build MCP HTTP client: {error}"))?;
+        let transport = StreamableHttpClientTransport::with_client(client, config);
         // HTTP 没有子进程，`logs` 给个空表（界面上「服务器日志」那块会显示成空的）
         Self::handshake(transport, None, Arc::new(Mutex::new(VecDeque::new()))).await
     }
@@ -834,6 +845,7 @@ mod tests {
             enabled: true,
             transport: McpTransport::Http { url: String::new() },
             secret_ref: String::new(),
+            proxy: String::new(),
             disabled_tools: Vec::new(),
         };
         // 不用 `expect_err`：那要求 `Ok` 那半（`Connection`）实现 `Debug`，

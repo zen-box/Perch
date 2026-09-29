@@ -38,8 +38,9 @@ use crate::llm_tools::{ToolCall, ToolResult};
 use crate::local_tools::{self, ExecControl, PendingTool, ProjectDir};
 use crate::mcp::{self, Connection};
 use crate::mcp_ops::Route;
-use crate::model::{ChatMessage, ChatSession, Permission, ToolSource};
+use crate::model::{ChatMessage, ChatSession};
 use crate::reply_ops::JobSpec;
+use crate::session_tools::{Permission, ToolSource};
 
 /// 一轮用户提问最多允许模型连着续跑几次。
 ///
@@ -123,11 +124,8 @@ pub struct AgentState {
     next_run_id: u64,
     /// 界面上展开了全文的工具结果（消息 id）
     pub expanded_results: HashSet<String>,
-    /// 权限档的二次确认：用户把「完全权限」拨开了，但还没点「仍然打开」。
-    ///
-    /// 放在这里而不是工具选择器自己身上，是因为面板是个无状态的 `Popover`，
-    /// 存不下东西；而档位本身就是 Agent 的事。
-    pub(crate) permission_prompt: bool,
+    /// 工具选择器里的高级工具列表是否展开。只属于当前界面的临时状态，不落盘。
+    pub(crate) advanced_tools_open: bool,
 }
 
 impl AgentState {
@@ -365,6 +363,10 @@ impl AppState {
     /// 复用 `make_job` + `spawn_jobs`，不另写一套发送逻辑：重试、取消、
     /// 指标统计这些都在那条路上，抄一份必然会走偏。
     fn continue_agent(&mut self, origin: AgentOrigin, cx: &mut Context<Self>) {
+        if self.block_unsupported_history_attachments(&origin.session_id, cx) {
+            self.agent.end_loop();
+            return;
+        }
         self.agent.round += 1;
         let history = self.history_messages(&origin.session_id);
         let mut assistant = ChatMessage::new_assistant();
@@ -440,8 +442,15 @@ impl AppState {
         // 「模型调了个用不了的 MCP 工具名」时要拿它列清单。同样得在挪进后台任务之前算好
         let mcp_tools = self.mcp.available_names(&self.config.mcp_servers);
         // Skills 快照也一样：执行 `load_skill` 要读它，而后台任务拿不到 `AppState`。
-        // 克隆的是 `Arc` 里那份列表的浅拷贝（每个 skill 几 KB 的正文），代价可以忽略。
-        let skills = self.skills.clone();
+        // **只放这次对话勾了的**：没勾的技能，模型就算猜到名字也读不到。
+        // 每个 skill 几 KB 的正文，克隆的代价可以忽略。
+        let skills = self
+            .session(session_id)
+            .map(|session| {
+                self.skills
+                    .picked_only(session.picked_skills(), &self.config.disabled_skills)
+            })
+            .unwrap_or_default();
 
         cx.spawn(async move |this, cx| {
             // 真正干活的在 tokio 运行时里：GPUI 自己的执行器不是 tokio，
@@ -570,10 +579,14 @@ impl AppState {
         let Some(session) = self.session(session_id) else {
             return false;
         };
-        let sources = session.tool_sources();
         if crate::skills::is_skill_tool(&tool.name) {
-            return sources.contains(&ToolSource::Skill);
+            return self
+                .skills
+                .picked(session.picked_skills(), &self.config.disabled_skills)
+                .next()
+                .is_some();
         }
+        let sources = session.tool_sources();
         match mcp::parse_tool_name(&tool.name) {
             Some((server_id, _)) => sources.contains(&ToolSource::Mcp {
                 server_id: server_id.to_string(),
@@ -719,6 +732,14 @@ impl AppState {
 
     pub(crate) fn session(&self, session_id: &str) -> Option<&ChatSession> {
         self.storage.sessions.iter().find(|session| session.id == session_id)
+    }
+
+    /// 展开 / 收起工具选择器里的高级工具列表。
+    ///
+    /// 这是界面临时状态，不落盘；选择器关闭时由界面重置为收起。
+    pub(crate) fn toggle_advanced_tools(&mut self, cx: &mut Context<Self>) {
+        self.agent.advanced_tools_open = !self.agent.advanced_tools_open;
+        cx.notify();
     }
 
     /// 展开 / 收起一条工具结果的全文

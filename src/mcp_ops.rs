@@ -101,6 +101,7 @@ pub struct McpEditor {
     pub args: Entity<TextareaState>,
     pub cwd: Entity<InputState>,
     pub url: Entity<InputState>,
+    pub proxy: Entity<InputState>,
     /// stdio 下是环境变量、HTTP 下是请求头——同一个 `NAME: VALUE` 输入框，两种用途
     pub env: Entity<TextareaState>,
 }
@@ -393,6 +394,7 @@ impl AppState {
             .and_then(|id| self.config.mcp_servers.iter().find(|server| server.id == id))
             .cloned();
         let name = existing.as_ref().map(|server| server.name.clone()).unwrap_or_default();
+        let proxy = existing.as_ref().map(|server| server.proxy.clone()).unwrap_or_default();
         let (kind, command, args, cwd, url) = match existing.as_ref().map(|server| &server.transport) {
             Some(McpTransport::Stdio { command, args, cwd }) => (
                 McpKind::Stdio,
@@ -440,6 +442,7 @@ impl AppState {
         let args_input = text_area(window, cx, &args);
         let cwd_input = text_input(window, cx, &cwd);
         let url_input = text_input(window, cx, &url);
+        let proxy_input = text_input(window, cx, &proxy);
         let env_input = text_area(window, cx, &env);
 
         self.mcp.editor = Some(McpEditor {
@@ -450,6 +453,7 @@ impl AppState {
             args: args_input,
             cwd: cwd_input,
             url: url_input,
+            proxy: proxy_input,
             env: env_input,
         });
         cx.notify();
@@ -485,6 +489,7 @@ impl AppState {
         let name = editor.name.read(cx).value().trim().to_string();
         let command = editor.command.read(cx).value().trim().to_string();
         let url = editor.url.read(cx).value().trim().to_string();
+        let proxy = editor.proxy.read(cx).value().trim().to_string();
         // 校验按连接方式分开：两种方式各自必填的字段不一样。合成一句
         // 「名称和启动命令不能为空」会把正在填 URL 的人指错方向。
         if let Some(key) = missing_required(kind, &name, &command, &url) {
@@ -526,6 +531,7 @@ impl AppState {
                 },
                 McpKind::Http => McpTransport::Http { url },
             },
+            proxy,
             // 留空即可，`secret_reference()` 会回落到 `mcp/<id>`
             secret_ref: String::new(),
             disabled_tools,
@@ -674,6 +680,7 @@ mod tests {
                 cwd: None,
             },
             secret_ref: String::new(),
+            proxy: String::new(),
             disabled_tools: disabled_tools.iter().map(|name| name.to_string()).collect(),
         }
     }

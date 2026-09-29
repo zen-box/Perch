@@ -170,6 +170,21 @@ pub(crate) fn openai_tools(tools: &[ToolSpec]) -> Vec<Value> {
         .collect()
 }
 
+/// OpenAI Responses 的工具声明：函数字段直接放在工具对象上。
+pub(crate) fn openai_responses_tools(tools: &[ToolSpec]) -> Vec<Value> {
+    tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            })
+        })
+        .collect()
+}
+
 /// Claude 的工具声明用 `input_schema`，字段名和 OpenAI 不同。
 pub(crate) fn claude_tools(tools: &[ToolSpec]) -> Vec<Value> {
     tools

@@ -17,3 +17,10 @@ tools/p3-test/mcp-exposed.txt
 tools/p3-test/mcp_calls.jsonl
 # 下划线开头是实测时的草稿与进程日志（放大裁图、启动日志、mock 的 stderr）
 tools/p3-test/_*
+
+# Local planning documents; keep AGENTS.md public as the repository's coding rules.
+/TODO.md
+/ROADMAP.md
+/TECH_DEBT.md
+/AGENT_MODE_PLAN.md
+/I18N_PLAN.md

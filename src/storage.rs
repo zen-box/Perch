@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use rusqlite::{Connection, params};
 
-use crate::model::{ChatMessage, ChatParams, ChatSession, SessionTools};
+use crate::model::{ChatMessage, ChatParams, ChatSession};
+use crate::session_tools::SessionTools;
 
 pub type StorageResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 

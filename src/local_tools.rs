@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::llm_tools::{ToolCall, ToolResult, ToolSpec};
-use crate::model::Permission;
+use crate::session_tools::Permission;
 
 /// 命令最长能跑多久，到点就结束整个进程树，把"超时"回传给模型。
 ///
@@ -582,7 +582,7 @@ fn list_directory(pending: &PendingTool, control: &ExecControl) -> (String, bool
             }
             items.sort();
             if items.is_empty() {
-                return (format!("目录 {dir} 是空的。"), false);
+                return (format!("Directory {dir} is empty."), false);
             }
             let total = items.len();
             if total > MAX_LIST_ENTRIES {
@@ -591,7 +591,7 @@ fn list_directory(pending: &PendingTool, control: &ExecControl) -> (String, bool
             }
             (items.join("\n"), false)
         }
-        Err(error) => (format!("无法列出目录 {dir}：{error}"), true),
+        Err(error) => (format!("Failed to list directory {dir}: {error}"), true),
     }
 }
 
@@ -601,19 +601,19 @@ fn read_file(pending: &PendingTool, control: &ExecControl) -> (String, bool) {
         Err(message) => return (message, true),
     };
     let Some(raw) = pending.string_arg("path") else {
-        return ("缺少参数 path，或者它不是字符串。".to_string(), true);
+        return ("Missing parameter `path`, or it is not a string.".to_string(), true);
     };
     let path = workspace.resolve(raw);
     let path_text = path.display().to_string();
     let file = match fs::File::open(&path) {
         Ok(file) => file,
-        Err(error) => return (format!("无法读取文件 {path_text}：{error}"), true),
+        Err(error) => return (format!("Failed to read file {path_text}: {error}"), true),
     };
     let total = file.metadata().map(|meta| meta.len()).unwrap_or(0);
     // 只读开头一段：几百 MB 的日志整个读进内存，界面和模型都受不了
     let mut bytes = Vec::new();
     if let Err(error) = file.take(MAX_READ_BYTES).read_to_end(&mut bytes) {
-        return (format!("无法读取文件 {path_text}：{error}"), true);
+        return (format!("Failed to read file {path_text}: {error}"), true);
     }
     // 文本文件里不会有 NUL 字节。二进制内容转成文字只是一堆乱码，还白白占上下文
     if bytes.contains(&0) {
@@ -652,7 +652,7 @@ fn git_status(control: &ExecControl) -> (String, bool, Option<i32>) {
             let text = String::from_utf8_lossy(&output.stdout);
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                ("工作区干净，没有改动。".to_string(), false, Some(0))
+                ("Working tree clean; no changes.".to_string(), false, Some(0))
             } else {
                 (trimmed.to_string(), false, Some(0))
             }
@@ -663,7 +663,7 @@ fn git_status(control: &ExecControl) -> (String, bool, Option<i32>) {
             let (content, is_error) = describe_process_output(output, GIT_TIMEOUT);
             (content, is_error, code)
         }
-        Err(error) => (format!("无法执行 git：{error}"), true, None),
+        Err(error) => (format!("Failed to run git: {error}"), true, None),
     }
 }
 
@@ -673,16 +673,16 @@ fn write_file(pending: &PendingTool, control: &ExecControl) -> (String, bool) {
         Err(message) => return (message, true),
     };
     let Some(raw) = pending.string_arg("path") else {
-        return ("缺少参数 path，或者它不是字符串。".to_string(), true);
+        return ("Missing parameter `path`, or it is not a string.".to_string(), true);
     };
     let Some(content) = pending.string_arg("content") else {
-        return ("缺少参数 content，或者它不是字符串。".to_string(), true);
+        return ("Missing parameter `content`, or it is not a string.".to_string(), true);
     };
     let path = workspace.resolve(raw);
     let path_text = path.display().to_string();
     match fs::write(&path, content) {
-        Ok(()) => (format!("已写入 {path_text}（{} 字节）。", content.len()), false),
-        Err(error) => (format!("无法写入文件 {path_text}：{error}"), true),
+        Ok(()) => (format!("Wrote {path_text} ({} bytes).", content.len()), false),
+        Err(error) => (format!("Failed to write file {path_text}: {error}"), true),
     }
 }
 
@@ -692,7 +692,11 @@ fn run_command(pending: &PendingTool, control: &ExecControl) -> (String, bool, O
         Err(message) => return (message, true, None),
     };
     let Some(command) = pending.string_arg("command") else {
-        return ("缺少参数 command，或者它不是字符串。".to_string(), true, None);
+        return (
+            "Missing parameter `command`, or it is not a string.".to_string(),
+            true,
+            None,
+        );
     };
 
     #[cfg(target_os = "windows")]
@@ -720,7 +724,7 @@ fn run_command(pending: &PendingTool, control: &ExecControl) -> (String, bool, O
             let (content, is_error) = describe_process_output(output, control.command_timeout);
             (content, is_error, code)
         }
-        Err(error) => (format!("无法执行命令：{error}"), true, None),
+        Err(error) => (format!("Failed to run command: {error}"), true, None),
     }
 }
 
@@ -873,7 +877,7 @@ fn describe_process_output(output: ProcessOutput, timeout: Duration) -> (String,
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let mut combined = match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
-        (true, true) => "(没有输出)".to_string(),
+        (true, true) => "(No output)".to_string(),
         (false, true) => stdout.to_string(),
         (true, false) => stderr.to_string(),
         (false, false) => format!("{stdout}\n{stderr}"),

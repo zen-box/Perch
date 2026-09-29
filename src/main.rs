@@ -37,12 +37,17 @@ mod reply_ops;
 mod session_folder_ops;
 mod session_list_ops;
 mod session_ops;
+mod session_tools;
 mod skill_ops;
 mod skills;
 mod storage;
 mod theme;
 mod tool_ops;
 mod ui;
+mod update;
+mod update_install;
+mod update_ops;
+mod video_demo;
 mod workspace_ops;
 
 use app::AppState;
@@ -54,6 +59,10 @@ actions!(
 );
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    if let Some(exit_code) = update_install::maybe_run_linux_helper() {
+        std::process::exit(exit_code);
+    }
     models_dev::sync_cache_background(false);
     // 配置读不出来也得能把窗口开起来——错误页要用它定主题和语言。所以这里退回默认值，
     // 真正的读取和报错交给 `AppState::bootstrap`（它失败时显示错误页，而不是闪退）。

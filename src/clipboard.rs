@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use gpui_kit::{ClipboardEntry, Image, ImageFormat};
 
+use crate::file_store::MAX_ATTACHMENT_BYTES;
 use crate::i18n::{AppLanguage, Key, tr, tr_args};
 
 /// 一次粘贴应该怎么处理
@@ -81,6 +82,25 @@ pub struct PreparedImage {
 /// 把剪贴板图片转成常见格式：PNG、JPEG、WebP、GIF 原样保留，
 /// 其余（Windows 截图读出来是 BMP）解码后重新编码成 PNG。大图解码较慢，在后台线程调用。
 pub fn prepare_image(image: &Image, lang: AppLanguage) -> Result<PreparedImage, String> {
+    let source_format = match image.format {
+        ImageFormat::Png => image::ImageFormat::Png,
+        ImageFormat::Jpeg => image::ImageFormat::Jpeg,
+        ImageFormat::Webp => image::ImageFormat::WebP,
+        ImageFormat::Gif => image::ImageFormat::Gif,
+        ImageFormat::Bmp => image::ImageFormat::Bmp,
+        ImageFormat::Tiff => image::ImageFormat::Tiff,
+        ImageFormat::Ico => image::ImageFormat::Ico,
+        ImageFormat::Pnm => image::ImageFormat::Pnm,
+        ImageFormat::Svg => return Err(tr(lang, Key::ClipboardSvgUnsupported).into()),
+    };
+    if image.bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Ok(PreparedImage {
+            bytes: compress_image(&image.bytes, source_format, lang)?,
+            extension: "jpg",
+            mime: "image/jpeg",
+        });
+    }
+
     let keep = |extension, mime| {
         Ok(PreparedImage {
             bytes: image.bytes.clone(),
@@ -88,28 +108,63 @@ pub fn prepare_image(image: &Image, lang: AppLanguage) -> Result<PreparedImage, 
             mime,
         })
     };
-    let source_format = match image.format {
-        ImageFormat::Png => return keep("png", "image/png"),
-        ImageFormat::Jpeg => return keep("jpg", "image/jpeg"),
-        ImageFormat::Webp => return keep("webp", "image/webp"),
-        ImageFormat::Gif => return keep("gif", "image/gif"),
-        ImageFormat::Bmp => image::ImageFormat::Bmp,
-        ImageFormat::Tiff => image::ImageFormat::Tiff,
-        ImageFormat::Ico => image::ImageFormat::Ico,
-        ImageFormat::Pnm => image::ImageFormat::Pnm,
-        ImageFormat::Svg => return Err(tr(lang, Key::ClipboardSvgUnsupported).into()),
-    };
-    let decoded = image::load_from_memory_with_format(&image.bytes, source_format)
+    match image.format {
+        ImageFormat::Png => keep("png", "image/png"),
+        ImageFormat::Jpeg => keep("jpg", "image/jpeg"),
+        ImageFormat::Webp => keep("webp", "image/webp"),
+        ImageFormat::Gif => keep("gif", "image/gif"),
+        ImageFormat::Bmp | ImageFormat::Tiff | ImageFormat::Ico | ImageFormat::Pnm => {
+            let decoded = image::load_from_memory_with_format(&image.bytes, source_format)
+                .map_err(|error| tr_args(lang, Key::ClipboardImageUnrecognized, &[&error.to_string()]))?;
+            let mut png = Cursor::new(Vec::new());
+            decoded
+                .write_to(&mut png, image::ImageFormat::Png)
+                .map_err(|error| tr_args(lang, Key::ClipboardImageConvertFailed, &[&error.to_string()]))?;
+            Ok(PreparedImage {
+                bytes: png.into_inner(),
+                extension: "png",
+                mime: "image/png",
+            })
+        }
+        ImageFormat::Svg => Err(tr(lang, Key::ClipboardSvgUnsupported).into()),
+    }
+}
+
+/// 把超限图片逐步降质、缩小，避免直接把剪贴板图片静默丢掉。
+fn compress_image(bytes: &[u8], format: image::ImageFormat, lang: AppLanguage) -> Result<Vec<u8>, String> {
+    let mut decoded = image::load_from_memory_with_format(bytes, format)
         .map_err(|error| tr_args(lang, Key::ClipboardImageUnrecognized, &[&error.to_string()]))?;
-    let mut png = Cursor::new(Vec::new());
-    decoded
-        .write_to(&mut png, image::ImageFormat::Png)
-        .map_err(|error| tr_args(lang, Key::ClipboardImageConvertFailed, &[&error.to_string()]))?;
-    Ok(PreparedImage {
-        bytes: png.into_inner(),
-        extension: "png",
-        mime: "image/png",
-    })
+    let original_mb = format!("{:.1}", bytes.len() as f64 / 1024.0 / 1024.0);
+    let max_mb = (MAX_ATTACHMENT_BYTES / 1024 / 1024).to_string();
+    let mut last_error = String::from("compression result is still too large");
+
+    for _ in 0..6 {
+        for quality in [85, 70, 55, 40] {
+            let mut output = Cursor::new(Vec::new());
+            match image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, quality).encode_image(&decoded) {
+                Ok(()) if output.get_ref().len() as u64 <= MAX_ATTACHMENT_BYTES => return Ok(output.into_inner()),
+                Ok(()) => {
+                    last_error = format!("quality {quality} produced {} MB", output.get_ref().len() / 1024 / 1024)
+                }
+                Err(error) => last_error = error.to_string(),
+            }
+        }
+        let width = decoded.width();
+        let height = decoded.height();
+        if width <= 1024 && height <= 1024 {
+            break;
+        }
+        decoded = decoded.resize(
+            (width / 2).max(1),
+            (height / 2).max(1),
+            image::imageops::FilterType::Triangle,
+        );
+    }
+    Err(tr_args(
+        lang,
+        Key::AttachmentImageCompressionFailed,
+        &[&original_mb, &max_mb, &last_error],
+    ))
 }
 
 #[cfg(test)]

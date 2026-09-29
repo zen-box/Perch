@@ -20,12 +20,21 @@ use crate::app::AppState;
 use crate::i18n::{AppLanguage, Key, current, tr, tr_args};
 use crate::model::ChatMessage;
 
+/// 助手消息头像的边长。
+pub(super) const AVATAR_SIZE: Pixels = px(28.);
+/// 头像和正文之间的距离。同一轮回复里的工具结果按「头像 + 这段距离」缩进，和正文对齐。
+pub(super) const AVATAR_GAP: Pixels = px(12.);
+
+/// 一条助手消息。
+///
+/// `avatar` 为 `None` 表示这条是同一轮智能体回复的续写（判断见 `chat.rs` 的 `continues_turn`）：
+/// 不画头像和「模型名 + 时间」那一行，只留出头像的宽度，让正文和上一段对齐。
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_assistant_message(
     app: &Entity<AppState>,
     ix: usize,
     msg: ChatMessage,
-    avatar: AnyElement,
+    avatar: Option<AnyElement>,
     model_label: String,
     expanded: bool,
     later: usize,
@@ -33,6 +42,7 @@ pub(super) fn render_assistant_message(
     cx: &mut App,
 ) -> impl IntoElement {
     let lang = app.read(cx).language();
+    let continues = avatar.is_none();
     let is_last = later == 0;
     let mono_font = cx.theme().mono_font_family.clone();
     let has_content = !msg.content.trim().is_empty();
@@ -54,29 +64,32 @@ pub(super) fn render_assistant_message(
     let toggle_app = app.clone();
     let toggle_id = msg.id.clone();
 
-    h_flex().w_full().items_start().gap_3().child(avatar).child(
+    let avatar = avatar.unwrap_or_else(|| div().flex_none().w(AVATAR_SIZE).into_any_element());
+    h_flex().w_full().items_start().gap(AVATAR_GAP).child(avatar).child(
         v_flex()
             .flex_1()
             .min_w_0()
             .gap_2()
-            .child(
-                h_flex()
-                    .h(px(28.))
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(model_label.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(p.muted_foreground)
-                            .child(format_msg_time(&msg.created_at).to_string()),
-                    ),
-            )
+            .when(!continues, |this| {
+                this.child(
+                    h_flex()
+                        .h(AVATAR_SIZE)
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(model_label.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(p.muted_foreground)
+                                .child(format_msg_time(&msg.created_at).to_string()),
+                        ),
+                )
+            })
             .when(has_unresolved_variants, |this| {
                 this.child(message_variants::render_variants(app, ix, &msg, p, cx))
             })
@@ -132,7 +145,18 @@ pub(super) fn render_assistant_message(
                         }),
                 )
             })
-            // 本地工具调用记录
+            .when(has_content, |this| {
+                this.child(
+                    div().w_full().text_sm().child(
+                        markdown_view(format!("md-{}", msg.id), msg.content.clone())
+                            .stream_fade(msg.is_streaming)
+                            .code_block_actions(|block, _, cx| render_code_block_actions(block, cx)),
+                    ),
+                )
+            })
+            // 工具调用记录放在正文**后面**：模型是先说一句「我去看看」再发调用，
+            // 流式输出也是这个顺序；而且这样调用和紧跟在下面的工具结果挨在一起，
+            // 不会被正文隔开
             .when(!msg.tool_calls.is_empty(), |this| {
                 this.child(h_flex().flex_wrap().gap_2().children(msg.tool_calls.iter().map(|tc| {
                     h_flex()
@@ -148,15 +172,6 @@ pub(super) fn render_assistant_message(
                         .child(Icon::new(IconName::Wrench).size(px(12.)).text_color(p.muted_foreground))
                         .child(tc.clone())
                 })))
-            })
-            .when(has_content, |this| {
-                this.child(
-                    div().w_full().text_sm().child(
-                        markdown_view(format!("md-{}", msg.id), msg.content.clone())
-                            .stream_fade(msg.is_streaming)
-                            .code_block_actions(|block, _, cx| render_code_block_actions(block, cx)),
-                    ),
-                )
             })
             .when(waiting, |this| {
                 this.child(
@@ -487,15 +502,25 @@ fn render_regen_popover(
 }
 
 fn render_message_metrics(msg: &ChatMessage, model_label: &str, p: &Palette, lang: AppLanguage) -> impl IntoElement {
-    let (cost_usd, cost_cny) = crate::models_dev::calculate_cost(
+    let cost = crate::models_dev::calculate_cost(
         if !msg.model.is_empty() { &msg.model } else { model_label },
         msg.prompt_tokens,
         msg.completion_tokens,
         0,
     );
+    let cost_known = cost.is_some();
+    let (cost_usd, cost_cny) = cost.unwrap_or_default();
 
     let total_tokens = msg.prompt_tokens + msg.completion_tokens;
-    let label = if cost_usd > 0.00001 {
+    let label = if !cost_known {
+        format!(
+            "{} tokens · {} · {:.1} tok/s · {:.1}s",
+            msg.completion_tokens,
+            tr(lang, Key::Unknown),
+            msg.speed_tps,
+            msg.latency_ms as f64 / 1000.0
+        )
+    } else if cost_usd > 0.00001 {
         format!(
             "{} tokens · ≈${:.4} · {:.1} tok/s · {:.1}s",
             msg.completion_tokens,
@@ -545,7 +570,9 @@ fn render_message_metrics(msg: &ChatMessage, model_label: &str, p: &Palette, lan
             }
             let tot = if total_tokens > 0 { total_tokens } else { output_t };
             text.push_str(&format!("{}\n", tr_args(lang, Key::TokenTotal, &[&tot.to_string()])));
-            if cost_usd > 0.00001 {
+            if !cost_known {
+                text.push_str(&format!("{}\n", tr(lang, Key::Unknown)));
+            } else if cost_usd > 0.00001 {
                 text.push_str(&format!(
                     "{}\n",
                     tr_args(
