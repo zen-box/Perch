@@ -593,7 +593,9 @@ mod tests {
         assert!(!detect("gemini-2.5-pro", "").reasoning_levels.contains(&Off));
 
         let r1 = detect("deepseek-ai/DeepSeek-R1", "");
-        assert!(r1.always_thinks && r1.reasoning_levels.contains(&Medium));
+        assert!(r1.always_thinks);
+        // 内置规则只标记总会思考；可调档位由可选的 models.dev 缓存补充。
+        assert!(family_spec("deepseek-r1").reasoning_levels.is_empty());
         assert!(!detect("deepseek-chat", "").always_thinks);
     }
 
