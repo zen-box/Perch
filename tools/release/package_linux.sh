@@ -33,8 +33,16 @@ chmod +x "$work/tools/linuxdeploy.AppImage"
 # image may not have them, so explicitly include these rather than weakening the
 # clean-container dependency check after packaging.
 libraries=()
-for name in libxcb.so.1 libfontconfig.so.1 libfreetype.so.6; do
+for name in libxcb.so.1 libfontconfig.so.1 libfreetype.so.6 libexpat.so.1; do
   library="$(awk -v name="$name" '$1 == name && $2 == "=>" { print $3; exit }' "$work/dependencies.txt")"
+  if [[ "$name" == libexpat.so.1 && -z "$library" ]]; then
+    # Expat is pulled in by fontconfig, not necessarily by the Perch binary itself.
+    library="$(ldconfig -p | awk -v name="$name" '$1 == name { print $NF; exit }')"
+  fi
+  if [[ "$name" == libexpat.so.1 && ! -f "$library" ]]; then
+    echo 'libexpat.so.1 is required for the bundled fontconfig library' >&2
+    exit 1
+  fi
   if [[ -n "$library" ]]; then
     [[ -f "$library" ]] || { echo "Required library not found: $name" >&2; exit 1; }
     libraries+=(--library "$library")
