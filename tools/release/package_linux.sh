@@ -29,7 +29,18 @@ mkdir -p "$work/tools" "$work/bundle"
 url="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${arch}.AppImage"
 curl --fail --location --retry 3 "$url" --output "$work/tools/linuxdeploy.AppImage"
 chmod +x "$work/tools/linuxdeploy.AppImage"
-(cd "$work/bundle" && ARCH="$arch" VERSION="$version" APPIMAGE_EXTRACT_AND_RUN=1 "$work/tools/linuxdeploy.AppImage" --appdir "$appdir" --output appimage)
+# linuxdeploy deliberately excludes some common desktop libraries. A minimal Ubuntu
+# image may not have them, so explicitly include these rather than weakening the
+# clean-container dependency check after packaging.
+libraries=()
+for name in libxcb.so.1 libfontconfig.so.1 libfreetype.so.6; do
+  library="$(awk -v name="$name" '$1 == name && $2 == "=>" { print $3; exit }' "$work/dependencies.txt")"
+  if [[ -n "$library" ]]; then
+    [[ -f "$library" ]] || { echo "Required library not found: $name" >&2; exit 1; }
+    libraries+=(--library "$library")
+  fi
+done
+(cd "$work/bundle" && ARCH="$arch" LINUXDEPLOY_OUTPUT_VERSION="$version" APPIMAGE_EXTRACT_AND_RUN=1 "$work/tools/linuxdeploy.AppImage" --appdir "$appdir" "${libraries[@]}" --output appimage)
 mapfile -t built < <(find "$work/bundle" -maxdepth 1 -type f -name '*.AppImage' -print)
 [[ "${#built[@]}" -eq 1 ]] || { echo 'Expected exactly one linuxdeploy AppImage' >&2; exit 1; }
 artifact="$(cd "$output" && pwd)/Perch-${version}-linux-${arch}.AppImage"
